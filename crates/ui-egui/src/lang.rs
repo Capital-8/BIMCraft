@@ -816,6 +816,8 @@ const WORDS: &[[&str; 3]] = &[
     ["Left out: {}", "Deixados de fora: {}", "Dejados fuera: {}"],
     ["Nothing was left out.", "Nada foi deixado de fora.", "No se dejó nada fuera."],
     ["Noted", "Anotações", "Observaciones"],
+    ["Copy Report", "Copiar relatório", "Copiar informe"],
+    ["Copied", "Copiado", "Copiado"],
     ["1 element", "1 elemento", "1 elemento"],
     ["{} elements", "{} elementos", "{} elementos"],
     ["Check for updates at startup", "Verificar atualizações ao iniciar", "Buscar actualizaciones al iniciar"],
