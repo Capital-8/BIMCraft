@@ -438,4 +438,18 @@ mod tests {
         assert!(first_own.is_some() && last_linked.is_some());
         assert!(last_linked < first_own, "the link's {last_linked:?} comes before the project's {first_own:?}");
     }
+
+    #[test]
+    fn a_line_keeps_its_pen_when_a_link_goes_under_the_projects() {
+        use crate::pen::Pen;
+        use crate::render::{Drawing, Rgb, View};
+        let mut d = Drawing::new(View { scale: 1.0, cx: 0.0, cy: 0.0, width: 10, height: 10 });
+        d.own(Some(7));
+        d.stroke(vec![(0.0, 0.0), (1.0, 1.0)], Pen::CUT, Rgb(0, 0, 0), None, false);
+        d.own(Some(LINKED));
+        d.stroke(vec![(2.0, 2.0), (3.0, 3.0)], Pen::PROJECTION, Rgb(0, 0, 0), None, false);
+        d.linked_under();
+        assert_eq!(d.owners, [Some(LINKED), Some(7)]);
+        assert_eq!(d.pens, [Some(Pen::PROJECTION), Some(Pen::CUT)], "each line's pen goes with it");
+    }
 }

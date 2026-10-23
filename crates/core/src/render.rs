@@ -278,17 +278,19 @@ impl Drawing {
             return;
         }
         let prims = std::mem::take(&mut self.prims);
-        let mut all: Vec<(Prim, Option<Id>, Part)> = prims
+        let mut all: Vec<(Prim, Option<Id>, Part, Option<Pen>)> = prims
             .into_iter()
             .zip(std::mem::take(&mut self.owners))
             .zip(std::mem::take(&mut self.parts))
-            .map(|((p, o), part)| (p, o, part))
+            .zip(std::mem::take(&mut self.pens))
+            .map(|(((p, o), part), pen)| (p, o, part, pen))
             .collect();
-        all.sort_by_key(|(_, o, _)| !under(o));
-        for (p, o, part) in all {
+        all.sort_by_key(|(_, o, ..)| !under(o));
+        for (p, o, part, pen) in all {
             self.prims.push(p);
             self.owners.push(o);
             self.parts.push(part);
+            self.pens.push(pen);
         }
     }
     /// Each line marked [`BY_CATEGORY`] in the pen its owner's object style gives, cut or in projection as its part is: before
