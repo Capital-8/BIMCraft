@@ -38,6 +38,7 @@ icon_names! {
     ZoomIn,
     ZoomOut,
     ThinLines,
+    LineWeights,
     Schedule,
     CloseInactive,
     Interface,
@@ -259,6 +260,12 @@ pub fn outlines(icon: Icon, compact: bool) -> Vec<Outline> {
             g.line(&[(3.0, 6.0), (21.0, 6.0)]);
             g.line(&[(3.0, 12.0), (21.0, 12.0)]);
             g.line(&[(3.0, 18.0), (21.0, 18.0)]);
+        }
+        Icon::LineWeights => {
+            // Three pens, each heavier than the one above: a line, a thin bar and a thick one (one pen, so weight is drawn as height).
+            g.line(&[(3.0, 5.0), (21.0, 5.0)]);
+            g.closed(&[(3.0, 9.0), (21.0, 9.0), (21.0, 12.0), (3.0, 12.0)]);
+            g.closed(&[(3.0, 15.0), (21.0, 15.0), (21.0, 21.0), (3.0, 21.0)]);
         }
         Icon::Schedule => {
             g.closed(&[(3.0, 4.0), (21.0, 4.0), (21.0, 20.0), (3.0, 20.0)]);

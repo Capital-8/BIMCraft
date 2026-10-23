@@ -19,6 +19,7 @@ mod graphics;
 pub mod icons;
 mod inquiry;
 pub mod lang;
+mod lineweights;
 mod links;
 mod mep;
 mod orbit;
@@ -529,6 +530,8 @@ pub struct BimApp {
     /// Phasing and Design Options, while they're open, and the design option (`set: option`) new
     /// elements are made in: none is the main model.
     phasing_dialog: Option<phasing::PhasingDialog>,
+    /// Manage > Line Weights, while open.
+    line_weights_dialog: Option<lineweights::LineWeightsDialog>,
     options_dialog: Option<phasing::OptionsDialog>,
     purge_dialog: Option<purge::PurgeDialog>,
     /// Manage > Select by ID and IDs of Selection, while open.
@@ -840,6 +843,7 @@ impl BimApp {
             filters_dialog: None,
             templates_dialog: None,
             phasing_dialog: None,
+            line_weights_dialog: None,
             options_dialog: None,
             purge_dialog: None,
             select_by_id: None,
@@ -1176,6 +1180,7 @@ impl BimApp {
             || self.filters_dialog.is_some()
             || self.templates_dialog.is_some()
             || self.phasing_dialog.is_some()
+            || self.line_weights_dialog.is_some()
             || self.options_dialog.is_some()
             || self.purge_dialog.is_some()
             || self.select_by_id.is_some()
@@ -2668,6 +2673,10 @@ impl BimApp {
             if big_button(ui, Icon::Delete, "Purge Unused", self.purge_dialog.is_some(), tip).clicked() {
                 self.open_purge();
             }
+            let tip = "Line Weights: what each pen draws on paper, the model's at each scale and the annotation's at any";
+            if big_button(ui, Icon::LineWeights, "Line Weights", self.line_weights_dialog.is_some(), tip).clicked() {
+                self.line_weights_dialog = Some(lineweights::LineWeightsDialog::new(&self.session.model));
+            }
             let tip = "Snaps: what a picked point sticks to (ends, middles, crossings, centres, perpendiculars), and the angles it steps by; SE, SM, SI, SC, SP and SN take one alone for the next point, SO none";
             if big_button(ui, Icon::Snaps, "Snaps", self.show_snaps, tip).clicked() {
                 self.show_snaps = true;
@@ -3443,6 +3452,7 @@ impl BimApp {
         self.filters_window(ctx);
         self.templates_window(ctx);
         self.phasing_window(ctx);
+        self.line_weights_window(ctx);
         self.options_window(ctx);
         self.purge_window(ctx);
         if std::mem::take(&mut self.link_dialog) {
