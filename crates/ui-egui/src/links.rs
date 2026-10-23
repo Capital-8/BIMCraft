@@ -2,6 +2,7 @@
 
 use std::path::Path;
 
+use egui::Context;
 use serde_json::json;
 
 use crate::BimApp;
@@ -9,10 +10,9 @@ use crate::lang::t;
 
 impl BimApp {
     /// Link Model (LK): the file the user picks.
-    pub(crate) fn link_model_dialog(&mut self) {
-        if let Some(path) = rfd::FileDialog::new().add_filter(t("BIMCraft project or IFC"), &["bimcraft", "ifc"]).pick_file() {
-            self.link_path(&path);
-        }
+    pub(crate) fn link_model_dialog(&mut self, ctx: &Context) {
+        let dialog = rfd::AsyncFileDialog::new().add_filter(t("BIMCraft project or IFC"), &["bimcraft", "ifc"]);
+        self.ask_file(ctx, dialog, false, |app, path| app.link_path(&path));
     }
 
     /// Links the project at `path`, kept relative to this project's folder where it lies under it, so the two move together.

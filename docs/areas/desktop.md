@@ -14,6 +14,14 @@ ids inside a view are per view (`push_id`), so two views on screen never clash. 
 they hand it a file): what it keeps is `Settings`, written when it changes, between drags; a setting still to come goes on
 its page greyed out (`later`).
 
+The system's file dialogs (Open, Save As, the exports, Load Family, Link Model, a material's picture) are asked for through
+`BimApp::ask_file` (`dialog.rs`), never with a blocking `rfd::FileDialog`: a native dialog run inside the window's event
+handler nests a run loop in it, and on macOS a drag reaching the window meanwhile re-enters the handler and aborts the app
+(issue 43). The dialog (`rfd::AsyncFileDialog`) is begun on the window's thread, where AppKit wants it and where a sheet does not
+block, and waited for on a thread of its own; `ask_file` is given what to do with the path, and `BimApp::dialog_answered` does it in a later frame (a cancel does nothing; one dialog is open at a time). A step
+that goes on after a save (the unsaved-changes prompt's Save) is that `then`. A file dropped on the window is queued in
+`opens`, as one the system asked for. A test hands the app a `Dialog` whose answer it sends itself (`tests/dialog.rs`).
+
 What a view hides or reveals for now (Temporary Hide/Isolate, Reveal Hidden Elements; `footer.rs`) is the window's, per `Sheet`, never the
 project's: the plan, the section and the 3D view draw `BimApp::view_model`, a copy of the model whose view graphics went through the `graphics`
 command on a scratch `Session`, made once for each model and each setting. A tool that needs the view's real model (select all, commands)
