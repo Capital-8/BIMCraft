@@ -208,6 +208,15 @@ impl Cloud {
         self.colours.as_deref().map(Vec::as_slice)
     }
 
+    /// Its points, shared: what a view keeps of it without copying them.
+    pub(crate) fn shared_points(&self) -> Arc<Vec<[f32; 3]>> {
+        Arc::clone(&self.points)
+    }
+
+    pub(crate) fn shared_colours(&self) -> Option<Arc<Vec<[u8; 3]>>> {
+        self.colours.clone()
+    }
+
     /// The box round its points, from its middle, mm.
     pub fn bounds(&self) -> ([f64; 3], [f64; 3]) {
         (self.lo.map(f64::from), self.hi.map(f64::from))
@@ -420,8 +429,8 @@ struct Shade {
     intensity: (f64, f64),
 }
 
-/// The grey of a point with neither colour nor intensity in a file whose others have one.
-const GREY: u8 = 160;
+/// The grey of a point with neither colour nor intensity: in a file whose others have one, and in a view, of a scan with none.
+pub const GREY: u8 = 160;
 
 impl Shade {
     fn of(&self, raw: &Raw) -> [u8; 3] {

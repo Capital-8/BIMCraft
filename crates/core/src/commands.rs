@@ -1999,7 +1999,7 @@ fn drawn_category(c: &str, given: &str) -> Result<String, String> {
             c,
             format!(
                 "`{given}` isn't a category views draw; there are: {}",
-                graphics::MODEL.iter().chain(&graphics::ANNOTATION).copied().collect::<Vec<_>>().join(", ")
+                graphics::MODEL.iter().chain(&graphics::ANNOTATION).chain(&graphics::SCANS).copied().collect::<Vec<_>>().join(", ")
             ),
         ))
     }
