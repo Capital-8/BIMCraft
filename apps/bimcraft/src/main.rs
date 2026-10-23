@@ -60,7 +60,7 @@ fn main() -> ExitCode {
     let mut session = Session::new();
     // A blank project starts in the interface's language: its levels named in it.
     if args.is_empty() {
-        let _ = session.execute("new", &json!({"language": language.code()}));
+        let _ = session.execute("new", &json!({"language": language.project().code()}));
     }
     let mut problem = None;
     let mut opened = Vec::new();

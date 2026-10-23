@@ -39,6 +39,14 @@ window through a channel; `BimApp::answer_agents` runs it in the frame as `BimAp
 request wakes the window (`Context::request_repaint`, from the context the first frame left in a `OnceLock`). Eight connections at
 most, ten seconds to say the first line. A test (`tests/control.rs`) plays the agent on a real connection while the harness runs frames.
 
+The interface's language is `lang::Lang`: a project's language, or Simplified Chinese (issue 38), which only the window speaks
+(a drawing's lettering, `font.rs`, is drawn in code and has no hanzi, so a project is never in Chinese and `Lang::project()` gives
+it English). Its words are `lang/zh.rs`, English keys with the Chinese, and the core's words (schedule headings) stay English there.
+egui's own fonts have no hanzi, so the window in Chinese needs a font the system has: `lang::use_chinese_font` puts one behind egui's
+(`lang/font.rs` tries each system's known places, then the Linux font folders, taking Noto Sans CJK's Simplified face) the first frame the
+language is Chinese. Where there is none, `set_lang` leaves the language as it was and the status says why, and a settings file that says
+Chinese on such a machine starts the window in English. The app holds the finder (`font_finder`) so a test can say there is none.
+
 What a view hides or reveals for now (Temporary Hide/Isolate, Reveal Hidden Elements; `footer.rs`) is the window's, per `Sheet`, never the
 project's: the plan, the section and the 3D view draw `BimApp::view_model`, a copy of the model whose view graphics went through the `graphics`
 command on a scratch `Session`, made once for each model and each setting. A tool that needs the view's real model (select all, commands)
