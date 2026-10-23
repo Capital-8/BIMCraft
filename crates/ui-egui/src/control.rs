@@ -11,10 +11,10 @@
 use std::io::{self, BufRead, Read, Write};
 use std::net::{Ipv4Addr, TcpListener, TcpStream};
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Arc, OnceLock};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use bimcraft_core::bridge::{self, Entry, Error, MAX_LINE, Request};
 use bimcraft_core::ids::Guid;
@@ -24,17 +24,19 @@ use crate::BimApp;
 
 /// The most agents connected at once.
 const MAX_CONNECTIONS: usize = 8;
-/// How long a connection has to say its first line, with the token in it.
+/// How long a connection has, from the start, to say its first line whole, with the token in it.
 const FIRST_LINE: Duration = Duration::from_secs(10);
 /// How long a request waits for the window to answer: a render or an import of a big model takes a while.
 const ANSWER: Duration = Duration::from_secs(600);
 /// How many requests a frame answers.
 const PER_FRAME: usize = 16;
 
-/// A request on its way to the window, and where its reply goes.
-struct Asked {
-    request: Request,
-    reply: Sender<String>,
+/// A request on its way to the window, and where its reply goes. An agent that has given up waiting says so, and the window does not
+/// do a request nobody is waiting for any more.
+pub(crate) struct Asked {
+    pub(crate) request: Request,
+    pub(crate) reply: Sender<String>,
+    pub(crate) abandoned: Arc<AtomicBool>,
 }
 
 /// The listening port and what it has taken.
@@ -52,6 +54,11 @@ impl Control {
     /// Listens on `port` of this machine's own address (0: any that is free) and writes the bridge `file` with the port and a token
     /// of 128 random bits, for the user alone.
     pub fn start(port: u16, file: Option<PathBuf>) -> io::Result<Control> {
+        Control::start_within(port, file, FIRST_LINE)
+    }
+
+    /// [`Control::start`] with `first_line` as the time a connection has to say its first.
+    pub(crate) fn start_within(port: u16, file: Option<PathBuf>, first_line: Duration) -> io::Result<Control> {
         let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, port))?;
         let entry = Entry { port: listener.local_addr()?.port(), token: Guid::new().to_string() };
         if let Some(file) = &file {
@@ -61,7 +68,12 @@ impl Control {
         let wake = Arc::new(OnceLock::new());
         let (token, woken, live) = (entry.token.clone(), Arc::clone(&wake), Arc::new(AtomicUsize::new(0)));
         std::thread::Builder::new().name("control-accept".into()).spawn(move || {
-            for stream in listener.incoming().flatten() {
+            for stream in listener.incoming() {
+                let Ok(stream) = stream else {
+                    // A failing accept (no file descriptors left, say) is waited out, not spun on.
+                    std::thread::sleep(Duration::from_millis(50));
+                    continue;
+                };
                 // A ninth agent is turned away, not queued: it was dropped, which closes it.
                 if live.fetch_add(1, Ordering::SeqCst) >= MAX_CONNECTIONS {
                     live.fetch_sub(1, Ordering::SeqCst);
@@ -69,7 +81,7 @@ impl Control {
                 }
                 let (token, tx, woken, live) = (token.clone(), tx.clone(), Arc::clone(&woken), Arc::clone(&live));
                 let spawned = std::thread::Builder::new().name("control-agent".into()).spawn(move || {
-                    let _ = serve(stream, &token, &tx, &woken);
+                    let _ = serve(stream, &token, &tx, &woken, first_line);
                     live.fetch_sub(1, Ordering::SeqCst);
                 });
                 if spawned.is_err() {
@@ -78,6 +90,16 @@ impl Control {
             }
         })?;
         Ok(Control { entry, asked, wake, file })
+    }
+}
+
+#[cfg(test)]
+impl Control {
+    /// A control with no port: the requests are put in by the test.
+    pub(crate) fn detached() -> (Control, Sender<Asked>) {
+        let (tx, asked) = channel();
+        let entry = Entry { port: 0, token: String::new() };
+        (Control { entry, asked, wake: Arc::new(OnceLock::new()), file: None }, tx)
     }
 }
 
@@ -102,40 +124,78 @@ pub(crate) fn read_line(reader: &mut impl BufRead) -> io::Result<Option<String>>
     Ok(Some(line))
 }
 
-/// An agent's connection: a line in, the window's answer back, until it hangs up or says a wrong token.
-fn serve(stream: TcpStream, token: &str, tx: &Sender<Asked>, wake: &OnceLock<Context>) -> io::Result<()> {
+/// The first line of a connection: whole within `within` of the start, not a byte now and then, and no longer than [`MAX_LINE`].
+/// None where the connection ends before it.
+fn read_first_line(reader: &mut io::BufReader<TcpStream>, within: Duration) -> io::Result<Option<String>> {
+    let start = Instant::now();
+    let mut line = Vec::new();
+    loop {
+        let left = within
+            .checked_sub(start.elapsed())
+            .filter(|left| !left.is_zero())
+            .ok_or_else(|| io::Error::new(io::ErrorKind::TimedOut, "the first line did not come in time"))?;
+        reader.get_ref().set_read_timeout(Some(left))?;
+        let buffer = reader.fill_buf()?;
+        if buffer.is_empty() {
+            return Ok(None);
+        }
+        let end = buffer.iter().position(|&b| b == b'\n').map_or(buffer.len(), |at| at + 1);
+        line.extend_from_slice(&buffer[..end]);
+        let whole = buffer[end - 1] == b'\n';
+        reader.consume(end);
+        if line.len() > MAX_LINE {
+            return Err(io::Error::new(io::ErrorKind::InvalidData, "a request line is too long"));
+        }
+        if whole {
+            return String::from_utf8(line).map(Some).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e));
+        }
+    }
+}
+
+/// An agent's connection: a line in, the window's answer back, until it hangs up or says a wrong token. Until a request has come
+/// with the token nothing is allowed that costs anything: the first line comes whole and soon, and what is not a request closes
+/// the connection (a web page's HTTP, say), after its reply.
+fn serve(stream: TcpStream, token: &str, tx: &Sender<Asked>, wake: &OnceLock<Context>, first_line: Duration) -> io::Result<()> {
     stream.set_nodelay(true)?;
-    stream.set_read_timeout(Some(FIRST_LINE))?;
     let mut reader = io::BufReader::new(stream.try_clone()?);
     let mut writer = stream;
-    let mut first = true;
-    while let Some(line) = read_line(&mut reader)? {
-        if std::mem::take(&mut first) {
-            // Once it is known, an agent may take as long as it likes between requests.
-            writer.set_read_timeout(None)?;
-        }
+    let mut known = false;
+    loop {
+        let line = if known { read_line(&mut reader)? } else { read_first_line(&mut reader, first_line)? };
+        let Some(line) = line else { return Ok(()) };
         let reply = match bridge::parse(&line, token) {
-            Err(Error::Token) => {
-                writeln!(writer, "{}", bridge::reply(Err(Error::Token.to_string())))?;
+            Err(e @ Error::Token) => {
+                writeln!(writer, "{}", bridge::reply(Err(e.to_string())))?;
+                return Ok(());
+            }
+            Err(e) if !known => {
+                writeln!(writer, "{}", bridge::reply(Err(e.to_string())))?;
                 return Ok(());
             }
             Err(e) => bridge::reply(Err(e.to_string())),
             Ok(request) => {
+                if !std::mem::replace(&mut known, true) {
+                    // Once it is known, an agent may take as long as it likes between requests.
+                    reader.get_ref().set_read_timeout(None)?;
+                }
                 let (reply, answer) = channel();
-                if tx.send(Asked { request, reply }).is_err() {
+                let abandoned = Arc::new(AtomicBool::new(false));
+                if tx.send(Asked { request, reply, abandoned: Arc::clone(&abandoned) }).is_err() {
                     // The window has gone.
                     return Ok(());
                 }
                 if let Some(ctx) = wake.get() {
                     ctx.request_repaint();
                 }
-                answer.recv_timeout(ANSWER).unwrap_or_else(|_| bridge::reply(Err("the window did not answer".into())))
+                answer.recv_timeout(ANSWER).unwrap_or_else(|_| {
+                    abandoned.store(true, Ordering::SeqCst);
+                    bridge::reply(Err("the window did not answer".into()))
+                })
             }
         };
         writeln!(writer, "{reply}")?;
         writer.flush()?;
     }
-    Ok(())
 }
 
 impl BimApp {
@@ -159,7 +219,10 @@ impl BimApp {
         }
         let asked: Vec<Asked> = std::iter::from_fn(|| control.asked.try_recv().ok()).take(PER_FRAME).collect();
         let more = asked.len() == PER_FRAME;
-        for Asked { request, reply } in asked {
+        for Asked { request, reply, abandoned } in asked {
+            if abandoned.load(Ordering::SeqCst) {
+                continue;
+            }
             self.made_in();
             let result = bridge::run(&mut self.session, &request);
             // The core renames and drops the option with its set.

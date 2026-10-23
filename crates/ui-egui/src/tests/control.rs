@@ -169,3 +169,57 @@ fn a_port_in_use_is_an_error_and_the_bridge_file_is_left_alone() {
     assert!(!file.exists());
     let _ = std::fs::remove_dir_all(file.parent().unwrap());
 }
+
+#[test]
+fn a_connection_that_trickles_its_first_line_or_speaks_another_protocol_is_closed() {
+    use std::time::Instant;
+    // A short time for the first line, so that the test is short.
+    let control = Control::start_within(0, None, Duration::from_millis(400)).unwrap();
+    let port = control.entry.port;
+    // A byte now and then never makes a line: it is closed 400 ms from its start, not at its next byte.
+    let mut slow = TcpStream::connect(("127.0.0.1", port)).unwrap();
+    slow.set_read_timeout(Some(Duration::from_millis(100))).unwrap();
+    let start = Instant::now();
+    slow.write_all(b"{").unwrap();
+    let closed = loop {
+        let mut byte = [0u8; 1];
+        match slow.read(&mut byte) {
+            Ok(0) => break start.elapsed(),
+            Ok(_) => panic!("nothing is said to a connection that has said nothing"),
+            Err(e) if matches!(e.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut) => {}
+            Err(_) => break start.elapsed(),
+        }
+        assert!(start.elapsed() < Duration::from_secs(5), "never closed");
+        let _ = slow.write_all(b" ");
+    };
+    assert!(closed >= Duration::from_millis(300) && closed < Duration::from_secs(3), "closed after {closed:?}");
+    // A web page's HTTP is not a request: it is told so, and closed, rather than held reading its headers.
+    let mut http = TcpStream::connect(("127.0.0.1", port)).unwrap();
+    http.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+    http.write_all(b"GET / HTTP/1.1\r\nHost: localhost\r\nOrigin: http://evil.example\r\n\r\n").unwrap();
+    let mut said = String::new();
+    match http.read_to_string(&mut said) {
+        Ok(_) => assert!(said.lines().count() == 1 && said.contains("not JSON"), "{said}"),
+        Err(e) => assert!(!matches!(e.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut), "held open: {e}"),
+    }
+}
+
+#[test]
+fn a_request_whose_agent_has_given_up_is_not_done_and_the_next_one_is() {
+    use std::sync::Arc;
+    use std::sync::atomic::AtomicBool;
+    use std::sync::mpsc::channel;
+    let mut h = app(BOX);
+    let (control, tx) = Control::detached();
+    h.state_mut().use_control(control);
+    let wall = |y: i32| bimcraft_core::bridge::Request::Execute { command: "wall".into(), params: json!({"points": [[0, y], [5000, y]]}) };
+    let before = walls(&h).len();
+    let (gave_up, never) = channel();
+    let (waiting, answer) = channel();
+    tx.send(crate::control::Asked { request: wall(7000), reply: gave_up, abandoned: Arc::new(AtomicBool::new(true)) }).unwrap();
+    tx.send(crate::control::Asked { request: wall(8000), reply: waiting, abandoned: Arc::new(AtomicBool::new(false)) }).unwrap();
+    h.step();
+    assert_eq!(walls(&h).len(), before + 1, "only the wall somebody was waiting for");
+    assert!(answer.try_recv().unwrap().contains("\"ok\""));
+    assert!(never.try_recv().is_err(), "nobody is told what nobody asked for");
+}

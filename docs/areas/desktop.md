@@ -37,7 +37,8 @@ runs), are `bimcraft_core::bridge`. A connection thread reads a line (at most 16
 window through a channel; `BimApp::answer_agents` runs it in the frame as `BimApp::run` runs a button's command (`made_in`, then
 `Session::execute`) and sends the reply back, up to sixteen a frame, and not while a file is being read or an update installed. A
 request wakes the window (`Context::request_repaint`, from the context the first frame left in a `OnceLock`). Eight connections at
-most, ten seconds to say the first line. A test (`tests/control.rs`) plays the agent on a real connection while the harness runs frames.
+most; ten seconds, in all, to say the first line whole (a byte now and then does not count), and what is not a request, a web page's
+HTTP say, is answered with an error and closed. A test (`tests/control.rs`) plays the agent on a real connection while the harness runs frames.
 
 The interface's language is `lang::Lang`: a project's language, or Simplified Chinese (issue 38), which only the window speaks
 (a drawing's lettering, `font.rs`, is drawn in code and has no hanzi, so a project is never in Chinese and `Lang::project()` gives
