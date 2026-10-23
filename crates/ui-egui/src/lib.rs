@@ -1004,6 +1004,8 @@ impl BimApp {
         }
         style::follow(&ctx);
         lang::set(self.lang);
+        // What agents asked of the project comes before the tidying, which puts right what a command left stale.
+        self.answer_agents(&ctx);
         self.tidy();
         self.poll_updates(&ctx);
         self.poll_revit(&ctx);
@@ -1012,7 +1014,6 @@ impl BimApp {
         self.os_requests(&ctx);
         self.dialog_answered();
         self.watch_window(&ctx);
-        self.answer_agents(&ctx);
         let view = self.view_title(self.sheet);
         let title = format!("{}{} · {view} · BIMCraft", self.session.model.name, if self.dirty() { "*" } else { "" });
         if title != self.title {
