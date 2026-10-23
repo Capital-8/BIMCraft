@@ -20,6 +20,12 @@ pub struct Window {
     token: String,
 }
 
+/// Whether an error of the connection says the window has gone: a close with the request unread is a reset, not an end.
+fn gone(e: &std::io::Error) -> bool {
+    use std::io::ErrorKind::{BrokenPipe, ConnectionAborted, ConnectionReset, NotConnected, UnexpectedEof};
+    matches!(e.kind(), ConnectionReset | ConnectionAborted | BrokenPipe | UnexpectedEof | NotConnected)
+}
+
 impl Window {
     /// Connects to the window that left its bridge file, or, given `port`, to that one if the file is its.
     pub fn connect(port: Option<u16>) -> Result<Window, String> {
@@ -63,8 +69,9 @@ impl Window {
             .and_then(|()| self.writer.flush())
             .map_err(|e| format!("the window closed the connection ({e})"))?;
         let mut line = String::new();
-        let read =
-            self.reader.by_ref().take(MAX_LINE as u64 + 1).read_line(&mut line).map_err(|e| format!("the window did not answer: {e}"))?;
+        let read = self.reader.by_ref().take(MAX_LINE as u64 + 1).read_line(&mut line).map_err(|e| {
+            if gone(&e) { format!("the window closed the connection ({e})") } else { format!("the window did not answer: {e}") }
+        })?;
         if read == 0 {
             return Err("the window closed the connection".into());
         }
@@ -129,10 +136,12 @@ pub(crate) mod tests {
         // A window that closes after answering the hello: the next request finds the connection closed.
         let entry = stand_in(1);
         let mut w = Window::connect_to(&entry).unwrap();
-        assert!(
-            w.ask(json!({"op": "hello"})).unwrap_err().starts_with("the window closed the connection"),
-            "a read of nothing, or a write to nobody"
-        );
+        // Given time to have closed, with the next request unread: the answer to it is a reset, or nothing, or a broken pipe.
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        for _ in 0..2 {
+            let said = w.ask(json!({"op": "hello"})).unwrap_err();
+            assert!(said.starts_with("the window closed the connection"), "{said}");
+        }
         // A port nothing listens on: the first, which no program of a user's does.
         let gone = Entry { port: 1, token: "x".into() };
         assert!(Window::connect_to(&gone).err().is_some_and(|e| e.contains("no window answers")));
