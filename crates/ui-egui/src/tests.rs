@@ -69,6 +69,18 @@ fn topmost(h: &mut Harness<BimApp>, name: &str) {
     h.run();
 }
 
+/// The ribbon's tab scrolled to its right end with the wheel, for a tab wider than the window.
+fn scroll_ribbon_right(h: &mut Harness<BimApp>) {
+    h.hover_at(pos2(400.0, 110.0));
+    h.event(Event::MouseWheel {
+        unit: MouseWheelUnit::Point,
+        delta: vec2(-3000.0, 0.0),
+        phase: TouchPhase::Move,
+        modifiers: Modifiers::NONE,
+    });
+    h.run();
+}
+
 /// A button named `name` beside the widget `beside`, when another window has one by that name too: the nearest.
 fn press_near(h: &mut Harness<BimApp>, name: &str, beside: &str) {
     let from = h.get_by_label(beside).rect().center();
@@ -4123,8 +4135,10 @@ fn ph_and_do_open_phasing_and_design_options_and_so_do_the_manage_tabs_buttons()
     assert!(h.query_by_label("No design option sets yet: New Set makes one.").is_some());
     press(&mut h, "Close");
     assert!(h.query_by_label("Active design option:").is_none(), "no sets of options, no active one to pick");
-    // The Manage tab's buttons; the Properties palette has a Phasing group of its own, below.
+    // The Manage tab's buttons, past the window's edge until the tab is scrolled; the Properties palette has a Phasing group of
+    // its own, below.
     press(&mut h, "Manage");
+    scroll_ribbon_right(&mut h);
     topmost(&mut h, "Phasing");
     assert!(h.query_by_label("Phases, in order:").is_some());
     press(&mut h, "Close");
@@ -4132,6 +4146,23 @@ fn ph_and_do_open_phasing_and_design_options_and_so_do_the_manage_tabs_buttons()
     assert!(h.query_by_label("Option set:").is_some());
     press(&mut h, "Close");
     assert!(h.query_by_label("Option set:").is_none());
+}
+
+#[test]
+fn a_ribbon_tab_wider_than_the_window_scrolls_sideways_and_each_tab_keeps_its_place() {
+    let mut h = app(BOX);
+    let window = h.ctx.content_rect().right();
+    let ribbon =
+        |h: &Harness<BimApp>, name: &str| h.get_all_by_label(name).map(|n| n.rect()).min_by(|a, b| a.top().total_cmp(&b.top())).unwrap();
+    press(&mut h, "Manage");
+    assert!(ribbon(&h, "Design Options").right() > window, "the Manage tab is wider than a window of {window}");
+    scroll_ribbon_right(&mut h);
+    assert!(ribbon(&h, "Design Options").right() <= window, "at its end the last button is in the window");
+    assert!(ribbon(&h, "Materials").left() < 0.0, "and the first has gone out on the left");
+    press(&mut h, "Architecture");
+    assert!(ribbon(&h, "Wall").left() >= 0.0, "another tab starts at its left");
+    press(&mut h, "Manage");
+    assert!(ribbon(&h, "Design Options").right() <= window, "and Manage is where it was left");
 }
 
 #[test]

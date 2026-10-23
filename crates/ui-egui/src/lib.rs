@@ -2340,18 +2340,21 @@ impl BimApp {
     /// The ribbon tab's panels of tools.
     fn ribbon_panels(&mut self, ui: &mut Ui) {
         Frame::new().inner_margin(vec2(8.0, 6.0)).show(ui, |ui| {
-            ui.horizontal(|ui| match self.tab {
-                Tab::Architecture => self.architecture_tab(ui),
-                Tab::Structure => self.structure_tab(ui),
-                Tab::Plumbing => self.plumbing_tab(ui),
-                Tab::Electrical => self.electrical_tab(ui),
-                Tab::Lightning => self.lightning_tab(ui),
-                Tab::Data => self.data_tab(ui),
-                Tab::Annotate => self.annotate_tab(ui),
-                Tab::Massing => self.massing_tab(ui),
-                Tab::View => self.view_tab(ui),
-                Tab::Manage => self.manage_tab(ui),
-                Tab::Modify | Tab::Context => self.modify_tab(ui),
+            // A tab wider than the window (Manage is, at 1280) scrolls sideways, each tab where it was left.
+            egui::ScrollArea::horizontal().id_salt(self.tab as u8).auto_shrink([false, true]).show(ui, |ui| {
+                ui.horizontal(|ui| match self.tab {
+                    Tab::Architecture => self.architecture_tab(ui),
+                    Tab::Structure => self.structure_tab(ui),
+                    Tab::Plumbing => self.plumbing_tab(ui),
+                    Tab::Electrical => self.electrical_tab(ui),
+                    Tab::Lightning => self.lightning_tab(ui),
+                    Tab::Data => self.data_tab(ui),
+                    Tab::Annotate => self.annotate_tab(ui),
+                    Tab::Massing => self.massing_tab(ui),
+                    Tab::View => self.view_tab(ui),
+                    Tab::Manage => self.manage_tab(ui),
+                    Tab::Modify | Tab::Context => self.modify_tab(ui),
+                });
             });
         });
     }
