@@ -1,7 +1,7 @@
 //! File > Settings (Ctrl+,): the window's own settings, the user's and never a project's. They live in
 //! `settings.json` beside the favorites and the update settings ([`beside`]), which the desktop's `main` hands the app
 //! ([`BimApp::use_settings`]); a window that wasn't given the file (every test's) keeps them for as long as it's open.
-//! What it keeps: the theme, interface language, ribbon, palettes, and the background autosave interval.
+//! What it keeps: the theme, interface language, ribbon, palettes, the window's size, and the background autosave interval.
 //! The pages for what is still to come (performance and graphics) show what they will hold, greyed out.
 
 use std::path::{Path, PathBuf};
@@ -31,6 +31,40 @@ pub fn language_in(path: &Path) -> Option<Language> {
     read(path)?["language"].as_str().and_then(Language::from_code)
 }
 
+/// How the window was left: its size in points and whether it was maximized.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Window {
+    pub size: Option<[f32; 2]>,
+    pub maximized: bool,
+}
+
+impl Window {
+    /// The sizes believed: a window is never smaller than this, nor larger than the biggest screens.
+    const SIZES: std::ops::RangeInclusive<f32> = 300.0..=16_000.0;
+
+    fn to_json(self) -> Value {
+        match self.size {
+            Some([width, height]) => json!({"width": width, "height": height, "maximized": self.maximized}),
+            None => json!({"maximized": self.maximized}),
+        }
+    }
+
+    /// Reads back what [`to_json`](Self::to_json) wrote over `base`: whatever is missing, not a number or not a size a window can
+    /// be keeps `base`'s.
+    fn from_json(v: &Value, base: Window) -> Window {
+        let side = |key: &str| v[key].as_f64().map(|n| n as f32).filter(|n| Self::SIZES.contains(n));
+        Window {
+            size: side("width").zip(side("height")).map(|(w, h)| [w, h]).or(base.size),
+            maximized: v["maximized"].as_bool().unwrap_or(base.maximized),
+        }
+    }
+}
+
+/// The window the settings file at `path` keeps, if it keeps one: the app starts at its size.
+pub fn window_in(path: &Path) -> Option<Window> {
+    Some(Window::from_json(&read(path)?["window"], Window::default()))
+}
+
 /// What the settings file keeps.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Settings {
@@ -41,6 +75,7 @@ pub struct Settings {
     pub autosave_minutes: u32,
     /// Draw the 3D view on the graphics card, when there is one.
     pub gpu_3d: bool,
+    pub window: Window,
 }
 
 impl Settings {
@@ -57,6 +92,7 @@ impl Settings {
             "palettes": self.docking.to_json(),
             "autosave_minutes": self.autosave_minutes,
             "gpu_3d": self.gpu_3d,
+            "window": self.window.to_json(),
         })
     }
 
@@ -76,6 +112,7 @@ impl Settings {
             docking: if v["palettes"].is_object() { Docking::from_json(&v["palettes"]) } else { base.docking },
             autosave_minutes: v["autosave_minutes"].as_u64().filter(|n| *n <= 120).map_or(base.autosave_minutes, |n| n as u32),
             gpu_3d: v["gpu_3d"].as_bool().unwrap_or(base.gpu_3d),
+            window: Window::from_json(&v["window"], base.window),
         }
     }
 }
@@ -136,6 +173,7 @@ impl BimApp {
         self.theme_wanted = Some(kept.theme);
         self.autosave.interval_minutes = kept.autosave_minutes;
         self.card.wanted = kept.gpu_3d;
+        self.window.kept = kept.window;
         self.settings_kept = Some(kept);
         self.settings_path = Some(path);
     }
@@ -153,6 +191,7 @@ impl BimApp {
             docking: self.docking.clone(),
             autosave_minutes: self.autosave.interval_minutes,
             gpu_3d: self.card.wanted,
+            window: self.window.kept,
         }
     }
 

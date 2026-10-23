@@ -35,6 +35,7 @@ mod style;
 #[cfg(test)]
 mod tests;
 mod updates;
+pub mod window;
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
@@ -376,6 +377,8 @@ pub struct BimApp {
     settings_page: Option<settings::Page>,
     settings_path: Option<PathBuf>,
     settings_kept: Option<settings::Settings>,
+    /// The window's size, kept and brought within its screen (`window.rs`).
+    window: window::Tracker,
     theme_wanted: Option<egui::ThemePreference>,
     tab: Tab,
     /// Where the ribbon goes back to when the contextual tab goes.
@@ -737,6 +740,7 @@ impl BimApp {
             settings_page: None,
             settings_path: None,
             settings_kept: None,
+            window: window::Tracker::default(),
             theme_wanted: None,
             tab: Tab::Architecture,
             back: Tab::Architecture,
@@ -1003,6 +1007,7 @@ impl BimApp {
         self.keys(&ctx);
         self.os_requests(&ctx);
         self.dialog_answered();
+        self.watch_window(&ctx);
         let view = self.view_title(self.sheet);
         let title = format!("{}{} · {view} · BIMCraft", self.session.model.name, if self.dirty() { "*" } else { "" });
         if title != self.title {
@@ -1997,6 +2002,7 @@ impl BimApp {
         (fresh.thin, fresh.lang, fresh.snaps, fresh.ribbon_min) = (self.thin, self.lang, self.snaps, self.ribbon_min);
         fresh.docking = std::mem::take(&mut self.docking);
         (fresh.settings_path, fresh.settings_kept) = (self.settings_path.take(), self.settings_kept.take());
+        fresh.window = std::mem::take(&mut self.window);
         (fresh.updates, fresh.revit) = (self.updates.take(), self.revit.take());
         fresh.opens = std::mem::take(&mut self.opens);
         (fresh.recent, fresh.recent_path) = (std::mem::take(&mut self.recent), self.recent_path.take());

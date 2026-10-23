@@ -22,6 +22,13 @@ path, and `BimApp::dialog_answered` does it in a later frame (a cancel does noth
 that goes on after a save (the unsaved-changes prompt's Save) is that `then`. A file dropped on the window is queued in
 `opens`, as one the system asked for. A test hands the app a `Dialog` whose answer it sends itself (`tests/dialog.rs`).
 
+The window's size (`window.rs`, issue 37) is `Settings::window` (its size in points and whether it was maximized, never its place:
+Wayland tells an app none, and the window starts centred): `BimApp::watch_window` notes it once a frame, keeps it once it has held
+still for half a second, and writes nothing for a window left as it started; `main` starts the window at the size the file holds
+(`settings::window_in`). A window too big for its screen (the default 1440 x 900 on a laptop's, or a kept size after the screen
+changed) is made smaller, once, in the first frame that knows the screen (`fitted`: 96% by 90% of it, never below the least a
+window can be), and centred when it has taken the size.
+
 What a view hides or reveals for now (Temporary Hide/Isolate, Reveal Hidden Elements; `footer.rs`) is the window's, per `Sheet`, never the
 project's: the plan, the section and the 3D view draw `BimApp::view_model`, a copy of the model whose view graphics went through the `graphics`
 command on a scratch `Session`, made once for each model and each setting. A tool that needs the view's real model (select all, commands)

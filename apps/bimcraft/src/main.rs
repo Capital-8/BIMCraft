@@ -36,6 +36,8 @@ fn main() -> ExitCode {
     // the language picked, the ribbon and where the palettes are.
     let settings = bimcraft_core::favorites::default_path().map(|favorites| bimcraft_ui_egui::settings::beside(&favorites));
     let language = settings.as_deref().and_then(bimcraft_ui_egui::settings::language_in).unwrap_or_else(lang::from_env);
+    // The window starts at the size it was left at; if that is too big for the screen the window brings itself within it (`window.rs`).
+    let window = settings.as_deref().and_then(bimcraft_ui_egui::settings::window_in).unwrap_or_default();
     let mut session = Session::new();
     // A blank project starts in the interface's language: its levels named in it.
     if std::env::args().len() == 1 {
@@ -114,13 +116,14 @@ fn main() -> ExitCode {
     let mut viewport = eframe::egui::ViewportBuilder::default()
         .with_title("BIMCraft")
         .with_app_id(APP_ID)
-        .with_inner_size([1440.0, 900.0])
-        .with_min_inner_size([900.0, 560.0]);
+        .with_inner_size(window.size.unwrap_or([1440.0, 900.0]))
+        .with_maximized(window.maximized)
+        .with_min_inner_size(bimcraft_ui_egui::window::MIN_SIZE);
     // The logo, for the title bar and the taskbar.
     if let Ok(icon) = eframe::icon_data::from_png_bytes(include_bytes!("../../../assets/app-icon/bimcraft-256.png")) {
         viewport = viewport.with_icon(icon);
     }
-    let mut options = eframe::NativeOptions { viewport, ..Default::default() };
+    let mut options = eframe::NativeOptions { viewport, centered: true, ..Default::default() };
     if let Some(backends) = graphics.backends() {
         let mut setup = eframe::egui_wgpu::WgpuSetupCreateNew::without_display_handle();
         setup.instance_descriptor.backends = backends;
