@@ -2185,9 +2185,9 @@ const WORDS: &[[&str; 3]] = &[
     ["Draw the 3D view on the graphics card", "Desenhar a vista 3D na placa de vídeo", "Dibujar la vista 3D en la tarjeta gráfica"],
     ["Graphics card", "Placa de vídeo", "Tarjeta gráfica"],
     [
-        "Faster for large models. See-through surfaces, hidden line and wireframe are still drawn on the processor, and so is everything if the card fails",
-        "Mais rápido para modelos grandes. Superfícies transparentes, linhas ocultas e arame ainda são desenhados no processador, e tudo também se a placa falhar",
-        "Más rápido para modelos grandes. Las superficies transparentes, la línea oculta y el alambre se siguen dibujando en el procesador, y todo si la tarjeta falla",
+        "Faster for large models. Hidden line and wireframe are still drawn on the processor, and so is everything if the card fails",
+        "Mais rápido para modelos grandes. Linhas ocultas e arame ainda são desenhados no processador, e tudo também se a placa falhar",
+        "Más rápido para modelos grandes. La línea oculta y el alambre se siguen dibujando en el procesador, y todo si la tarjeta falla",
     ],
     [
         "This copy has no graphics card it can draw the 3D view on",
