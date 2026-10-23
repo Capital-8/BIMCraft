@@ -24,6 +24,7 @@ use crate::model::{
     Ramp, Roof, Section, Shaft, Stair, TOL, Tag, Wall,
 };
 use crate::pen::{Pen, Weights};
+use crate::styles::{BY_CATEGORY, ObjectStyle};
 use crate::units::Units;
 use crate::view3d::{self, Camera, Clip, Image, Scene};
 use crate::walls::{self, Axis};
@@ -56,6 +57,21 @@ pub enum Part {
     Cut,
     Text,
     Pattern,
+}
+
+impl Part {
+    /// Whether this part's lines turn their corners mitred, square as a cut wall's corner: all but lettering, whose strokes
+    /// turn round, so a V's point doesn't stick out.
+    pub(crate) fn mitred(self) -> bool {
+        self != Part::Text
+    }
+}
+
+impl Drawing {
+    /// Whether primitive `i`'s corners are mitred ([`Part::mitred`]).
+    pub(crate) fn mitred(&self, i: usize) -> bool {
+        self.parts.get(i).is_none_or(|p| p.mitred())
+    }
 }
 
 pub enum Prim {
@@ -197,9 +213,11 @@ pub struct Drawing {
     /// The element being drawn now, and the part of it.
     owner: Option<Id>,
     part: Part,
-    /// How big annotation is drawn, times the pixels it is drawn in: see [`annotation`]. A paper mm is
-    /// [`sheet::DENSITY`] times this many pixels, so it sizes the pens too.
+    /// How big annotation is drawn, times the pixels it is drawn in: see [`annotation`].
     pub(crate) k: f32,
+    /// How many times [`sheet::DENSITY`] pixels a mm of the paper the view stands for is, so the pens' size: `k`, not
+    /// clamped ([`paper_of`]).
+    paper: f32,
     /// How much of what the view cuts it draws.
     detail: Detail,
 }
@@ -217,6 +235,7 @@ impl Drawing {
             owner: None,
             part: Part::Projection,
             k: 1.0,
+            paper: 1.0,
             detail: Detail::Fine,
         }
     }
@@ -245,7 +264,7 @@ impl Drawing {
     /// Each line's width as its pen draws it in this view, as annotation where `annotation` says its owner is, else as
     /// the model: the last step of drawing a view, once its overrides have set their pens.
     pub(crate) fn weigh(&mut self, annotation: impl Fn(Option<Id>) -> bool) {
-        let (weights, k) = (self.weights, self.k);
+        let (weights, k) = (self.weights, self.paper);
         for ((prim, owner), pen) in self.prims.iter_mut().zip(&self.owners).zip(&self.pens) {
             if let (Prim::Line { width, .. }, Some(pen)) = (prim, pen) {
                 *width = (weights.mm(*pen, annotation(*owner)) * sheet::DENSITY) as f32 * k;
@@ -272,7 +291,16 @@ impl Drawing {
             self.parts.push(part);
         }
     }
-
+    /// Each line marked [`BY_CATEGORY`] in the pen its owner's object style gives, cut or in projection as its part is: before
+    /// a view's overrides set theirs.
+    pub(crate) fn by_category(&mut self, style: impl Fn(Option<Id>) -> ObjectStyle) {
+        for ((pen, owner), part) in self.pens.iter_mut().zip(&self.owners).zip(&self.parts) {
+            if *pen == Some(BY_CATEGORY) {
+                let st = style(*owner);
+                *pen = Some(if *part == Part::Cut { st.cut } else { st.projection });
+            }
+        }
+    }
     /// `rings` filled, each turned the same way round, so where they overlap or meet they fill as one.
     pub(crate) fn fill(&mut self, rings: &[Vec<P2>], color: Rgb) {
         if rings.is_empty() {
@@ -301,7 +329,7 @@ impl Drawing {
     /// How many pixels wide `pen` draws here as the model: 0 for a hairline, which every painter draws as thin as it
     /// can. [`Drawing::weigh`] sizes annotation's at the end.
     pub(crate) fn width(&self, pen: Pen) -> f32 {
-        (self.weights.mm(pen, false) * sheet::DENSITY) as f32 * self.k
+        (self.weights.mm(pen, false) * sheet::DENSITY) as f32 * self.paper
     }
     /// `px` pixels of annotation, as big as the view's scale makes them.
     fn px(&self, px: f32) -> f32 {
@@ -508,6 +536,11 @@ fn cut_unions(look: &Look, outlines: impl Iterator<Item = (Id, Vec<P2>)>) -> Vec
     unions
 }
 
+/// The object style of `owner`'s category; with no owner, what a project's categories start with.
+fn style_of(m: &Model, owner: Option<Id>) -> ObjectStyle {
+    m.object_style(owner.and_then(|id| m.elements.get(id)).map_or("", Element::category))
+}
+
 /// Whether what `owner` is draws in the annotation's pens: a dimension, a tag, text, a spot elevation, a grid, a level, a
 /// room's tag, the mark of a section or an elevation. The rest is the model's.
 fn annotates(m: &Model, owner: Option<Id>) -> bool {
@@ -528,8 +561,9 @@ fn annotates(m: &Model, owner: Option<Id>) -> bool {
 }
 
 /// What of each cut outline is the edge of what the view cuts, as runs of points: its edges, but for the stretches
-/// another outline lies against on their outer side, where two walls meet at a join or one runs into another.
-fn cut_edges(outlines: &[(Id, Vec<P2>)]) -> Vec<(Id, Vec<Vec<P2>>)> {
+/// another outline lies against on their outer side, where two walls meet at a join or one runs into another; where two
+/// runs meet, each carried on `reach` mm round the corner ([`turn_corners`]).
+fn cut_edges(outlines: &[(Id, Vec<P2>)], reach: f64) -> Vec<(Id, Vec<Vec<P2>>)> {
     // How far past an edge, outward, a point is looked for in another outline: mm.
     const PAST: f64 = 1.0;
     let boxes: Vec<(P2, P2)> = outlines
@@ -597,7 +631,52 @@ fn cut_edges(outlines: &[(Id, Vec<P2>)]) -> Vec<(Id, Vec<Vec<P2>>)> {
         }
         out.push((*id, runs));
     }
+    turn_corners(&mut out, reach);
     out
+}
+
+/// A run of [`cut_edges`] in its category's pen: one that comes back to where it starts (an outline nothing lies against)
+/// closed, so none of its corners is a line's round end.
+fn ink_cut(d: &mut Drawing, run: &[P2]) {
+    match run.split_last() {
+        Some((last, ring)) if ring.len() > 2 && ring[0].dist(*last) < 1e-9 => d.line(ring, BY_CATEGORY, INK, true),
+        _ => d.line(run, BY_CATEGORY, INK, false),
+    }
+}
+
+/// Each run that ends where another ends (two walls' outlines meeting at a corner) carried on `reach` mm (or the other's
+/// first edge, if shorter) along the other: so the corner is a join inside a line, mitred square, not two ends meeting with
+/// a notch between them. What's carried on draws over the other's line, in its place.
+fn turn_corners(runs: &mut [(Id, Vec<Vec<P2>>)], reach: f64) {
+    // Every end: its point, and the way its run goes from it.
+    let ends: Vec<(P2, P2)> = runs
+        .iter()
+        .flat_map(|(_, rs)| rs)
+        .filter(|r| r.len() >= 2 && r.first().zip(r.last()).is_some_and(|(a, b)| a.dist(*b) > 1e-9))
+        .flat_map(|r| {
+            let n = r.len();
+            [(r[0], r[1]), (r[n - 1], r[n - 2])]
+        })
+        .collect();
+    let on = |at: P2, from: P2| {
+        ends.iter().find(|(p, q)| p.dist(at) < 1e-6 && q.dist(from) > 1e-9).map(|(p, q)| {
+            let len = p.dist(*q);
+            *p + (*q - *p) * (reach.min(len) / len)
+        })
+    };
+    for r in runs.iter_mut().flat_map(|(_, rs)| rs.iter_mut()) {
+        let n = r.len();
+        if n < 2 || r[0].dist(r[n - 1]) <= 1e-9 {
+            continue;
+        }
+        let (head, tail) = (on(r[0], r[1]), on(r[n - 1], r[n - 2]));
+        if let Some(q) = tail {
+            r.push(q);
+        }
+        if let Some(q) = head {
+            r.insert(0, q);
+        }
+    }
 }
 
 /// The plan of `level` fitted into `width` x `height` px, as an image of it is made: with its name lettered at its bottom left.
@@ -676,7 +755,9 @@ pub fn sketch(m: &Model, view: View, id: Id, e: &Element) -> Drawing {
     // Annotation as big as the view it will be in draws it.
     let on = m.annotation_plan(e);
     d.k = on.map_or(1.0, |v| annotation(m, v, view));
-    d.weights = on.map_or_else(|| m.line_weights().at(m.units.default_scale()), |v| m.line_weights().at(scale_of(m, v)));
+    // Its pens as the view it will be in draws them: annotation's, or the plan of its level's.
+    let n = on.or_else(|| m.level_of(e)).map_or_else(|| m.units.default_scale(), |v| scale_of(m, v));
+    (d.weights, d.paper) = (m.line_weights().at(n), paper_of(n, view.scale));
     match e {
         Element::Dimension(dm) => dimension(&mut d, m, dm),
         Element::Tag(t) => tag(&mut d, m, t),
@@ -705,6 +786,8 @@ pub fn sketch(m: &Model, view: View, id: Id, e: &Element) -> Drawing {
         _ => {}
     }
     let annotation = on.is_some() || matches!(e, Element::Section(_) | Element::Elevation(_));
+    let style = m.object_style(e.category());
+    d.by_category(|_| style);
     d.weigh(|_| annotation);
     d
 }
@@ -879,7 +962,7 @@ pub fn section_at(m: &Model, id: impl Key, view: View, k: f32) -> Drawing {
 /// [`section_at`], its pens the line weights' at 1 : `n`.
 fn section_in(m: &Model, id: impl Key, view: View, k: f32, n: f64) -> Drawing {
     let mut d = Drawing::new(view);
-    (d.k, d.detail, d.weights) = (k, detail_of(m, id), m.line_weights().at(n));
+    (d.k, d.paper, d.detail, d.weights) = (k, paper_of(n, view.scale), detail_of(m, id), m.line_weights().at(n));
     let Some(v) = m.section(id) else { return d };
     let look = Look::of(m, id);
     let u = (v.end - v.start).unit();
@@ -915,10 +998,10 @@ fn section_in(m: &Model, id: impl Key, view: View, k: f32, n: f64) -> Drawing {
         d.fill(rings, POCHE);
     }
     let pieces: Vec<(Id, Vec<P2>)> = cuts.iter().flat_map(|(owner, rings)| rings.iter().map(|r| (*owner, r.clone()))).collect();
-    for (owner, runs) in cut_edges(&pieces) {
+    for (owner, runs) in cut_edges(&pieces, 1.0 / d.view.scale) {
         d.owner = Some(owner);
         for run in runs {
-            d.line(&run, Pen::CUT, INK, false);
+            ink_cut(&mut d, &run);
         }
     }
     // A compound wall's layers where the line cuts it: each its material's cut pattern, between where
@@ -1028,14 +1111,14 @@ fn section_in(m: &Model, id: impl Key, view: View, k: f32, n: f64) -> Drawing {
                 massing::section_lines(&massing::tris(&ms.footprint(), &ms.top_ring(), (z0, z1)), v.start + u * first, u, last - first)
             {
                 let line: Vec<P2> = line.into_iter().map(|q| P2(q.0 + first, q.1)).collect();
-                d.dashed(&line, Pen::PROJECTION, MASS, false);
+                d.dashed(&line, BY_CATEGORY, MASS, false);
             }
             continue;
         }
         for (s0, s1) in view3d::crossings(&ms.boundary, v.start, u) {
             let (a, b) = (s0.max(first), s1.min(last));
             if b - a > 1e-6 {
-                d.dashed(&[P2(a, z0), P2(b, z0), P2(b, z1), P2(a, z1)], Pen::PROJECTION, MASS, true);
+                d.dashed(&[P2(a, z0), P2(b, z0), P2(b, z1), P2(a, z1)], BY_CATEGORY, MASS, true);
             }
         }
     }
@@ -1084,6 +1167,7 @@ fn section_in(m: &Model, id: impl Key, view: View, k: f32, n: f64) -> Drawing {
         }
     }
     d.owner = None;
+    d.by_category(|o| style_of(m, o));
     look.dress(&mut d);
     d.linked_under();
     d.weigh(|o| annotates(m, o));
@@ -1122,10 +1206,10 @@ pub fn draw_ceiling(m: &Model, level: impl Key, view: View) -> Drawing {
 /// How big the annotation of view `id` is drawn through `view`, times the size it is laid out at. A view with a scale
 /// holds it as paper at that scale would: its lettering and marks a fixed size on paper, which `scale` mm of the model per
 /// mm of paper and `view` showing `view.scale` pixels to the mm make of it ([`sheet::DENSITY`] pixels to a mm of paper); on
-/// a sheet, where the viewport sets the scale, it is 1. A view with no scale of its own is at [`DEFAULT_SCALE`]. The
-/// pens are sized by it too ([`pen_width`]), so a line is as wide as on the paper the view stands for. A
-/// shortcut: clamped to a tenth and ten times, so a hostile scale or zoom can't draw lettering a screen tall; widen it
-/// if a plan at 1 : 10000 on screen wants more.
+/// a sheet, where the viewport sets the scale, it is 1. A view with no scale of its own is at the units' default
+/// ([`crate::units::Units::default_scale`]). A shortcut: clamped to a tenth and ten times, so a hostile scale or zoom
+/// can't draw lettering a screen tall; widen it if a plan at 1 : 10000 on screen wants more. The pens aren't clamped
+/// ([`paper_of`], [`Drawing::width`]): a line is as wide as on the paper the view stands for, however far in or out.
 pub fn annotation(m: &Model, id: impl Key, view: View) -> f32 {
     annotation_of(scale_of(m, id), view.scale)
 }
@@ -1133,6 +1217,13 @@ pub fn annotation(m: &Model, id: impl Key, view: View) -> f32 {
 /// [`annotation`] for a view at scale 1 : `n` shown at `scale` pixels to the mm.
 fn annotation_of(n: f64, scale: f64) -> f32 {
     (n * scale / sheet::DENSITY).clamp(0.1, 10.0) as f32
+}
+
+/// [`annotation_of`] unclamped, what sizes the pens: but for a hostile scale or zoom, 0 (a hairline) when it isn't a
+/// number and no more than a million.
+fn paper_of(n: f64, scale: f64) -> f32 {
+    let k = n * scale / sheet::DENSITY;
+    if k.is_finite() && k > 0.0 { k.min(1e6) as f32 } else { 0.0 }
 }
 
 /// The level of detail view `id` draws at: its own, or its template's where that controls it.
@@ -1154,7 +1245,7 @@ fn draw_plan(m: &Model, plan: impl Key, view: View, up: bool, k: f32, n: f64, ti
     let level = m.plan_level(key).map_or(key, |l| m.guid(l));
     let index = walls::Index::new(m);
     let mut d = Drawing::new(view);
-    (d.k, d.detail, d.weights) = (k, detail_of(m, key), m.line_weights().at(n));
+    (d.k, d.paper, d.detail, d.weights) = (k, paper_of(n, view.scale), detail_of(m, key), m.line_weights().at(n));
     let look = Look::of(m, key);
     let shown = |id: Id| look.shows(id);
     let mut range = m.plan_range(key);
@@ -1173,7 +1264,7 @@ fn draw_plan(m: &Model, plan: impl Key, view: View, up: bool, k: f32, n: f64, ti
         }
         d.owner = Some(id);
         for ring in std::iter::once(&f.boundary).chain(&f.openings) {
-            d.line(ring, Pen::PROJECTION, FAINT, true);
+            d.line(ring, BY_CATEGORY, FAINT, true);
         }
         holes(&mut d, m, &m.floor_slabs(f));
         // Its top layer's surface pattern, faint, in a fine view.
@@ -1208,7 +1299,7 @@ fn draw_plan(m: &Model, plan: impl Key, view: View, up: bool, k: f32, n: f64, ti
     // Walls and columns below the cut plane, as seen from it; past the bottom, faint.
     for (id, o, top) in seen_below(m, &range, &look, &index).into_iter().filter(|_| !up) {
         d.owner = Some(id);
-        d.line(&o, Pen::PROJECTION, if top > range.bottom - TOL { INK } else { FAINT }, true);
+        d.line(&o, BY_CATEGORY, if top > range.bottom - TOL { INK } else { FAINT }, true);
     }
     // A run's centre line, faint and dashed, where it is seen but not cut: Revit's mark of a beam, and where to pick it.
     for (&id, e) in m.elements.iter().filter(|_| !up).filter(|(id, _)| shown(**id)) {
@@ -1219,7 +1310,7 @@ fn draw_plan(m: &Model, plan: impl Key, view: View, up: bool, k: f32, n: f64, ti
         if seen || over {
             d.owner = Some(id);
             let pts = [P2(g.a[0], g.a[1]), P2(g.b[0], g.b[1])].iter().map(|p| d.view.px(*p)).collect();
-            d.stroke(pts, Pen::PROJECTION, FAINT, Some([14.0, 5.0]), false);
+            d.stroke(pts, BY_CATEGORY, FAINT, Some([14.0, 5.0]), false);
         }
     }
     d.part(Part::Cut);
@@ -1240,10 +1331,10 @@ fn draw_plan(m: &Model, plan: impl Key, view: View, up: bool, k: f32, n: f64, ti
         d.owner = Some(*id);
         d.fill(std::slice::from_ref(o), POCHE);
     }
-    for (id, runs) in cut_edges(&outlines) {
+    for (id, runs) in cut_edges(&outlines, 1.0 / d.view.scale) {
         d.owner = Some(id);
         for run in runs {
-            d.line(&run, Pen::CUT, INK, false);
+            ink_cut(&mut d, &run);
         }
     }
     // A compound wall's layers: each its material's cut pattern where it's wide enough to hold it,
@@ -1326,7 +1417,7 @@ fn draw_plan(m: &Model, plan: impl Key, view: View, up: bool, k: f32, n: f64, ti
             }
             _ if up => {}
             // A mass the plane passes through: its outline, dashed.
-            Element::Mass(ms) if m.mass_cut_by(ms, range.cut) => d.dashed(&m.mass_outline(ms, range.cut), Pen::PROJECTION, MASS, true),
+            Element::Mass(ms) if m.mass_cut_by(ms, range.cut) => d.dashed(&m.mass_outline(ms, range.cut), BY_CATEGORY, MASS, true),
             Element::Stair(st) => stair(&mut d, m, st, level),
             Element::Ramp(r) => ramp(&mut d, m, r, level),
             Element::Railing(rl) if m.level_of(e) == Some(level) => railing(&mut d, m, rl, range.cut),
@@ -1343,7 +1434,7 @@ fn draw_plan(m: &Model, plan: impl Key, view: View, up: bool, k: f32, n: f64, ti
                 if range.cut < eave && eave <= range.top {
                     for ring in std::iter::once(&m.roof_outline(r)).chain(&r.courtyards) {
                         let pts = ring.iter().map(|p| d.view.px(*p)).collect();
-                        d.stroke(pts, Pen::PROJECTION, INK, Some([10.0, 5.0]), true);
+                        d.stroke(pts, BY_CATEGORY, INK, Some([10.0, 5.0]), true);
                     }
                 }
             }
@@ -1351,7 +1442,7 @@ fn draw_plan(m: &Model, plan: impl Key, view: View, up: bool, k: f32, n: f64, ti
             crate::model::run_arm!(_) => {
                 if let Some(g) = m.run_geom(e).filter(|g| range.cut < g.z_span().0 && g.z_span().0 <= range.top) {
                     let pts = g.footprint().iter().map(|p| d.view.px(*p)).collect();
-                    d.stroke(pts, Pen::PROJECTION, INK, Some([10.0, 5.0]), true);
+                    d.stroke(pts, BY_CATEGORY, INK, Some([10.0, 5.0]), true);
                 }
             }
             _ => {}
@@ -1398,6 +1489,7 @@ fn draw_plan(m: &Model, plan: impl Key, view: View, up: bool, k: f32, n: f64, ti
         });
     }
     d.owner = None;
+    d.by_category(|o| style_of(m, o));
     look.dress(&mut d);
     d.linked_under();
     d.weigh(|o| annotates(m, o));
@@ -1434,12 +1526,12 @@ fn component(d: &mut Drawing, pieces: &[crate::family::Piece]) {
             let mut at = 0.0;
             for (s0, s1) in hidden {
                 if s0 > at {
-                    d.line(&[a + u * at, a + u * s0], Pen::PROJECTION, INK, false);
+                    d.line(&[a + u * at, a + u * s0], BY_CATEGORY, INK, false);
                 }
                 at = f64::max(at, s1);
             }
             if at < len {
-                d.line(&[a + u * at, b], Pen::PROJECTION, INK, false);
+                d.line(&[a + u * at, b], BY_CATEGORY, INK, false);
             }
         }
     }
@@ -1468,7 +1560,7 @@ fn slope_arrow(d: &mut Drawing, tail: P2, head: P2, slope: f64) {
 
 /// A shaft cut in plan: its outline, and the diagonals of its box across it.
 fn shaft(d: &mut Drawing, ring: &[P2]) {
-    d.line(ring, Pen::PROJECTION, INK, true);
+    d.line(ring, BY_CATEGORY, INK, true);
     let Some((lo, hi)) = bounds(ring) else { return };
     for (from, to) in [(lo, hi), (P2(lo.0, hi.1), P2(hi.0, lo.1))] {
         let u = (to - from).unit();
@@ -1637,7 +1729,7 @@ fn hatching(d: &mut Drawing, ring: &[P2], pattern: Pattern, u: P2, color: Rgb, g
 /// it, and with a grid, its tiles: lines through its middle, a tile apart, stopping at the holes.
 fn ceiling(d: &mut Drawing, m: &Model, c: &Ceiling) {
     for ring in std::iter::once(&c.boundary).chain(&c.openings) {
-        d.line(ring, Pen::PROJECTION, INK, true);
+        d.line(ring, BY_CATEGORY, INK, true);
     }
     let slabs = m.ceiling_slabs(c);
     holes(d, m, &slabs);
@@ -1789,11 +1881,11 @@ fn opening(d: &mut Drawing, m: &Model, e: &Element, o: &Opening, w: &Wall, cut: 
     // Of a family: the forms the cut plane passes through, outlined, and the lines of its symbols (a door's swing).
     if o.family.is_some() {
         for piece in m.opening_pieces(e).iter().filter(|p| p.bottom <= cut && cut < p.top) {
-            d.line(&piece.outline, Pen::MEDIUM, INK, true);
+            d.line(&piece.outline, BY_CATEGORY, INK, true);
         }
         d.part(Part::Projection);
         for stroke in m.opening_strokes(e) {
-            d.line(&stroke, Pen::PROJECTION, INK, false);
+            d.line(&stroke, BY_CATEGORY, INK, false);
         }
         d.part(Part::Cut);
         return;
@@ -1807,10 +1899,10 @@ fn opening(d: &mut Drawing, m: &Model, e: &Element, o: &Opening, w: &Wall, cut: 
         let out = axis.tangent(hinge).perp() * if o.flip_facing { -1.0 } else { 1.0 };
         let shut = axis.at(free, side);
         let open = pivot + out * pivot.dist(shut);
-        d.line(&[pivot, open], Pen::MEDIUM, INK, false);
+        d.line(&[pivot, open], BY_CATEGORY, INK, false);
         // What the leaf sweeps is seen, not cut.
         d.part(Part::Projection);
-        d.line(&arc(pivot, open, shut, 24), Pen::PROJECTION, INK, false);
+        d.line(&arc(pivot, open, shut, 24), BY_CATEGORY, INK, false);
         d.part(Part::Cut);
     } else {
         for across in [int, (ext + int) / 2.0, ext] {
@@ -1898,7 +1990,7 @@ fn railing(d: &mut Drawing, m: &Model, rl: &Railing, cut: f64) {
         };
         for (p, q, over) in parts {
             let pts = vec![d.view.px(p), d.view.px(q)];
-            d.stroke(pts, Pen::MEDIUM, INK, over.then_some([6.0, 4.0]), false);
+            d.stroke(pts, BY_CATEGORY, INK, over.then_some([6.0, 4.0]), false);
         }
     }
 }
@@ -1906,7 +1998,7 @@ fn railing(d: &mut Drawing, m: &Model, rl: &Railing, cut: f64) {
 /// A line from `a` to `b`, one pixel wide; dashed, `over`.
 fn segment(d: &mut Drawing, a: P2, b: P2, over: bool) {
     let pts = vec![d.view.px(a), d.view.px(b)];
-    d.stroke(pts, Pen::PROJECTION, INK, over.then_some([6.0, 4.0]), false);
+    d.stroke(pts, BY_CATEGORY, INK, over.then_some([6.0, 4.0]), false);
 }
 
 /// A stair's or a ramp's walk line, its arrow at the top, marked UP at its foot; from above, the
@@ -1945,7 +2037,7 @@ fn arrow(d: &mut Drawing, a: (f32, f32), b: (f32, f32)) -> (f32, f32) {
 fn roof(d: &mut Drawing, m: &Model, r: &Roof) {
     let faces = m.roof_faces(r).map_or_else(|_| vec![m.roof_outline(r)], |f| f.into_iter().flat_map(|(loops, _)| loops).collect());
     for f in faces {
-        d.line(&f, Pen::PROJECTION, INK, true);
+        d.line(&f, BY_CATEGORY, INK, true);
     }
 }
 
@@ -2230,7 +2322,7 @@ pub fn svg(d: &Drawing) -> String {
         r#"<svg xmlns="http://www.w3.org/2000/svg" width="{w}" height="{h}" viewBox="0 0 {w} {h}"><rect width="{w}" height="{h}" fill="{}"/>"#,
         hex(PAPER)
     );
-    for p in &d.prims {
+    for (i, p) in d.prims.iter().enumerate() {
         let _ = match p {
             Prim::Fill { rings, color } => {
                 let data: Vec<String> = rings.iter().map(|r| path_data(r, true)).collect();
@@ -2242,9 +2334,10 @@ pub fn svg(d: &Drawing) -> String {
                 let width = if *width > 0.0 { format!(r#"{width}""#) } else { r#"1" vector-effect="non-scaling-stroke""#.to_string() };
                 write!(
                     s,
-                    r#"<path d="{}" fill="none" stroke="{}" stroke-width="{width} stroke-linecap="round" stroke-linejoin="round"{dash}/>"#,
+                    r#"<path d="{}" fill="none" stroke="{}" stroke-width="{width} stroke-linecap="round" stroke-linejoin="{}"{dash}/>"#,
                     path_data(pts, *closed),
-                    hex(*color)
+                    hex(*color),
+                    if d.mitred(i) { "miter" } else { "round" }
                 )
             }
             Prim::Image { at, width, height, rgba } => match picture(*width, *height, rgba).and_then(|pm| pm.encode_png().ok()) {
@@ -2290,7 +2383,7 @@ fn picture(width: u32, height: u32, rgba: &[u8]) -> Option<Pixmap> {
 
 /// The display list drawn over what `pm` holds.
 fn paint(pm: &mut Pixmap, d: &Drawing) {
-    for p in &d.prims {
+    for (i, p) in d.prims.iter().enumerate() {
         let mut paint = Paint { anti_alias: true, ..Paint::default() };
         match p {
             Prim::Fill { rings, color } => {
@@ -2305,7 +2398,7 @@ fn paint(pm: &mut Pixmap, d: &Drawing) {
                 let stroke = Stroke {
                     width: *width,
                     line_cap: LineCap::Round,
-                    line_join: LineJoin::Round,
+                    line_join: if d.mitred(i) { LineJoin::Miter } else { LineJoin::Round },
                     dash: dash.and_then(|[a, b]| StrokeDash::new(vec![a, b], 0.0)),
                     ..Stroke::default()
                 };
@@ -3057,11 +3150,14 @@ mod tests {
         assert!((at_50 - mm * 5.0).abs() < 1e-4, "{at_50}");
         // At 1 : 100 the same screen stands for half the paper, so the pen is twice the pixels; zoomed in twice, twice again.
         s.execute("scale", &serde_json::json!({"view": 100000, "scale": 100})).unwrap();
-        assert!((widest(&s, view, wall) - 8.0).abs() < 1e-4);
-        assert!((widest(&s, View { scale: 0.2, ..view }, wall) - 16.0).abs() < 1e-4);
+        assert!((widest(&s, view, wall) - 3.5).abs() < 1e-4, "pen 10, 0.35 mm: {}", widest(&s, view, wall));
+        assert!((widest(&s, View { scale: 0.2, ..view }, wall) - 7.0).abs() < 1e-4);
+        // However far in or out: a pixel to the mm is 20 times the paper (35 px), a 500th of one a 25th (0.07 px).
+        assert!((widest(&s, View { scale: 1.0, ..view }, wall) - 35.0).abs() < 1e-3, "{}", widest(&s, View { scale: 1.0, ..view }, wall));
+        assert!((widest(&s, View { scale: 0.002, ..view }, wall) - 0.07).abs() < 1e-5);
         // A weight overridden is a pen too.
         s.execute("graphics", &serde_json::json!({"view": 100000, "categories": {"walls": {"cut": {"weight": 13}}}})).unwrap();
-        assert!((widest(&s, view, wall) - 2.0 * 5.0 * 2.0).abs() < 1e-4, "pen 13, 2 mm: {}", widest(&s, view, wall));
+        assert!((widest(&s, view, wall) - 0.7 * 5.0 * 2.0).abs() < 1e-4, "pen 13, 0.7 mm: {}", widest(&s, view, wall));
     }
 
     #[test]
@@ -3102,15 +3198,75 @@ mod tests {
     #[test]
     fn a_cut_walls_outline_is_inked_over_its_poche_and_not_across_its_joins() {
         let s = house();
-        // At 1 : 100 and a tenth of a pixel to the mm, a cut outline (pen 10, 0.8 mm) is 8 px wide.
-        let view = View { scale: 0.1, cx: 4000.0, cy: 3000.0, width: 1000, height: 800 };
+        // At 1 : 100 a cut outline (pen 10, 0.35 mm on paper) is 35 mm of the model wide; at a fifth of a pixel to the mm, 7 px.
+        let view = View { scale: 0.2, cx: 6000.0, cy: 1000.0, width: 1000, height: 800 };
         let d = draw(&s.model, 100000, view);
         let png = png(&d).unwrap();
         // Two pixels inside the south wall's outer face (its axis on y = 0, 200 mm thick): the outline, whole.
-        assert_eq!(pixel(&png, view.px(P2(6000.0, -80.0))), (INK.0, INK.1, INK.2), "the outline over the poché");
-        assert_eq!(pixel(&png, view.px(P2(6000.0, 80.0))), (INK.0, INK.1, INK.2), "and on its inner face");
+        assert_eq!(pixel(&png, view.px(P2(6000.0, -90.0))), (INK.0, INK.1, INK.2), "the outline over the poché");
+        assert_eq!(pixel(&png, view.px(P2(6000.0, 90.0))), (INK.0, INK.1, INK.2), "and on its inner face");
         // Where two walls meet at a corner, the mitre between them is poché, no line.
         assert_eq!(pixel(&png, view.px(P2(8000.0, 0.0))), (POCHE.0, POCHE.1, POCHE.2));
         assert_eq!(pixel(&png, view.px(P2(8040.0, 40.0))), (POCHE.0, POCHE.1, POCHE.2));
+    }
+
+    #[test]
+    fn lettering_turns_its_corners_round_while_a_pens_lines_turn_them_square() {
+        let view = View { scale: 1.0, cx: 0.0, cy: 0.0, width: 400, height: 200 };
+        let mut d = Drawing::new(view);
+        d.text("VW", (200.0, 100.0), 80.0, INK);
+        d.line(&[P2(-150.0, 0.0), P2(-100.0, 50.0), P2(-50.0, 0.0)], Pen::MEDIUM, INK, false);
+        let svg = svg(&d);
+        let joins: Vec<&str> = svg.split("stroke-linejoin=\"").skip(1).filter_map(|s| s.split('"').next()).collect();
+        assert_eq!(joins.last(), Some(&"miter"), "the pen's line");
+        assert!(joins.len() > 2 && joins[..joins.len() - 1].iter().all(|j| *j == "round"), "{joins:?}");
+        let (pdf, _) = crate::pdf::contents(&d, P2(100.0, 50.0));
+        assert!(pdf.contains(" 1 j ") && pdf.trim_end().rsplit('\n').next().is_some_and(|l| l.contains(" 0 j ")), "{pdf}");
+    }
+
+    #[test]
+    fn a_wall_on_its_own_is_inked_all_round_as_one_closed_line_square_at_every_corner() {
+        let mut s = Session::new();
+        s.script(r#"wall {"points": [[0, 0], [4000, 0]]}"#).unwrap();
+        // Half a pixel to the mm: the outline, 35 mm of the model wide at 1 : 100, reaches 17.5 mm past each corner, so 15 mm
+        // out each way is ink at a square corner and paper at a round one (21 mm from it).
+        let view = View { scale: 0.5, cx: 2000.0, cy: 0.0, width: 2400, height: 400 };
+        let d = draw(&s.model, 100000, view);
+        let cut: Vec<bool> = d
+            .prims
+            .iter()
+            .zip(&d.parts)
+            .filter_map(|(p, part)| match p {
+                Prim::Line { closed, .. } if *part == Part::Cut => Some(*closed),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(cut, [true], "one closed line, no ends");
+        let png = png(&d).unwrap();
+        for (x, y) in [(-15.0, -115.0), (4015.0, -115.0), (4015.0, 115.0), (-15.0, 115.0)] {
+            assert_eq!(pixel(&png, view.px(P2(x, y))), (INK.0, INK.1, INK.2), "the corner by ({x}, {y}), square");
+        }
+    }
+
+    #[test]
+    fn where_two_walls_cut_outlines_meet_at_a_corner_they_join_square_with_no_notch() {
+        let s = house();
+        // The house's south-east corner: the south wall's axis on y = 0, the east's on x = 8000, both 200 mm thick, so the
+        // outer corner is at (8100, -100). The outline, 35 mm of the model wide at 1 : 100, reaches 17.5 mm past it each way,
+        // a square corner: 15 mm out each way is inside that square, outside a rounded one (21 mm from the corner, past its
+        // 17.5 mm radius). Half a pixel to the mm, to see it.
+        let view = View { scale: 0.5, cx: 8000.0, cy: 0.0, width: 1000, height: 800 };
+        let d = draw(&s.model, 100000, view);
+        let png = png(&d).unwrap();
+        assert_eq!(pixel(&png, view.px(P2(8115.0, -115.0))), (INK.0, INK.1, INK.2), "the outer corner, square");
+        // Each wall's run goes on round the corner into the other's: one line, joined, not two ends meeting.
+        let corner = view.px(P2(8100.0, -100.0));
+        let through = d.prims.iter().zip(&d.parts).any(|(p, part)| match p {
+            Prim::Line { pts, .. } if *part == Part::Cut => {
+                pts.len() > 2 && pts[1..pts.len() - 1].iter().any(|q| (q.0 - corner.0).abs() < 0.01 && (q.1 - corner.1).abs() < 0.01)
+            }
+            _ => false,
+        });
+        assert!(through, "a run turns the corner");
     }
 }

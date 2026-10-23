@@ -21,7 +21,7 @@ fn deflate(bytes: &[u8]) -> Vec<u8> {
 /// pictures, RGB, in the order the stream names them (`/Im0`, `/Im1`…).
 pub(crate) fn contents(d: &Drawing, paper: P2) -> (String, Vec<(u32, u32, Vec<u8>)>) {
     let k = 72.0 / 25.4 / d.view.scale;
-    let mut s = format!("{k:.6} 0 0 {:.6} 0 {:.3} cm 1 J 1 j\n", -k, paper.1 * 72.0 / 25.4);
+    let mut s = format!("{k:.6} 0 0 {:.6} 0 {:.3} cm 1 J 0 j\n", -k, paper.1 * 72.0 / 25.4);
     let color =
         |c: crate::render::Rgb| format!("{:.3} {:.3} {:.3}", f32::from(c.0) / 255.0, f32::from(c.1) / 255.0, f32::from(c.2) / 255.0);
     let path = |s: &mut String, pts: &[(f32, f32)], closed: bool| {
@@ -33,7 +33,7 @@ pub(crate) fn contents(d: &Drawing, paper: P2) -> (String, Vec<(u32, u32, Vec<u8
         }
     };
     let mut images = Vec::new();
-    for p in &d.prims {
+    for (i, p) in d.prims.iter().enumerate() {
         match p {
             Prim::Fill { rings, color: c } => {
                 let _ = write!(s, "{} rg ", color(*c));
@@ -44,7 +44,7 @@ pub(crate) fn contents(d: &Drawing, paper: P2) -> (String, Vec<(u32, u32, Vec<u8
             }
             Prim::Line { pts, width, color: c, dash, closed } => {
                 let dash = dash.map_or_else(|| "[] 0 d".to_string(), |[a, b]| format!("[{a} {b}] 0 d"));
-                let _ = write!(s, "{} RG {width} w {dash} ", color(*c));
+                let _ = write!(s, "{} RG {width} w {} j {dash} ", color(*c), if d.mitred(i) { 0 } else { 1 });
                 path(&mut s, pts, *closed);
                 s.push_str("S\n");
             }

@@ -731,9 +731,22 @@ pub static ALL: &[Command] = &[
          column of the scale nearest its own (by how many times finer or coarser; the finer of two as near). `annotation` \
          gives the 16 pens that dimensions, tags, text, grids, levels and marks draw in, at any scale. Each width is 0.01 to \
          20 mm; pen 0 is always a hairline. `reset` goes back to what a project in its units starts with (the model's pens \
-         wider at finer scales; at 1 : 100, pen 4 is 0.20 mm and pen 10 0.80 mm). Without any, it says what they are, each \
+         wider at finer scales; at 1 : 100, pen 4 is 0.18 mm and pen 10 0.35 mm). Without any, it says what they are, each \
          scale named as the project's units name it, and `own` whether the project has set them",
         line_weights,
+    ),
+    edit(
+        "object_styles",
+        "Object Styles",
+        &[],
+        "{categories?: {category: {projection?: pen, cut?: pen}, …}, reset?: true} the project's object styles, as Revit's \
+         Manage > Object Styles: the pen (0, a hairline, to 16) each model category draws its lines in where it is seen \
+         (`projection`) and where a view cuts it (`cut`), in every plan and section; a view's Visibility/Graphics overrides \
+         them. A category given keeps the pen it isn't given. The rest of an element's lines keep their own: a compound \
+         wall's layers, a door's jambs, a stair's walk line. `reset` goes back to what a project starts with (cut pen 10 and \
+         seen pen 4; a door's and a window's cut 6, a railing seen 6, a mass 4 both). Without either, it says each model \
+         category's, `own` whether the project has set it apart",
+        object_styles,
     ),
     edit(
         "units",
@@ -796,7 +809,7 @@ pub static ALL: &[Command] = &[
          in any case, singular or plural) leaves all its elements out of that view, and `hide_elements` the elements given. An \
          override is {hidden?, projection?: style, cut?: style, halftone?, transparency?}, a style {color?, weight? (a pen, \
          0 to 16: 0 a hairline, the thinnest line the screen or printer draws at any scale; 1 to 16 widths on paper from 0.10 to \
-         4 mm, 4 being 0.20 mm and 10 0.80 mm, a cut wall's outline), dash? (solid, dashed, dotted), fill?}, a colour [r, g, b] or \"#rrggbb\". \
+         4 mm, 4 being 0.18 mm and 10 0.35 mm, a cut wall's outline), dash? (solid, dashed, dotted), fill?}, a colour [r, g, b] or \"#rrggbb\". \
          Projection is what a plan sees below its cut plane, a section beyond its line and the annotation; cut is what the view \
          cuts; `fill` is the cut's poché, or a 3D view's surface; in a 3D view, and in what a section sees beyond its line, a \
          projection's `color` is the colour of the edges (weight and dash draw lines, and those are vectors). Halftone draws it \
@@ -6059,6 +6072,54 @@ fn line_weights(s: &mut Session, p: &Value) -> R {
     let model: Vec<Value> =
         lw.model.iter().map(|col| json!({"scale": col.scale, "name": m.units.scale(col.scale), "widths": col.widths})).collect();
     Ok(json!({"model": model, "annotation": lw.annotation, "own": m.line_weights.is_some()}))
+}
+
+fn object_styles(s: &mut Session, p: &Value) -> R {
+    let c = "object_styles";
+    let reset = match p.get("reset") {
+        None | Some(Value::Null) => false,
+        Some(Value::Bool(b)) => *b,
+        Some(v) => return Err(bad(c, format!("`reset` is true or false, not {v}"))),
+    };
+    if reset {
+        if !s.model.object_styles.is_empty() {
+            s.model_mut().object_styles.clear();
+        }
+    } else if let Some(v) = p.get("categories").filter(|v| !v.is_null()) {
+        /// What a category is given: a pen or both.
+        #[derive(serde::Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Given {
+            projection: Option<crate::pen::Pen>,
+            cut: Option<crate::pen::Pen>,
+        }
+        let given: BTreeMap<String, Given> = serde_json::from_value(v.clone())
+            .map_err(|e| bad(c, format!("`categories` is {{category: {{projection?: pen, cut?: pen}}, …}}: {e}")))?;
+        let mut styles = s.model.object_styles.clone();
+        for (cat, g) in given {
+            crate::styles::known(&cat).map_err(|e| bad(c, e))?;
+            let was = s.model.object_style(&cat);
+            let style = crate::styles::ObjectStyle { projection: g.projection.unwrap_or(was.projection), cut: g.cut.unwrap_or(was.cut) };
+            style.check(&cat).map_err(|e| bad(c, e))?;
+            if style == crate::styles::default_of(&cat) {
+                styles.remove(&cat);
+            } else {
+                styles.insert(cat, style);
+            }
+        }
+        if styles != s.model.object_styles {
+            s.model_mut().object_styles = styles;
+        }
+    }
+    let m = &s.model;
+    let all: Vec<Value> = crate::graphics::MODEL
+        .iter()
+        .map(|cat| {
+            let st = m.object_style(cat);
+            json!({"category": cat, "projection": st.projection, "cut": st.cut, "own": m.object_styles.contains_key(*cat)})
+        })
+        .collect();
+    Ok(json!({"categories": all}))
 }
 
 fn inspect(s: &mut Session, _: &Value) -> R {

@@ -39,6 +39,7 @@ icon_names! {
     ZoomOut,
     ThinLines,
     LineWeights,
+    ObjectStyles,
     Schedule,
     CloseInactive,
     Interface,
@@ -266,6 +267,12 @@ pub fn outlines(icon: Icon, compact: bool) -> Vec<Outline> {
             g.line(&[(3.0, 5.0), (21.0, 5.0)]);
             g.closed(&[(3.0, 9.0), (21.0, 9.0), (21.0, 12.0), (3.0, 12.0)]);
             g.closed(&[(3.0, 15.0), (21.0, 15.0), (21.0, 21.0), (3.0, 21.0)]);
+        }
+        Icon::ObjectStyles => {
+            // A wall cut, hatched, and a lighter one seen beyond it.
+            g.closed(&[(4.0, 4.0), (10.0, 4.0), (10.0, 20.0), (4.0, 20.0)]);
+            g.line(&[(4.0, 20.0), (10.0, 4.0)]);
+            g.closed(&[(14.0, 8.0), (20.0, 8.0), (20.0, 20.0), (14.0, 20.0)]);
         }
         Icon::Schedule => {
             g.closed(&[(3.0, 4.0), (21.0, 4.0), (21.0, 20.0), (3.0, 20.0)]);
