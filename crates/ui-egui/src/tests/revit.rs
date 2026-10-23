@@ -384,6 +384,41 @@ fn what_came_in_is_listed_the_most_numerous_first() {
 }
 
 #[test]
+fn the_report_as_text_has_everything_the_window_shows_however_long_it_is() {
+    let notes: Vec<String> =
+        (0..120).map(|k| format!("1 door left out, door {k} and door {} overlap in wall 34 (ids {})", k + 1, 1000 + k)).collect();
+    let all = notes.clone();
+    let mut r = rig(move || Ok(survey(&notes.iter().map(String::as_str).collect::<Vec<_>>())));
+    r.open("/projects/house.rvt");
+    r.done();
+    let copied = r.h.state().revit_report.as_ref().unwrap().text();
+    assert!(copied.starts_with("house.rvt · Revit 2024\n\nCame in: "), "{copied}");
+    assert!(copied.contains("\nLeft out: 120\n"), "{copied}");
+    for note in &all {
+        assert!(copied.contains(&format!("• {note}\n")), "the note `{note}` with its ids, on one line");
+    }
+}
+
+#[test]
+fn copy_report_says_it_was_pressed_with_a_long_list_under_it_too() {
+    let notes: Vec<String> =
+        (0..120).map(|k| format!("1 door left out, door {k} and door {} overlap in wall 34 (ids {})", k + 1, 1000 + k)).collect();
+    let mut r = rig(move || Ok(survey(&notes.iter().map(String::as_str).collect::<Vec<_>>())));
+    r.open("/projects/house.rvt");
+    r.done();
+    // The first frames of a window are laid out smaller.
+    r.h.run();
+    r.h.run();
+    assert!(r.h.query_by_label("Copy Report").is_some() && r.h.query_by_label("Copied").is_none());
+    // The accessibility click: a pointer click at the button's middle misses it in this harness once the list is this long.
+    r.h.get_by_label("Copy Report").click_accesskit();
+    r.h.run();
+    let (copied, report) = (r.h.query_by_label("Copied").is_some(), r.h.query_by_label("Copy Report").is_some());
+    assert!(copied && !report, "the button says it was pressed: Copied {copied}, Copy Report {report}");
+    assert!(r.h.state().report_open(), "and the report stays up");
+}
+
+#[test]
 fn a_long_report_scrolls_inside_the_window_and_leaves_its_close_button_on_screen() {
     let notes: Vec<String> =
         (0..120).map(|k| format!("1 door left out, door {k} and door {} overlap in wall 34 (ids {})", k + 1, 1000 + k)).collect();
