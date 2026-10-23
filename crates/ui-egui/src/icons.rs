@@ -141,6 +141,7 @@ icon_names! {
     Search,
     Legend,
     Home,
+    Back,
     NewFile,
     Code,
     Check,
@@ -1088,6 +1089,11 @@ pub fn outlines(icon: Icon, compact: bool) -> Vec<Outline> {
             g.line(&[(3.0, 11.0), (12.0, 3.0), (21.0, 11.0)]);
             g.line(&[(5.0, 9.222222), (5.0, 21.0), (19.0, 21.0), (19.0, 9.222222)]);
             g.line(&[(10.0, 21.0), (10.0, 15.0), (14.0, 15.0), (14.0, 21.0)]);
+        }
+        Icon::Back => {
+            // An arrow pointing left: back where you were.
+            g.line(&[(20.0, 12.0), (4.5, 12.0)]);
+            g.line(&[(10.5, 6.0), (4.5, 12.0), (10.5, 18.0)]);
         }
         Icon::NewFile => {
             g.closed(&[(5.0, 3.0), (14.0, 3.0), (19.0, 8.0), (19.0, 21.0), (5.0, 21.0)]);
