@@ -1,8 +1,11 @@
 //! The system's file dialogs. One run inside the window's event handler nests a run loop of its own in it, and on macOS
-//! a drag that reaches the window meanwhile re-enters the handler and aborts the app (issue 43). So a dialog is taken on a
-//! thread of its own, the window keeps its event loop, and the path comes back in a later frame.
+//! a drag that reaches the window meanwhile re-enters the handler and aborts the app (issue 43). So a dialog is only begun on
+//! the window's thread (AppKit wants that, and the sheet it opens does not block) and waited for on a thread of its own: the
+//! window keeps its event loop, and the path comes back in a later frame.
 
+use std::future::Future;
 use std::path::PathBuf;
+use std::pin::Pin;
 use std::sync::mpsc::{Receiver, TryRecvError, channel};
 
 use egui::Context;
@@ -33,8 +36,12 @@ impl BimApp {
         }
         let (tx, answer) = channel();
         let ctx = ctx.clone();
+        // Made here, on the window's thread: on macOS that is where the dialog is begun (its sheet opens at once and does not
+        // block), and only waiting for it is done on the thread below.
+        let future: Pin<Box<dyn Future<Output = Option<rfd::FileHandle>> + Send>> =
+            if save { Box::pin(dialog.save_file()) } else { Box::pin(dialog.pick_file()) };
         std::thread::spawn(move || {
-            let file = pollster::block_on(async { if save { dialog.save_file().await } else { dialog.pick_file().await } });
+            let file = pollster::block_on(future);
             let _ = tx.send(file.map(|f| f.path().to_path_buf()));
             ctx.request_repaint();
         });
