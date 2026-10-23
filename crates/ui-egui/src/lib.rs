@@ -8,6 +8,7 @@
 mod browser;
 mod canvas;
 mod context;
+pub mod control;
 mod dialog;
 mod dock;
 mod editor;
@@ -558,6 +559,8 @@ pub struct BimApp {
     /// The reader of Revit files, which the desktop app attaches (`bimcraft-rvt` is Apache-2.0 only, so this crate never depends on
     /// it): a window starts without one, so it offers no `.rvt` and a test never reads a real one.
     pub revit: Option<revit::Importer>,
+    /// The control port, when the window was started with one: agents work on this project through it.
+    control: Option<control::Control>,
     /// The Revit file being read, on a thread of its own.
     revit_job: Option<revit::Job>,
     /// Files to open at the next frame: the command line's, and what the system asked for while a Revit file was being read.
@@ -853,6 +856,7 @@ impl BimApp {
             styled: false,
             updates: None,
             revit: None,
+            control: None,
             revit_job: None,
             opens: Vec::new(),
             dialog: None,
@@ -1008,6 +1012,7 @@ impl BimApp {
         self.os_requests(&ctx);
         self.dialog_answered();
         self.watch_window(&ctx);
+        self.answer_agents(&ctx);
         let view = self.view_title(self.sheet);
         let title = format!("{}{} · {view} · BIMCraft", self.session.model.name, if self.dirty() { "*" } else { "" });
         if title != self.title {
@@ -2004,6 +2009,7 @@ impl BimApp {
         (fresh.settings_path, fresh.settings_kept) = (self.settings_path.take(), self.settings_kept.take());
         fresh.window = std::mem::take(&mut self.window);
         (fresh.updates, fresh.revit) = (self.updates.take(), self.revit.take());
+        fresh.control = self.control.take();
         fresh.opens = std::mem::take(&mut self.opens);
         (fresh.recent, fresh.recent_path) = (std::mem::take(&mut self.recent), self.recent_path.take());
         fresh.autosave = std::mem::take(&mut self.autosave);

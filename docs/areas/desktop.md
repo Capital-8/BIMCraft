@@ -29,6 +29,16 @@ still for half a second, and writes nothing for a window left as it started; `ma
 changed) is made smaller, once, in the first frame that knows the screen (`fitted`: 96% by 90% of it, never below the least a
 window can be), and centred when it has taken the size.
 
+The control port (`control.rs`, issue 41) is how an agent works on the project the window has open: `bimcraft --control PORT` binds
+only 127.0.0.1, makes a token of 128 random bits and writes both to `bridge.json` beside the favorites (for the user alone; the
+window takes it away when it closes), and `bimcraft-cli mcp --connect` runs its tools on the window's session. The protocol, and
+what an agent may not do (`bridge::REFUSED`: `new`, `open`, `recover`, `highrise`, by any name, and a script is read through before it
+runs), are `bimcraft_core::bridge`. A connection thread reads a line (at most 16 MB), checks the token, and hands the request to the
+window through a channel; `BimApp::answer_agents` runs it in the frame as `BimApp::run` runs a button's command (`made_in`, then
+`Session::execute`) and sends the reply back, up to sixteen a frame, and not while a file is being read or an update installed. A
+request wakes the window (`Context::request_repaint`, from the context the first frame left in a `OnceLock`). Eight connections at
+most, ten seconds to say the first line. A test (`tests/control.rs`) plays the agent on a real connection while the harness runs frames.
+
 What a view hides or reveals for now (Temporary Hide/Isolate, Reveal Hidden Elements; `footer.rs`) is the window's, per `Sheet`, never the
 project's: the plan, the section and the 3D view draw `BimApp::view_model`, a copy of the model whose view graphics went through the `graphics`
 command on a scratch `Session`, made once for each model and each setting. A tool that needs the view's real model (select all, commands)

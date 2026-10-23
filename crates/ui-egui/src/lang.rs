@@ -110,6 +110,11 @@ pub fn category(category: &str, several: bool) -> String {
 /// names and headings) besides.
 const WORDS: &[[&str; 3]] = &[
     ["Autosave", "Salvamento automático", "Guardado automático"],
+    [
+        "An agent can work on this project: bimcraft-cli mcp --connect {}",
+        "Um agente pode trabalhar neste projeto: bimcraft-cli mcp --connect {}",
+        "Un agente puede trabajar en este proyecto: bimcraft-cli mcp --connect {}",
+    ],
     ["Autosave in the background", "Salvar automaticamente em segundo plano", "Guardar automáticamente en segundo plano"],
     ["Recover Autosave…", "Recuperar salvamento automático…", "Recuperar guardado automático…"],
     ["Recovery copy found", "Cópia de recuperação encontrada", "Copia de recuperación encontrada"],

@@ -101,7 +101,7 @@ One line per module: what it owns. Read the module's file and, for the areas it 
 
 `crates/core` (`bimcraft-core`; its own notes: [crates/core/CLAUDE.md](crates/core/CLAUDE.md)):
 
-- `commands.rs`: every command (`ALL`): what the CLI, scripts and MCP run. `engine.rs`: `Session`, which runs them (rollback, undo).
+- `commands.rs`: every command (`ALL`): what the CLI, scripts and MCP run. `engine.rs`: `Session`, which runs them (rollback, undo). `bridge.rs`: the control port's protocol, which the window and `mcp --connect` share.
 - `model.rs`: the model: elements, types, `Model::check` and the queries on it. `ids.rs`: element ids and GUIDs. `library.rs`: types, materials and families as entries with ids and GUIDs.
 - `walls.rs` (`walls/index.rs`): wall axes, faces, mitred caps, outlines. `skeleton.rs`: the straight skeleton (roofs by footprint). `stairs.rs`: stairs, ramps, railings. `runs.rs`: beams, pipes, conduits and the other straight runs. `geom.rs`: plan geometry. `snap.rs`: where a picked point lands. Areas: [levels, walls and roofs](docs/areas/levels-walls-roofs.md), [structure and MEP](docs/areas/structure-and-mep.md).
 - `render.rs`: plans (a display list drawn to SVG and PNG, and picking). `view3d.rs`: the 3D scene, its software rasterizer and picking; `view3d/gpu.rs`: its mesh and picking for the graphics card. `sheet.rs`, `pdf.rs`: sheets and their PDF. `font.rs`: our own lettering. Area: [views and graphics](docs/areas/views-and-graphics.md).
@@ -113,7 +113,7 @@ One line per module: what it owns. Read the module's file and, for the areas it 
 
 `crates/ui-egui` (`bimcraft-ui-egui`, a thin shell over the core; notes: [crates/ui-egui/CLAUDE.md](crates/ui-egui/CLAUDE.md); area: [the desktop](docs/areas/desktop.md)):
 
-- `lib.rs`: the app: ribbon, menus, tools, tabs, files. `canvas.rs`: the plan canvas (picks, tools, grips). `orbit.rs`: the 3D view; `gpu.rs` and `gpu.wgsl`: drawing it on the graphics card. `section.rs`, `paper.rs`: sections and sheets. `properties.rs`: the Properties palette. `browser.rs`: the Project Browser. `dock.rs`: docking palettes and floating views. `settings.rs`: File > Settings. `start.rs`: the start page. `context.rs`: the right-click menu. `dialog.rs`: the file dialogs, on a thread of their own. `window.rs`: the window's size, kept and fitted to its screen.
+- `lib.rs`: the app: ribbon, menus, tools, tabs, files. `canvas.rs`: the plan canvas (picks, tools, grips). `orbit.rs`: the 3D view; `gpu.rs` and `gpu.wgsl`: drawing it on the graphics card. `section.rs`, `paper.rs`: sections and sheets. `properties.rs`: the Properties palette. `browser.rs`: the Project Browser. `dock.rs`: docking palettes and floating views. `settings.rs`: File > Settings. `start.rs`: the start page. `context.rs`: the right-click menu. `dialog.rs`: the file dialogs, on a thread of their own. `window.rs`: the window's size, kept and fitted to its screen. `control.rs`: the control port, agents working on the window's project.
 - `graphics.rs`, `footer.rs`, `phasing.rs`: Visibility/Graphics, the view control bar, Phasing. `inquiry.rs`, `recent.rs`, `autosave.rs`, `updates.rs`, `revit.rs`: Manage > Inquiry, Open Recent, autosave and recovery, the update banner, Revit files.
 - `links.rs`: Link Model. `structure.rs`, `mep.rs`: the Structure tab and the discipline tabs. `editor.rs`, `favorites.rs`: the Family Editor and Favorites. `style.rs`: look and feel, light and dark. `icons.rs`: the icons, drawn in code (`--example icon_catalog` exports them). `lang.rs`: every label's Portuguese and Spanish (`WORDS`). `tests.rs`, `tests/`: the app driven as a user does.
 
@@ -121,7 +121,7 @@ One line per module: what it owns. Read the module's file and, for the areas it 
 
 `crates/rvt` (the Revit file reader, Apache-2.0 only; notes: [crates/rvt/CLAUDE.md](crates/rvt/CLAUDE.md); area: [Revit files](docs/areas/revit-import.md)): one module for each part of a file (`container`, `gzip`, `records`, `schema`, `inventory`) and for each element kind it imports (`walls`, `floors`, `roofs`, `columns`, `openings`, `rooms`), joined by `import.rs`.
 
-`apps/bimcraft` (the desktop: `main.rs`, `startup.rs`: the log and the graphics fallback) and `apps/bimcraft-cli` (`main.rs`; `mcp.rs` the MCP server; `revit.rs`); notes: [apps/CLAUDE.md](apps/CLAUDE.md). More: `packaging/` (installers and packages: [packaging](docs/areas/packaging.md)), `docs/` (design notes), `.github/workflows/` (CI on every pull request, and the release).
+`apps/bimcraft` (the desktop: `main.rs`, `startup.rs`: the log and the graphics fallback) and `apps/bimcraft-cli` (`main.rs`; `mcp.rs` the MCP server; `window.rs`: `mcp --connect`; `revit.rs`); notes: [apps/CLAUDE.md](apps/CLAUDE.md). More: `packaging/` (installers and packages: [packaging](docs/areas/packaging.md)), `docs/` (design notes), `.github/workflows/` (CI on every pull request, and the release).
 
 ## Keep the agent docs layered
 
