@@ -59,7 +59,7 @@ use serde_json::{Value, json};
 use bimcraft_core::language::Language;
 mod autosave;
 use icons::Icon;
-use lang::{t, tf};
+use lang::{Lang, t, tf};
 use style::pal;
 
 /// A view: what the middle of the window shows.
@@ -347,7 +347,9 @@ pub struct BimApp {
     pub selection: Vec<Id>,
     pub status: Status,
     /// The interface's language: English unless told otherwise (the app asks the environment).
-    pub lang: Language,
+    pub lang: Lang,
+    /// Where a font with Chinese glyphs comes from, when the window is put in Chinese.
+    font_finder: lang::FontFinder,
     /// The views docked as tabs, and the one of them the views' area shows: the active view, unless that floats.
     views: Vec<Sheet>,
     front: Sheet,
@@ -796,7 +798,8 @@ impl BimApp {
             tag_label: String::new(),
             note_text: String::new(),
             units,
-            lang: Language::English,
+            lang: Lang::English,
+            font_finder: lang::chinese_font,
             typed_length: String::new(),
             dim_edit: None,
             temporary: HashMap::new(),
@@ -1003,6 +1006,11 @@ impl BimApp {
             ctx.set_theme(theme);
         }
         style::follow(&ctx);
+        // Chinese needs a font with its glyphs, which the system may not have: then the window stays in English and says why.
+        if self.lang == Lang::Chinese && !lang::use_chinese_font(&ctx, self.font_finder) {
+            self.lang = Lang::English;
+            self.status = updates::failed(t(lang::NO_CHINESE_FONT).to_string());
+        }
         lang::set(self.lang);
         // What agents asked of the project comes before the tidying, which puts right what a command left stale.
         self.answer_agents(&ctx);
@@ -2006,6 +2014,7 @@ impl BimApp {
         fresh.status = std::mem::take(&mut self.status);
         fresh.os_events = self.os_events.take();
         (fresh.thin, fresh.lang, fresh.snaps, fresh.ribbon_min) = (self.thin, self.lang, self.snaps, self.ribbon_min);
+        fresh.font_finder = self.font_finder;
         fresh.docking = std::mem::take(&mut self.docking);
         (fresh.settings_path, fresh.settings_kept) = (self.settings_path.take(), self.settings_kept.take());
         fresh.window = std::mem::take(&mut self.window);
@@ -2056,7 +2065,7 @@ impl BimApp {
             Pending::Recover(backup) => self.recover_backup(backup),
             Pending::New => {
                 // In the interface's language: its levels named in it.
-                if self.run("new", json!({"language": self.lang.code()})).is_some() {
+                if self.run("new", json!({"language": self.lang.project().code()})).is_some() {
                     self.retire_autosave();
                     self.reopened();
                     self.autosave_document();
@@ -2630,9 +2639,9 @@ impl BimApp {
                 }
                 ui.separator();
                 ui.label(RichText::new(t("Language")).color(pal().muted));
-                for l in Language::ALL {
+                for l in Lang::ALL {
                     if ui.selectable_label(self.lang == l, l.label()).clicked() {
-                        self.lang = l;
+                        self.set_lang(ui.ctx(), l);
                     }
                 }
             });

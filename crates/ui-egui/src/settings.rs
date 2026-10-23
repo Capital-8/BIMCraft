@@ -6,13 +6,12 @@
 
 use std::path::{Path, PathBuf};
 
-use bimcraft_core::language::Language;
 use egui::{Align, ComboBox, Context, Id as UiId, Layout, Modal, RichText, ScrollArea, ThemePreference, Ui, vec2};
 use serde_json::{Value, json};
 
 use crate::BimApp;
 use crate::dock::{Docking, Palette};
-use crate::lang::t;
+use crate::lang::{Lang, t};
 use crate::style::pal;
 use crate::updates::failed;
 
@@ -27,8 +26,8 @@ pub fn beside(favorites: &Path) -> PathBuf {
 }
 
 /// The interface's language the settings file at `path` keeps, if it keeps one: a blank project starts in it.
-pub fn language_in(path: &Path) -> Option<Language> {
-    read(path)?["language"].as_str().and_then(Language::from_code)
+pub fn language_in(path: &Path) -> Option<Lang> {
+    read(path)?["language"].as_str().and_then(Lang::from_code)
 }
 
 /// How the window was left: its size in points and whether it was maximized.
@@ -69,7 +68,7 @@ pub fn window_in(path: &Path) -> Option<Window> {
 #[derive(Clone, Debug, PartialEq)]
 pub struct Settings {
     pub theme: ThemePreference,
-    pub language: Language,
+    pub language: Lang,
     pub ribbon_minimized: bool,
     pub docking: Docking,
     pub autosave_minutes: u32,
@@ -107,7 +106,7 @@ impl Settings {
         };
         Settings {
             theme,
-            language: v["language"].as_str().and_then(Language::from_code).unwrap_or(base.language),
+            language: v["language"].as_str().and_then(Lang::from_code).unwrap_or(base.language),
             ribbon_minimized: v["ribbon_minimized"].as_bool().unwrap_or(base.ribbon_minimized),
             docking: if v["palettes"].is_object() { Docking::from_json(&v["palettes"]) } else { base.docking },
             autosave_minutes: v["autosave_minutes"].as_u64().filter(|n| *n <= 120).map_or(base.autosave_minutes, |n| n as u32),
@@ -165,6 +164,16 @@ impl Page {
 }
 
 impl BimApp {
+    /// Puts the interface in `lang`. Chinese needs a font with its glyphs: where the system has none the language stays as it was, and
+    /// the status says why.
+    pub(crate) fn set_lang(&mut self, ctx: &Context, lang: Lang) {
+        if lang == Lang::Chinese && !crate::lang::use_chinese_font(ctx, self.font_finder) {
+            self.status = failed(t(crate::lang::NO_CHINESE_FONT).to_string());
+        } else {
+            self.lang = lang;
+        }
+    }
+
     /// Keeps the settings in `path`: what it holds now, and from now on what changes.
     pub fn use_settings(&mut self, path: PathBuf) {
         let now = self.settings_now(ThemePreference::System);
@@ -260,8 +269,10 @@ impl BimApp {
         }
         heading(ui, "Language");
         ComboBox::from_id_salt("settings-language").selected_text(self.lang.label()).width(200.0).show_ui(ui, |ui| {
-            for l in Language::ALL {
-                ui.selectable_value(&mut self.lang, l, l.label());
+            for l in Lang::ALL {
+                if ui.selectable_label(self.lang == l, l.label()).clicked() {
+                    self.set_lang(ctx, l);
+                }
             }
         });
         heading(ui, "Ribbon");

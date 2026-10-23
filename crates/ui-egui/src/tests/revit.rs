@@ -340,7 +340,7 @@ fn an_import_that_left_nothing_out_opens_no_report_but_has_one_to_read() {
 #[test]
 fn the_report_speaks_the_interface_language_and_keeps_the_importers_notes_as_they_are() {
     let mut r = rig(|| Ok(survey(&NOTES)));
-    r.h.state_mut().lang = bimcraft_core::language::Language::Portuguese;
+    r.h.state_mut().lang = crate::lang::Lang::Portuguese;
     r.open("/projects/house.rvt");
     r.done();
     r.h.run();
