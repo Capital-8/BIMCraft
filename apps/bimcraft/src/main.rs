@@ -8,16 +8,19 @@ use std::process::ExitCode;
 
 use bimcraft_core::engine::Session;
 use bimcraft_core::sample::SAMPLE;
+use bimcraft_ui_egui::control::Control;
 use bimcraft_ui_egui::revit::{Importer, is_revit};
 use bimcraft_ui_egui::{BimApp, Status, lang};
 use serde_json::json;
 
 mod startup;
 
-const USAGE: &str = "USAGE: bimcraft [FILE] [--sample | --highrise]
+const USAGE: &str = "USAGE: bimcraft [FILE] [--sample | --highrise] [--control PORT]
   FILE       a .bimcraft project to open, or an .ifc or .rvt (Revit) file to import
   --sample   start on the sample house
   --highrise start on the original 20-storey performance sample
+  --control  let an agent work on this window's project: `bimcraft-cli mcp --connect PORT` (0: any free port). Only this
+             machine can reach it, and the port and a token are in bridge.json beside the favorites
   --version  the release
 
 It looks for a newer version when it starts (File > Check for updates at startup switches that off).
@@ -26,6 +29,15 @@ Set BIMCRAFT_NO_UPDATE_CHECK=1 and it never makes a request.";
 /// What the desktop knows the app by: Wayland's app id and X11's window class, which a Linux desktop
 /// matches to the `.desktop` file of that name for the window's icon, and the macOS bundle's identifier.
 const APP_ID: &str = "io.github.ipedrax.bimcraft";
+
+/// The arguments without `--control PORT`, and the port it names: a number, 0 for one that is free.
+fn control_port(mut args: Vec<String>) -> Result<(Vec<String>, Option<u16>), String> {
+    let Some(at) = args.iter().position(|a| a == "--control") else { return Ok((args, None)) };
+    args.remove(at);
+    let port = (at < args.len()).then(|| args.remove(at)).ok_or("--control needs a port")?;
+    let port = port.parse().map_err(|_| format!("`{port}` is not a port: a number up to 65535, or 0 for one that is free"))?;
+    Ok((args, Some(port)))
+}
 
 fn main() -> ExitCode {
     // An update runs the installer from a copy of this program, once the app has exited: nothing else here applies to it.
@@ -38,9 +50,16 @@ fn main() -> ExitCode {
     let language = settings.as_deref().and_then(bimcraft_ui_egui::settings::language_in).unwrap_or_else(lang::from_env);
     // The window starts at the size it was left at; if that is too big for the screen the window brings itself within it (`window.rs`).
     let window = settings.as_deref().and_then(bimcraft_ui_egui::settings::window_in).unwrap_or_default();
+    let (args, control) = match control_port(std::env::args().skip(1).collect()) {
+        Ok(taken) => taken,
+        Err(e) => {
+            eprintln!("bimcraft: {e}\n\n{USAGE}");
+            return ExitCode::FAILURE;
+        }
+    };
     let mut session = Session::new();
     // A blank project starts in the interface's language: its levels named in it.
-    if std::env::args().len() == 1 {
+    if args.is_empty() {
         let _ = session.execute("new", &json!({"language": language.code()}));
     }
     let mut problem = None;
@@ -48,7 +67,7 @@ fn main() -> ExitCode {
     // A Revit file takes minutes to read, so the window comes up first and reads it (`BimApp::open_later`): the last file wins.
     let mut later = None;
     let mut failed_project = None;
-    for arg in std::env::args().skip(1) {
+    for arg in &args {
         let done = match arg.as_str() {
             "-h" | "--help" => {
                 println!("{USAGE}");
@@ -93,7 +112,7 @@ fn main() -> ExitCode {
     let mut app = BimApp::new(session);
     app.lang = language;
     // Given nothing to open, the window opens on the start page.
-    if std::env::args().len() == 1 {
+    if args.is_empty() {
         app.show_start_page();
     }
     app.revit = revit_reader();
@@ -108,6 +127,16 @@ fn main() -> ExitCode {
         app.keep_recent_in(bimcraft_ui_egui::recent::beside(path));
         for file in &opened {
             app.note_recent(file);
+        }
+    }
+    // An agent can work on the window's project through the control port, when it was started with one.
+    if let Some(port) = control {
+        match Control::start(port, bimcraft_core::bridge::entry_path()) {
+            Ok(control) => {
+                eprintln!("bimcraft: an agent can work on this project: bimcraft-cli mcp --connect {}", control.entry.port);
+                app.use_control(control);
+            }
+            Err(e) => problem = Some(format!("couldn't listen on port {port} for an agent: {e}")),
         }
     }
     if let Some(text) = problem {
@@ -244,5 +273,32 @@ mod tests {
         let imported = bimcraft_rvt::import(&p.file(), "house").unwrap();
         let left: usize = imported.skipped.iter().filter_map(|n| bimcraft_ui_egui::revit::count_left_out(n)).sum();
         assert_eq!(left, 2, "{:?}", imported.skipped);
+    }
+}
+
+#[cfg(test)]
+mod control_tests {
+    use super::control_port;
+
+    fn control_args(text: &str) -> Vec<String> {
+        text.split_whitespace().map(String::from).collect()
+    }
+
+    #[test]
+    fn the_control_port_is_taken_out_of_the_arguments_wherever_it_stands() {
+        assert_eq!(control_port(control_args("house.bimcraft")), Ok((control_args("house.bimcraft"), None)));
+        assert_eq!(control_port(control_args("--control 7000 house.bimcraft")), Ok((control_args("house.bimcraft"), Some(7000))));
+        assert_eq!(
+            control_port(control_args("house.bimcraft --sample --control 0")),
+            Ok((control_args("house.bimcraft --sample"), Some(0)))
+        );
+        assert_eq!(
+            control_port(control_args("--control 65535")),
+            Ok((vec![], Some(65535))),
+            "nothing else: the start page and a new project"
+        );
+        for bad in ["--control", "--control x", "--control 70000", "--control -1", "a --control"] {
+            assert!(control_port(control_args(bad)).is_err(), "{bad}");
+        }
     }
 }

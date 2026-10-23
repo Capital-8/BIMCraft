@@ -443,6 +443,21 @@ or to any MCP client's configuration:
 A command that fails comes back as a tool error saying what to fix (`door: no wall at [4000, 3000] on Level 1`), and it
 changes nothing.
 
+### On the project you have open
+
+Start the window with `--control PORT` (`0` for any free port) and an agent can work on the project in front of you instead of
+a copy of its own: what it makes appears in the window, as an undo step you can take back, and is saved with Ctrl+S.
+
+```sh
+bimcraft --control 0                       # the window says the port; bridge.json beside the favorites holds it and a token
+claude mcp add bimcraft -- /path/to/bimcraft-cli mcp --connect
+```
+
+`mcp --connect` takes the port from that file (or `--connect PORT` names it, which must be the window's). The port is on this
+machine's own address only, a connection that does not say the token in its first line is dropped, and only the user can read
+the file. The tools are the same, except `new_model` and `open`, which would replace your project: start or open another in
+the window. The window answers between its frames, so a long command holds the window as it would from a button.
+
 ## Commands
 
 | Command | Shortcut | Parameters |
