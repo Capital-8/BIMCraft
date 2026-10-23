@@ -107,6 +107,30 @@ fn a_revit_file_the_system_opens_replaces_the_project_with_a_new_unsaved_one() {
     assert!(!status.error && status.text.starts_with("Opened from Revit 2024: "), "{status:?}");
 }
 
+/// A file dropped on the window, as the windowing layer hands it over.
+#[derive(Debug)]
+struct Dropped(PathBuf);
+
+impl egui::DroppedFile for Dropped {
+    fn path(&self) -> &Path {
+        &self.0
+    }
+
+    fn bytes(&self) -> Result<Vec<u8>, String> {
+        Err("a test's file is not read".into())
+    }
+}
+
+#[test]
+fn a_file_dropped_on_the_window_opens_like_one_the_system_asked_for() {
+    let mut r = rig(|| Ok(survey(&[])));
+    r.h.input_mut().dropped_files.push(Arc::new(Dropped("/projects/dropped.rvt".into())));
+    r.h.step();
+    r.done();
+    assert_eq!(r.project(), "Survey");
+    assert_eq!(*r.asked.lock().unwrap(), [PathBuf::from("/projects/dropped.rvt")]);
+}
+
 #[test]
 fn a_revit_file_named_on_the_command_line_is_opened_once_the_window_is_up() {
     let mut r = rig(|| Ok(survey(&[])));

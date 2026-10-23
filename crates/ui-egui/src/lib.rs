@@ -8,6 +8,7 @@
 mod browser;
 mod canvas;
 mod context;
+mod dialog;
 mod dock;
 mod editor;
 mod favorites;
@@ -558,6 +559,8 @@ pub struct BimApp {
     revit_job: Option<revit::Job>,
     /// Files to open at the next frame: the command line's, and what the system asked for while a Revit file was being read.
     opens: Vec<PathBuf>,
+    /// The file dialog that is open, if one is: it is on a thread of its own, and answers in a later frame.
+    dialog: Option<dialog::Dialog>,
     /// What the last Revit import left out and brought in, for as long as its project is the one open.
     revit_report: Option<revit::Report>,
 }
@@ -848,6 +851,7 @@ impl BimApp {
             revit: None,
             revit_job: None,
             opens: Vec::new(),
+            dialog: None,
             revit_report: None,
         }
     }
@@ -998,6 +1002,7 @@ impl BimApp {
         self.poll_autosave(&ctx);
         self.keys(&ctx);
         self.os_requests(&ctx);
+        self.dialog_answered();
         let view = self.view_title(self.sheet);
         let title = format!("{}{} · {view} · BIMCraft", self.session.model.name, if self.dirty() { "*" } else { "" });
         if title != self.title {
@@ -1172,9 +1177,9 @@ impl BimApp {
         }
         let pressed = |m: Modifiers, k: Key| ctx.input_mut(|i| i.consume_key(m, k));
         if pressed(Modifiers::COMMAND | Modifiers::SHIFT, Key::S) {
-            self.save_as();
+            self.save_as(ctx, None);
         } else if pressed(Modifiers::COMMAND, Key::S) {
-            self.save();
+            self.save(ctx, None);
         }
         if pressed(Modifiers::COMMAND, Key::O) {
             self.guard(Pending::Open, ctx);
@@ -1912,28 +1917,45 @@ impl BimApp {
         saved
     }
 
-    fn save(&mut self) -> bool {
+    /// Saves to the project's file, or asks where first. `then` is done once it is saved.
+    fn save(&mut self, ctx: &Context, then: Option<Pending>) {
         match self.session.path.clone() {
-            Some(p) => self.save_to(&p),
-            None => self.save_as(),
+            Some(p) => {
+                if self.save_to(&p)
+                    && let Some(then) = then
+                {
+                    self.proceed(then, ctx);
+                }
+            }
+            None => self.save_as(ctx, then),
         }
     }
 
-    fn save_as(&mut self) -> bool {
-        self.ask_path("BIMCraft project", "bimcraft").is_some_and(|p| self.save_to(&p))
+    fn save_as(&mut self, ctx: &Context, then: Option<Pending>) {
+        let later = ctx.clone();
+        self.ask_path(ctx, "BIMCraft project", "bimcraft", move |app, p| {
+            if app.save_to(&p)
+                && let Some(then) = then
+            {
+                app.proceed(then, &later);
+            }
+        });
     }
 
-    fn export(&mut self, what: &str, ext: &str) {
-        if let Some(p) = self.ask_path(what, ext) {
-            self.save_to(&p);
-        }
+    fn export(&mut self, ctx: &Context, what: &str, ext: &str) {
+        self.ask_path(ctx, what, ext, |app, p| {
+            app.save_to(&p);
+        });
     }
 
-    /// Where to save, from the system's file dialog, ending in `.ext`.
-    fn ask_path(&self, what: &str, ext: &str) -> Option<PathBuf> {
+    /// Asks, in the system's file dialog, where to save, and calls `then` with the path, ending in `.ext`, in a later frame.
+    fn ask_path(&mut self, ctx: &Context, what: &str, ext: &str, then: impl FnOnce(&mut BimApp, PathBuf) + 'static) {
         let name = format!("{}.{ext}", self.session.model.name.replace(['/', '\\'], "-"));
-        let p = rfd::FileDialog::new().add_filter(t(what), &[ext]).set_file_name(name).save_file()?;
-        Some(if p.extension().is_some_and(|e| e.eq_ignore_ascii_case(ext)) { p } else { p.with_extension(ext) })
+        let ext = ext.to_string();
+        let dialog = rfd::AsyncFileDialog::new().add_filter(t(what), &[&ext]).set_file_name(name);
+        self.ask_file(ctx, dialog, true, move |app, p| {
+            then(app, if p.extension().is_some_and(|e| e.eq_ignore_ascii_case(&ext)) { p } else { p.with_extension(&ext) });
+        });
     }
 
     /// Open a project, or import an IFC file and say what came in and what was left out.
@@ -1999,6 +2021,9 @@ impl BimApp {
                 OsEvent::Quit => self.guard(Pending::Close, ctx),
             }
         }
+        // A file dropped on the window opens as one the system asked for.
+        let dropped: Vec<PathBuf> = ctx.input(|i| i.raw.dropped_files.iter().map(|f| f.path().to_path_buf()).collect());
+        self.opens.extend(dropped);
         // A Revit file being read holds the files that come meanwhile, which are opened in turn once it is over: the last one wins.
         if !self.importing()
             && let Some(path) = self.opens.pop()
@@ -2030,9 +2055,10 @@ impl BimApp {
             Pending::Open => {
                 let revit = self.revit.is_some();
                 let name = t(if revit { "BIMCraft project, IFC or Revit" } else { "BIMCraft project or IFC" });
-                if let Some(path) = rfd::FileDialog::new().add_filter(name, &revit::open_extensions(revit)).pick_file() {
-                    self.open_path(&path);
-                }
+                let dialog = rfd::AsyncFileDialog::new().add_filter(name, &revit::open_extensions(revit));
+                self.ask_file(ctx, dialog, false, |app, path| {
+                    app.open_path(&path);
+                });
             }
             Pending::Close => {
                 self.retire_autosave();
@@ -2059,7 +2085,7 @@ impl BimApp {
                     self.guard(Pending::Open, &ctx);
                 }
                 if icon_button(ui, Icon::Save, "Save").clicked() {
-                    self.save();
+                    self.save(&ctx, None);
                 }
                 ui.separator();
                 if icon_button(ui, Icon::Undo, "Undo").clicked() {
@@ -2208,26 +2234,26 @@ impl BimApp {
         }
         self.recent_menu(ui, ctx);
         if item(ui, "Save", cmd(Key::S)) {
-            self.save();
+            self.save(ctx, None);
         }
         if item(ui, "Save As…", Some(KeyboardShortcut::new(Modifiers::COMMAND | Modifiers::SHIFT, Key::S))) {
-            self.save_as();
+            self.save_as(ctx, None);
         }
         if !self.autosave.candidates.is_empty() && item(ui, "Recover Autosave…", None) {
             self.autosave.show_recovery = true;
         }
         SubMenuButton::new(t("Export")).ui(ui, |ui| {
             if ui.button(t("IFC…")).clicked() {
-                self.export("IFC4", "ifc");
+                self.export(ctx, "IFC4", "ifc");
             }
             if ui.button(t("View as PNG…")).clicked() {
-                self.export("PNG image", "png");
+                self.export(ctx, "PNG image", "png");
             }
             if ui.button(t("Plan as SVG…")).clicked() {
-                self.export("SVG drawing", "svg");
+                self.export(ctx, "SVG drawing", "svg");
             }
             if ui.button(t("Sheets as PDF…")).clicked() {
-                self.export("PDF", "pdf");
+                self.export(ctx, "PDF", "pdf");
             }
         });
         self.report_menu(ui);
@@ -2812,13 +2838,15 @@ impl BimApp {
         if matches!(self.tool, Tool::Component | Tool::Fixture(_)) {
             panel(ui, "Mode", |ui| {
                 let tip = "Load Family: a family saved as a .json file, BIMCraft's own";
-                if big_button(ui, Icon::LoadFamily, "Load Family", false, tip).clicked()
-                    && let Some(path) = rfd::FileDialog::new().add_filter(t("BIMCraft family"), &["json"]).pick_file()
-                    && let Some(r) = self.run("family", json!({"path": path.to_string_lossy()}))
-                {
-                    let name = r["name"].as_str().unwrap_or_default().to_string();
-                    let first = r["family"]["types"].as_object().and_then(|t| t.keys().next().cloned()).unwrap_or_default();
-                    self.component = Some((name, first));
+                if big_button(ui, Icon::LoadFamily, "Load Family", false, tip).clicked() {
+                    let dialog = rfd::AsyncFileDialog::new().add_filter(t("BIMCraft family"), &["json"]);
+                    self.ask_file(ui.ctx(), dialog, false, |app, path| {
+                        if let Some(r) = app.run("family", json!({"path": path.to_string_lossy()})) {
+                            let name = r["name"].as_str().unwrap_or_default().to_string();
+                            let first = r["family"]["types"].as_object().and_then(|t| t.keys().next().cloned()).unwrap_or_default();
+                            app.component = Some((name, first));
+                        }
+                    });
                 }
             });
         }
@@ -3396,7 +3424,7 @@ impl BimApp {
         self.options_window(ctx);
         self.purge_window(ctx);
         if std::mem::take(&mut self.link_dialog) {
-            self.link_model_dialog();
+            self.link_model_dialog(ctx);
         }
         self.select_by_id_window(ctx);
         self.ids_of_selection_window(ctx);
@@ -3433,7 +3461,7 @@ impl BimApp {
             self.pending = None;
         }
         match choice {
-            Some(Choice::Save) if self.save() => self.proceed(pending, ctx),
+            Some(Choice::Save) => self.save(ctx, Some(pending)),
             Some(Choice::Discard) => self.proceed(pending, ctx),
             _ => {}
         }

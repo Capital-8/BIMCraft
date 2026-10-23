@@ -1531,6 +1531,8 @@ impl BimApp {
         // Save the material to the Favorites (true), or open them (false), once the window is done.
         let mut favorite: Option<bool> = None;
         let mut typed_wrong: Option<String> = None;
+        // The material that asked for a picture for its texture.
+        let mut picture: Option<String> = None;
         let released = ctx.input(|i| !i.pointer.any_down());
         let r = Modal::new(UiId::new("materials")).show(ctx, |ui| {
             ui.set_width(440.0);
@@ -1606,11 +1608,8 @@ impl BimApp {
                                 run = Some(json!({"name": d.picked, "texture": {"kind": k}}));
                             }
                         }
-                        let clicked = ui.selectable_label(now == Some(TextureKind::Image), t("Picture…")).clicked();
-                        if let Some(path) =
-                            clicked.then(|| rfd::FileDialog::new().add_filter(t("Pictures"), &["png", "jpg", "jpeg"]).pick_file()).flatten()
-                        {
-                            run = Some(json!({"name": d.picked, "texture": {"kind": "image", "path": path.to_string_lossy()}}));
+                        if ui.selectable_label(now == Some(TextureKind::Image), t("Picture…")).clicked() {
+                            picture = Some(d.picked.clone());
                         }
                     });
                     c.response.labelled_by(l.id);
@@ -1693,6 +1692,12 @@ impl BimApp {
         }
         if let Some(p) = run {
             self.run("material", p);
+        }
+        if let Some(material) = picture {
+            let dialog = rfd::AsyncFileDialog::new().add_filter(t("Pictures"), &["png", "jpg", "jpeg"]);
+            self.ask_file(ctx, dialog, false, move |app, path| {
+                app.run("material", json!({"name": material, "texture": {"kind": "image", "path": path.to_string_lossy()}}));
+            });
         }
         if let Some(n) = picked {
             (d.name, d.picked, d.color) = (n.clone(), n, None);
