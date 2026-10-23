@@ -17,8 +17,8 @@ its page greyed out (`later`).
 The system's file dialogs (Open, Save As, the exports, Load Family, Link Model, a material's picture) are asked for through
 `BimApp::ask_file` (`dialog.rs`), never with a blocking `rfd::FileDialog`: a native dialog run inside the window's event
 handler nests a run loop in it, and on macOS a drag reaching the window meanwhile re-enters the handler and aborts the app
-(issue 43). The dialog is taken on a thread of its own (`rfd::AsyncFileDialog`), `ask_file` is given what to do with the
-path, and `BimApp::dialog_answered` does it in a later frame (a cancel does nothing; one dialog is open at a time). A step
+(issue 43). The dialog (`rfd::AsyncFileDialog`) is begun on the window's thread, where AppKit wants it and where a sheet does not
+block, and waited for on a thread of its own; `ask_file` is given what to do with the path, and `BimApp::dialog_answered` does it in a later frame (a cancel does nothing; one dialog is open at a time). A step
 that goes on after a save (the unsaved-changes prompt's Save) is that `then`. A file dropped on the window is queued in
 `opens`, as one the system asked for. A test hands the app a `Dialog` whose answer it sends itself (`tests/dialog.rs`).
 
