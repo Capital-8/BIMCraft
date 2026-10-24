@@ -114,6 +114,49 @@ fn units_spacing_and_files_it_cant_take() {
 }
 
 #[test]
+fn several_files_come_in_as_one_scan_with_a_station_for_each() {
+    let mut s = Session::new();
+    // Two stations of one survey, metres, meeting at x = 4: one coloured, one not.
+    let east = scan("stations", "east.xyz", "0 0 0 255 0 0\n4 0 0 255 0 0\n");
+    let west = scan("stations", "west.xyz", "4 0 0\n8 0 2\n");
+    let r = run(&mut s, "point_cloud", json!({"path": [east, west]}));
+    assert_eq!((r["cloud"].as_str(), r["points"].as_u64(), r["read"].as_u64()), (Some("east"), Some(4), Some(4)), "{r}");
+    let origin: Vec<f64> = r["origin"].as_array().unwrap().iter().map(|v| v.as_f64().unwrap()).collect();
+    assert!(near([origin[0], origin[1], origin[2]], [4000.0, 0.0, 1000.0]), "{origin:?}");
+    let (lo, hi) = bounds(&s, r["id"].as_u64().unwrap());
+    assert!(near(lo, [-4000.0, 0.0, 0.0]) && near(hi, [4000.0, 0.0, 2000.0]), "{lo:?} {hi:?}");
+    let e = one(&mut s);
+    assert_eq!(e["stations"], json!([{"source": "east.xyz", "points": 2}, {"source": "west.xyz", "points": 2}]), "{e}");
+    // The station with no colours is grey among the one with.
+    let colours = s.model.clouds.get("east").unwrap().colours().unwrap().to_vec();
+    assert_eq!((colours[0], colours[2]), ([255, 0, 0], [crate::cloud::GREY; 3]));
+    // Where the stations overlap, a spacing keeps one point.
+    let r = run(&mut s, "point_cloud", json!({"path": [east, west], "name": "thinned", "spacing": 100}));
+    assert_eq!((r["points"].as_u64(), r["read"].as_u64()), (Some(3), Some(4)), "{r}");
+    let stations = s.model.clouds.get("thinned").unwrap().stations().to_vec();
+    assert_eq!(stations.iter().map(|t| t.points).collect::<Vec<_>>(), [2, 1]);
+    // Saved, it opens with its stations.
+    let before = s.model.clouds.clone();
+    let file = std::env::temp_dir().join(format!("bimcraft-cloud-{}-stations.bimcraft", std::process::id()));
+    run(&mut s, "save", json!({"path": file}));
+    let mut t = Session::new();
+    run(&mut t, "open", json!({"path": file}));
+    assert_eq!(t.model.clouds, before);
+    // A list of one is the file alone.
+    run(&mut s, "point_cloud", json!({"path": [east], "name": "alone"}));
+    assert!(s.model.clouds.get("alone").unwrap().stations().is_empty());
+    let many = vec![east.clone(); crate::cloud::MAX_STATIONS + 1];
+    for (p, says) in [
+        (json!({"path": []}), "path"),
+        (json!({"path": [east, 3], "name": "n"}), "path"),
+        (json!({"path": many, "name": "n"}), &crate::cloud::MAX_STATIONS.to_string()[..]),
+    ] {
+        let e = fails(&mut s, "point_cloud", p.clone());
+        assert!(e.contains(says), "{e}");
+    }
+}
+
+#[test]
 fn a_scan_is_brought_in_once_and_placed_as_often_as_wanted() {
     let mut s = Session::new();
     let path = scan("again", "box.xyz", BOX);

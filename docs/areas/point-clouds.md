@@ -17,6 +17,13 @@ it as `CloudFile`, the points as little-endian `f32` and the colours as bytes, e
 A project holds up to `MAX_CLOUDS` scans and `MAX_CLOUD_POINTS` points among them (`Model::check`), so the `point_cloud` command
 thins a new one to what the others leave.
 
+A survey's stations come in as one scan, as ReCap gathers a project's scans and Revit links the project: `path` may be a list of
+up to `MAX_STATIONS` files. Each is read with an even share of what the project leaves, and `cloud::merge` puts them about the
+middle of them all, keeps one point in each cube of `spacing` across them (so where stations overlap they aren't kept twice), and
+greys a file with no colours among ones with. The `Cloud` keeps a `Station` for each file, its name and its share of the points
+in order, so a view may one day show or hide a station; it is known by the first file's name, and the element's JSON lists the
+stations. A list of one is that file alone.
+
 A `PointCloud` element places a scan, as a component places a family: its `cloud` (a library name, a GUID in a file), its `level`,
 its middle at `at` and `offset` over the level, turned `angle` degrees about it; `Model::cloud_place` is that transform and
 `Model::cloud_box` the box round what it places. It holds no `params`, so phases, design options and paint don't reach it. It moves,
