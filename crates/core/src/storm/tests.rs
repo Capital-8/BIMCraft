@@ -134,7 +134,7 @@ mod command {
         assert_eq!(r["inside_mm"], json!(70.0), "under 70 mm on the chart: 70");
         let r = run(&mut s, json!({"kind": "downpipe", "area": 300, "gutter": 70, "length": 6350, "outlet": "funnel", "rainfall": 150}));
         assert_eq!(r["flow_lpm"], json!(750.0));
-        assert!(r["inside_mm"].as_f64().is_some_and(|d| d >= 70.0 && d < 100.0));
+        assert!(r["inside_mm"].as_f64().is_some_and(|d| (70.0..100.0).contains(&d)));
         let r = run(&mut s, json!({"kind": "horizontal", "flow": 1000, "slope": 0.01}));
         assert!(r["inside_mm"].as_f64().is_some_and(|d| d > 130.0 && d < 165.0));
         let r = run(&mut s, json!({"kind": "horizontal", "flow": 1000, "slope": 0.01, "inside": 144.8}));
