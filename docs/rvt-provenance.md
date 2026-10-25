@@ -140,7 +140,11 @@ Its README's legal claims were not copied and are not relied on.
 | A type's layers are a counted list after `ff ff ff ff` and the schema's tag of `VerticalRegionsStructure`, or after the type's name and a zero word: width in feet, material id, deck id, function (1 structure, 2 substrate, 3 thermal, 4 and 5 finish, 100 membrane, 200 deck); 37 bytes a record in 2024 and 2025, 29 up to 2023 (ids `u32`), 41 in 2026 and 2027 | rvt-rs `partition_compound_structure.rs` (RE-53, RE-112, RE-124) | architectural basic sample 2023, 2024, 2025: the layer widths and materials of all 47 walls equal rvt-rs's export, layer by layer (47 of 47). 2026 and 2027: synthetic only |
 | A material is an object `01 00 00 00` + id with the schema's tag of `Material` 0x47 bytes past a `u64` id (0x27 past a `u32`); its name is read by rules in order (its own name field, the string that ends at `PhysicalParamSet`, the first string framed by `PatternHelper`, the `-1001203` entry, and from 2024 the string closed by eight zero bytes, an id and `ff` ×8; up to 2023 also the first framed name in its own data) | rvt-rs `partition_materials.rs` (RE-58, RE-116, RE-125) | architectural basic sample 2023 to 2025: the material names on the layers of the 47 walls equal rvt-rs's, 47 of 47 |
 | A layer that names no material takes its category's, written in the object styles: the category id, an unset id, `01 00 00 00`, another unset id and the material (up to 2024); from the `i32` id and `ff` ×4 in 2023 and before | rvt-rs `partition_materials.rs` (`scan_category_material`, RE-91, RE-115) | not met on the samples (the layers of the 47 walls name their materials); synthetic only |
-| A sketched element's boundary is its sketch lines: records of the category `OST_SketchLines` (-2000045) whose second reference list ends in the sketched element's id, each with its curve (a bounded line, or an arc not marked by a word before it) as the first curve record of its data; before 2024 only their boxes are read, and a diagonal's two candidate ends are settled only when exactly one open pair fits | rvt-rs `element_record_plan_profiles.rs` (RE-25, RE-50, RE-96), `partition_beam_axes.rs` | architectural basic sample 2023 to 2025: all 8 floors and 2 ceilings close into the boundary rvt-rs's export has (the footprint areas equal to 0.005 m2, their tops and bottoms to 0.1 mm, their storeys); the structural sample's 5 floors at 2023 to 2026 the same. A floor has the level its list names and its top is its box's top; a ceiling's underside is its box's bottom |
+| A sketched element's boundary is its sketch lines: records of the category `OST_SketchLines` (-2000045) whose second reference list names the sketched element's id in any slot (first, in the middle or last, with whatever else the line meets after it; the owner is the one id of the list that is a floor, a ceiling or a roof: found here (not looked for in rvt-rs), in the bytes of the Snowdon Towers architectural sample, where a line's owner is often not the last id), each with its curve (a bounded line, or an arc not marked by a word before it) as the first curve record of its data; before 2024 only their boxes are read, and a diagonal's two candidate ends are settled only when exactly one open pair fits | rvt-rs `element_record_plan_profiles.rs` (RE-25, RE-50, RE-96), `partition_beam_axes.rs` | architectural basic sample 2023 to 2025: all 8 floors and 2 ceilings close into the boundary rvt-rs's export has (the footprint areas equal to 0.005 m2, their tops and bottoms to 0.1 mm, their storeys); the structural sample's 5 floors at 2023 to 2026 the same. A floor has the level its list names and its top is its box's top; a ceiling's underside is its box's bottom |
+| A sketch line's curve record reads twice, as a line and as an arc; the reading whose own extent is closest to the record's box on every side is the curve, the line where the two agree | Found here (not looked for in rvt-rs), from the bytes of the Snowdon Towers architectural sample, whose curved floors read as sketches that close nothing when the line reading was taken wherever its two ends lay inside the box | Snowdon Towers architectural 2024: the curved floors of the tower close into boundaries with their arcs; the sample files of 2023 to 2026 that rvt-rs's export covers read as before (the line and the arc agree on a straight line) |
+| A wall's first reference list may name the roof its top is attached to, with the levels it is constrained to; the wall is then cut by the roof's underside, as Revit draws it | Found here (not looked for in rvt-rs), from the bytes of the architectural basic sample, where the walls under a ridge came in as a box standing up to the ridge | architectural basic sample: the walls that name a roof come in cut by it (the note names their ids). Only a roof that is flat, or one by extrusion, is attached: a roof that rises, or one by face, comes in level as a stand-in, and a wall under it keeps its own box |
+| An element's data is read 256 KiB past its header (`data::WINDOW`); the location line of a long wall lies past 64 KiB | Found here (not looked for in rvt-rs), from the Snowdon Towers architectural sample, whose 102 ft rail wall and six-storey storefront walls hold more than 64 KiB of geometry | Snowdon Towers architectural 2024: the walls whose location line was cut off come in with the openings hosted in them |
+| A layer of a compound structure that has no width and is not a membrane (a structural deck, which takes its thickness from the layer above and writes none) adds nothing to its type's thickness and is not a layer of BIMCraft's type | Found here (not looked for in rvt-rs), from the Snowdon Towers structural sample | Snowdon Towers structural 2024: the floor type `NW Concrete on Metal Deck` has the thickness of its other layer, and the sample imports (it was refused whole for a layer of no thickness) |
 | A door's or window's host is a wall its first reference list names: the nearest below the record's own id that the opening fits in, else the nearest it names, skipping curtain walls; an opening whose only candidates are curtain walls has none, and one that names a roof or a floor is a skylight, which BIMCraft has no element for | rvt-rs `partition_schema_mvp.rs` (RE-23, RE-85, #439) | architectural basic sample 2023 to 2025: the host of every door and window rvt-rs's export sets in a wall is the wall this rule names (26 of 26), and the 7 openings with no host there name only curtain walls or no wall |
 | The hole a door or window cuts in a wall that runs along an axis is its instance's box along the wall (centre and width) and in height (the sill is the box's bottom less the wall's base) | rvt-rs `ifc` export (RE-93, RE-94), which cuts from the record box | architectural basic sample: the centre, width, bottom and top of the hole of each of the 25 openings that come in equal rvt-rs's cut to 0.2 mm, but for the ten windows that overlap their neighbours in the file (by up to 94 mm), which are narrowed to fit |
 | The hole a door or window cuts in a wall at an angle is solved from its instance's box, which is the axis-aligned extent of a rectangle turned to the wall: the width along the wall and the depth across it give an x extent of width·\|cos\| + depth·\|sin\| and a y extent of width·\|sin\| + depth·\|cos\|, and the box's middle is the opening's middle; a wall within about 3° of 45° (where the two extents say the same) or a box that is no turned rectangle (a width or depth that comes out below zero) gives none | BIMCraft: plain geometry on the box the row above reads, nothing more read from the file | Snowdon Towers architectural sample (Revit 2024): all 32 openings in angled walls (29 windows and 3 doors) come in, none of them refused by the model's rules; a synthetic case checks the width and the offset exactly (`tests/openings.rs`). No second reader's cut to compare with: the widths are geometry, not a finding checked against rvt-rs |
@@ -291,7 +295,7 @@ stand in for the comparison there).
 | Doors, windows | 16 (+15 symbols), 17 | 10, 15 | the host wall the same for all 25; centre, width, bottom and top to 0.2 mm (except ten windows rvt-rs cuts overlapping a neighbour by up to 94 mm, which BIMCraft refuses, so the pair is narrowed and the notes say so); the type name equal for 25 of 25 |
 | Columns | 3 (and 30 on the structural sample, 2024 to 2026) | 3 (30) | plan, size and bottom to 0.2 mm (rvt-rs's body is the record box cut by the walls it joins); the top where no slab was cut from it; the 2024 and later bottom of one column corrected from its geometry node |
 | Roofs | 2 | 2 (one by footprint, one by extrusion) | the footprint roof: storey, bottom, top and net area to 0.1 mm and 0.005 m2. rvt-rs's export draws the roof by extrusion as a level plate of its record box (5,726.517 to 9,198.677 mm over a plan 19,500 by 6,360 mm), so the box is the check, and BIMCraft's IFC export of it (IfcOpenShell, `express_rules=True`: no statement) is the record's box in x and y to 1 mm and at the bottom to 0.01 mm, and 5.6 mm taller at the ridge; its volume, 35.4241 m3, is 35.4236 m3 by hand from the file's own numbers |
-| Rooms | 14 | 9 (5 open to curtain walls or room separation lines, listed) | numbers and names equal for the nine |
+| Rooms | 14 | 10 (4 open to room separation lines, listed) | numbers and names equal for the nine rvt-rs writes; the tenth, 206, is closed by curtain walls, which come in as the plane of their boxes |
 
 BIMCraft's own IFC export of the imported 2024 sample (`bimcraft-cli run x.rvt --save out.ifc`), read back by IfcOpenShell:
 `express_rules=True` gives no statement, and all 47 walls, 8 slabs, 2 coverings, 10 doors, 15 windows, 3 columns, 1 roof and 9 spaces
@@ -303,20 +307,29 @@ skipped. The same holds for the structural sample (2023 to 2026) and the Snowdon
 
 ## What the reader does with what it cannot read
 
-Every sample now comes in with nothing left out: `racbasicsampleproject.rvt` (2023, 2024, 2025), `rstbasicsampleproject.rvt`
-(2023, 2024), `racadvancedsampleproject.rvt` (2026), `Snowdon Towers Sample Architectural.rvt` and `Snowdon Towers Sample
-Structural.rvt` (2024) each report as many elements in as their records hold of the categories the reader reads. Where the file
-says less than BIMCraft's element needs, the reader takes the nearest thing the file does say, and says so in the report; none of
-these fallbacks is a finding about the format, and none is checked against another reader:
+Where the file says less than BIMCraft's element needs, the reader may take the nearest thing the file does say and put the element
+in the project, and the report says what was not read of it. That is an approximation, not a finding about the format, none of
+these fallbacks is checked against another reader, and none of them counts as read whole. What the project cannot hold at all is
+left out and counted: `N kinds left out, why`, which the desktop adds up.
+
+Measured on the local copies of Autodesk's samples (the files are never committed; `BIMCRAFT_RVT_SAMPLES` names them):
+
+| Sample | Elements in | Left out |
+|---|---|---|
+| `racbasicsampleproject.rvt` (2023, 2024, 2025) | 118 | 6: 4 rooms the walls do not enclose, 2 skylights |
+| `Snowdon Towers Sample Structural.rvt` (2024) | 178 | 0 |
+| `Snowdon Towers Sample Architectural.rvt` (2024) | 1,791 | 84: 46 doors and windows that overlap a neighbour in their wall, 36 rooms the walls do not enclose, 2 levels inside other elements |
+
+Stand-ins, each told in the report with its ids:
 
 - A type with no compound structure (a curtain wall, a storefront, a tilted solar panel, a roof type of the 2026 sample) has no
   thickness: a wall takes the thickness its own box gives, and a floor, a ceiling or a roof the height of its box. The panels and
   mullions of a curtain wall, and the layers of such a type, are not read.
 - A floor, a ceiling or a roof whose box is taller than its type is thick is sloped or stepped: it comes in level, as thick as its
   type, at the bottom of its box. The slope blocks of the edges (rvt-rs RE-56) are not read, and no sample's slopes were compared
-  with another reader's.
-- A sketch whose lines do not close, whose loops cross, or one of whose lines has no curve the reader can read still makes a
-  floor: its open ends are joined by a straight line, and failing that it comes in as the footprint of its box.
+  with another reader's. A wall is never attached to such a roof, because the stand-in is not the roof its top would follow.
+- A sketch whose lines do not close joins its open ends by a straight line; one whose loops cross, or one of whose lines has no
+  curve, comes in as the footprint of its box. Such a floor's area is not the floor's, and the tests do not compare it.
 - A wall whose record holds no curve (a family instance of the wall category, a trellis member) comes in along the long side of
   its own box; one that names no type of the category comes in with a type of its own, as thick as its box says. A turned column
   whose family symbol's size is not known comes in as its box, turned.
@@ -324,11 +337,14 @@ these fallbacks is a finding about the format, and none is checked against anoth
   footprint of its own box.
 - An opening whose box overruns its wall - Revit's frame runs a few millimetres past the wall's box, a door through a wall the file
   cuts short - comes in as far as the wall goes. A sill within 2 mm below the wall's base is taken as zero.
-- A room no walls enclose (Revit's own not-enclosed room, or one whose sides are room separation lines, which BIMCraft has none of)
-  comes in at the middle of its box: it is a room of the file, with its name and number, and the plan draws whatever boundary the
-  walls there make.
-- A level inside another element (a group's, a family's) is no project level: the report names it and the project does not hold it.
-- A window set in a roof or a floor is a skylight: BIMCraft's windows stand in walls, so it is named in the report and not built.
+
+Left out and counted: a window set in a roof or a floor (a skylight; BIMCraft's windows stand in walls), a room no walls enclose
+(Revit's own not-enclosed room, or one bounded by room separation lines, which BIMCraft has none of: it comes in again when the
+walls enclose its box), a level inside another element (a group's, a family's), and an opening the model's rules refuse where it
+overlaps a neighbour in its wall. The last is the rule `Model::check` applies to every project: it counts two openings as
+overlapping where they share a place along the wall, whatever their heights, so a window over a door is refused. Letting openings
+overlap only where they also share a height would bring the 46 of the Snowdon sample in; that is a change of the model's rule,
+for every project, and is made on its own.
 
 ## Not verified
 
