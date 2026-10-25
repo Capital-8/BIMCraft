@@ -957,6 +957,18 @@ pub static ALL: &[Command] = &[
         vent_size,
     ),
     other(
+        "water_size",
+        "Size Cold Water Pipes",
+        "{fixtures?: {wc, lav, sink, shower, laundry: count}, flow?, method?: weights|sum, dn?, length?, fittings?: {elbow90, elbow45, \
+         tee_through, tee_side, gate, globe, check: count}, pressure?, rise?} a cold water pipe of PVC soldável as NBR 5626 asks. The \
+         flow is `flow` (L/s), or the design flow of the `fixtures` by the `method` the project chooses: weights (the empirical \
+         method, Q = 0.3 √ΣP, never more than the fixtures' own flows; the default) or sum (every fixture at once). Without `dn` it \
+         replies the smallest DN that keeps the speed within 3 m/s; with it, whether that pipe does. The head loss is Darcy-Weisbach \
+         (Colebrook, PVC at 20 °C) over `length` (m) plus the equivalent length of the `fittings`; with `pressure` (kPa, dynamic, \
+         upstream) and `rise` (m, up) it replies the pressure left at the end, 10 kPa at least at a point of use. It changes nothing",
+        water_size,
+    ),
+    other(
         "storm_size",
         "Size a Storm Drain",
         "{kind: downpipe|horizontal, area?, rainfall?, flow?, outlet?: edge|funnel, gutter?, length?, slope?, inside?} a storm drain as \
@@ -3104,6 +3116,91 @@ fn vent_size(_: &mut Session, p: &Value) -> R {
         out.insert("trap_to_vent_mm".into(), json!(mm));
     }
     Ok(Value::Object(out))
+}
+
+fn water_size(_: &mut Session, p: &Value) -> R {
+    use crate::water::{self, FITTINGS, FIXTURES, MAX_SPEED, MIN_USE_KPA, Method};
+    let c = "water_size";
+    let o = p.as_object().ok_or_else(|| bad(c, "params must be an object"))?;
+    const KEYS: &[&str] = &["fixtures", "flow", "method", "dn", "length", "fittings", "pressure", "rise"];
+    if let Some(key) = o.keys().find(|k| !KEYS.contains(&k.as_str())) {
+        return Err(bad(c, format!("unknown parameter `{key}`")));
+    }
+    let method = Method::parse(choice(c, p, "method", &["weights", "sum"], "weights")?).unwrap_or(Method::Weights);
+    let flow = match (absent(p.get("flow")), p.get("fixtures")) {
+        (false, f) if !absent(f) => return Err(bad(c, "give `flow` or `fixtures`, not both")),
+        (false, _) => within(c, p, "flow", 0.0, f64::MIN_POSITIVE, 1000.0)?,
+        (true, Some(Value::Object(f))) => {
+            let mut list: Vec<(&str, f64)> = Vec::new();
+            for (kind, n) in f {
+                if water::fixture(kind).is_none() {
+                    return Err(bad(
+                        c,
+                        format!("`fixtures`: no fixture `{kind}`, use {}", FIXTURES.iter().map(|x| x.0).collect::<Vec<_>>().join(", ")),
+                    ));
+                }
+                let n = n
+                    .as_f64()
+                    .filter(|n| n.is_finite() && *n >= 0.0 && *n <= 10_000.0 && n.fract() == 0.0)
+                    .ok_or_else(|| bad(c, format!("`fixtures`: `{kind}` must be a whole number from 0 to 10000, got {n}")))?;
+                list.push((kind.as_str(), n));
+            }
+            water::design_flow(method, &list)
+        }
+        (true, Some(v)) if !absent(Some(v)) => return Err(bad(c, format!("`fixtures` must be an object {{kind: count}}, got {v}"))),
+        _ => 0.0,
+    };
+    if flow <= 0.0 {
+        return Err(bad(c, "`flow` (L/s) or `fixtures` is required"));
+    }
+    let dn = if absent(p.get("dn")) {
+        water::smallest_dn(flow).ok_or_else(|| bad(c, "no DN of PVC soldável (20 to 110) keeps the speed within 3 m/s at that flow"))?
+    } else {
+        let dn = within(c, p, "dn", 0.0, 0.0, 1000.0)?;
+        water::inside(dn).map(|_| dn).ok_or_else(|| bad(c, "`dn` must be one of 20, 25, 32, 40, 50, 60, 75, 85, 110 (PVC soldável)"))?
+    };
+    let inside = water::inside(dn).ok_or_else(|| bad(c, "`dn` is not a PVC soldável size"))?;
+    let mut length = within(c, p, "length", 0.0, 0.0, 1.0e6)?;
+    match p.get("fittings") {
+        v if absent(v) => {}
+        Some(Value::Object(f)) => {
+            for (kind, n) in f {
+                let le = water::equivalent_length(dn, kind)
+                    .ok_or_else(|| bad(c, format!("`fittings`: no fitting `{kind}`, use {}", FITTINGS.join(", "))))?;
+                let n = n
+                    .as_f64()
+                    .filter(|n| n.is_finite() && *n >= 0.0 && *n <= 10_000.0 && n.fract() == 0.0)
+                    .ok_or_else(|| bad(c, format!("`fittings`: `{kind}` must be a whole number from 0 to 10000, got {n}")))?;
+                length += le * n;
+            }
+        }
+        Some(v) => return Err(bad(c, format!("`fittings` must be an object {{fitting: count}}, got {v}"))),
+        None => {}
+    }
+    let (speed, j) = water::head_loss(flow, inside, water::EPS_PVC);
+    let loss = j * length * water::KPA_PER_M;
+    let round = |x: f64, k: f64| (x * k).round() / k + 0.0;
+    let mut ok = speed <= MAX_SPEED + 1e-9;
+    let end = if absent(p.get("pressure")) {
+        None
+    } else {
+        let pressure = within(c, p, "pressure", 0.0, 0.0, 1.0e5)?;
+        let rise = within(c, p, "rise", 0.0, -1000.0, 1000.0)?;
+        let end = pressure - loss - rise * water::KPA_PER_M;
+        ok = ok && end >= MIN_USE_KPA;
+        Some(end)
+    };
+    Ok(json!({
+        "flow_lps": round(flow, 1000.0),
+        "dn": dn,
+        "inside_mm": round(inside, 10.0),
+        "speed_ms": round(speed, 100.0),
+        "head_loss_m_per_m": round(j, 1.0e5),
+        "equivalent_length_m": round(length, 100.0),
+        "loss_kpa": round(loss, 100.0),
+        "end_kpa": end.map(|e| round(e, 100.0)),
+        "ok": ok,
+    }))
 }
 
 fn storm_size(_: &mut Session, p: &Value) -> R {
