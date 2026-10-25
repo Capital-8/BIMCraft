@@ -28,6 +28,7 @@ pub mod library;
 pub mod link;
 pub mod massing;
 pub mod model;
+pub mod nbr5410;
 pub mod paint;
 pub mod pdf;
 pub mod pen;

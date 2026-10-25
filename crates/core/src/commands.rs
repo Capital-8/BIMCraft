@@ -906,6 +906,24 @@ pub static ALL: &[Command] = &[
         undoable: false,
     },
     other(
+        "circuit",
+        "Size a Circuit",
+        "{load, apparent?, demand?, power_factor?, phases?: FN|FF|3F|3FN, system?: 127/220|220/380|230/400, use?: lighting|power, length?, \
+         method?, insulation?: pvc|epr, conductor?: flexible|rigid, ambient?, grouped?, bundle?, spacing?, soil?, section?, breaker?, \
+         drop_limit?, reduced_neutral?} one electrical circuit sized as NBR 5410:2004 asks, for copper: `load` in W (or VA with \
+         `apparent`), `demand` (0 to 1, 1) and `power_factor` (over 0 to 1, 1; a first value, not a claim about the load), `phases` \
+         (FN one phase and neutral, the default; FF; 3F; 3FN balanced), the voltage `system` (127/220), `use` (power: 2.5 mm² at least; \
+         lighting 1.5), `length` to the farthest load (mm; none: no drop is checked), the installation `method` of Tabela 33 (7: a \
+         conduit in masonry; also 1 to 8, 11, 11A, 61, 61A), `insulation` (pvc 70 °C, or epr 90 °C), `conductor` (flexible, the larger \
+         resistance; or rigid), `ambient` °C (30 in air, 20 in soil), `grouped` circuits in the conduit (this one included), `bundle` \
+         (method 11 cables bundled), `spacing` between buried conduits (mm) and `soil` resistivity (K·m/W), and a `section` (mm²) and \
+         `breaker` (A) already chosen, which are never made smaller. Replies with the design current, the section and breaker that give \
+         I_B ≤ I_n ≤ I_Z (and 1.45 I_n ≤ 1.45 I_Z) with the drop within `drop_limit` (4 %), the current the section carries, the drop, \
+         the conductors (phases, neutral, protective), the factors, and what the chosen section and breaker give. It changes nothing; \
+         aluminium, trays, several layers, short circuit and harmonics are not checked",
+        circuit,
+    ),
+    other(
         "library",
         "Library",
         "{kind?, name?} the project's library with its ids and GUIDs, as elements have them: each type (`kind` \
@@ -2779,6 +2797,134 @@ fn measure(_: &mut Session, p: &Value) -> R {
     let r = snap::ruler(point_req(c, p, "from")?, point_req(c, p, "to")?);
     let to = |x: f64, k: f64| (x * k).round() / k + 0.0;
     Ok(json!({"length": to(r.length, 100.0), "dx": to(r.dx, 100.0), "dy": to(r.dy, 100.0), "angle": to(r.angle, 1e4)}))
+}
+
+/// A number of `key` within `lo..=hi`, or `default` when absent.
+fn within(c: &str, p: &Value, key: &str, default: f64, lo: f64, hi: f64) -> Result<f64, String> {
+    match p.get(key) {
+        v if absent(v) => Ok(default),
+        Some(v) => v
+            .as_f64()
+            .filter(|x| x.is_finite() && *x >= lo && *x <= hi)
+            .ok_or_else(|| bad(c, format!("`{key}` must be a number from {lo} to {hi}, got {v}"))),
+        None => Ok(default),
+    }
+}
+
+/// A choice among `names`, as text; `default` when absent.
+fn choice<'a>(c: &str, p: &'a Value, key: &str, names: &[&str], default: &'a str) -> Result<&'a str, String> {
+    match p.get(key) {
+        v if absent(v) => Ok(default),
+        Some(Value::String(t)) if names.contains(&t.as_str()) => Ok(t.as_str()),
+        Some(v) => Err(bad(c, format!("`{key}` must be one of {}, got {v}", names.join(", ")))),
+        None => Ok(default),
+    }
+}
+
+fn circuit(_: &mut Session, p: &Value) -> R {
+    use crate::nbr5410::{self as e, Circuit, Insulation, Phases, Use};
+    let c = "circuit";
+    let o = p.as_object().ok_or_else(|| bad(c, "params must be an object"))?;
+    const KEYS: &[&str] = &[
+        "load",
+        "apparent",
+        "demand",
+        "power_factor",
+        "phases",
+        "system",
+        "use",
+        "length",
+        "method",
+        "insulation",
+        "conductor",
+        "ambient",
+        "grouped",
+        "bundle",
+        "spacing",
+        "soil",
+        "section",
+        "breaker",
+        "drop_limit",
+        "reduced_neutral",
+    ];
+    if let Some(key) = o.keys().find(|k| !KEYS.contains(&k.as_str())) {
+        return Err(bad(c, format!("unknown parameter `{key}`")));
+    }
+    let load = within(c, p, "load", 0.0, 0.0, 1.0e9)?;
+    if load <= 0.0 {
+        return Err(bad(c, "`load` (W, or VA with `apparent`) is required"));
+    }
+    let systems: Vec<&str> = e::SYSTEMS.iter().map(|s| s.0).collect();
+    let system = choice(c, p, "system", &systems, systems[0])?;
+    let methods = e::method_keys();
+    let sections_ok = |x: f64| e::SECTIONS.iter().any(|s| (s - x).abs() < 1e-9);
+    let section = within(c, p, "section", 0.0, 0.0, 1000.0)?;
+    if section > 0.0 && !sections_ok(section) {
+        return Err(bad(
+            c,
+            format!(
+                "`section` must be one of the standard's: {}",
+                e::SECTIONS.iter().map(|s| s.to_string()).collect::<Vec<_>>().join(", ")
+            ),
+        ));
+    }
+    let breaker = within(c, p, "breaker", 0.0, 0.0, 1000.0)?;
+    if breaker > 0.0 && !e::BREAKERS.iter().any(|b| (b - breaker).abs() < 1e-9) {
+        return Err(bad(
+            c,
+            format!("`breaker` must be one of: {}", e::BREAKERS.iter().map(|b| b.to_string()).collect::<Vec<_>>().join(", ")),
+        ));
+    }
+    let ambient = match p.get("ambient") {
+        v if absent(v) => None,
+        _ => Some(within(c, p, "ambient", 30.0, -50.0, 200.0)?),
+    };
+    let circuit = Circuit {
+        load,
+        apparent: flag(c, p, "apparent")?,
+        demand: within(c, p, "demand", 1.0, f64::MIN_POSITIVE, 1.0)?,
+        power_factor: within(c, p, "power_factor", 1.0, f64::MIN_POSITIVE, 1.0)?,
+        phases: Phases::parse(choice(c, p, "phases", &["FN", "FF", "3F", "3FN"], "FN")?).unwrap_or(Phases::PhaseNeutral),
+        system: systems.iter().position(|s| *s == system).unwrap_or(0),
+        use_: if choice(c, p, "use", &["power", "lighting"], "power")? == "lighting" { Use::Lighting } else { Use::Power },
+        length: within(c, p, "length", 0.0, 0.0, MAX_COORD)? / 1000.0,
+        method: choice(c, p, "method", &methods, "7")?.to_string(),
+        insulation: Insulation::parse(choice(c, p, "insulation", &["pvc", "epr"], "pvc")?).unwrap_or(Insulation::Pvc),
+        flexible: choice(c, p, "conductor", &["flexible", "rigid"], "flexible")? == "flexible",
+        ambient,
+        grouped: within(c, p, "grouped", 1.0, 1.0, 1000.0)?.round() as u32,
+        bundle: flag(c, p, "bundle")?,
+        spacing: within(c, p, "spacing", 0.0, 0.0, 100_000.0)? / 1000.0,
+        soil: within(c, p, "soil", 2.5, 0.0, 100.0)?,
+        section,
+        breaker,
+        drop_limit: within(c, p, "drop_limit", e::DROP_LIMIT, f64::MIN_POSITIVE, 100.0)?,
+        reduced_neutral: flag(c, p, "reduced_neutral")?,
+    };
+    let d = e::design(&circuit);
+    if let Some(fault) = d.fault {
+        return Err(bad(c, fault.message()));
+    }
+    let round = |x: f64, k: f64| (x * k).round() / k + 0.0;
+    let evaluation = |v: &e::Evaluation| {
+        json!({"section_mm2": v.section, "breaker_a": v.breaker, "carries_a": round(v.carries, 100.0), "carries_ok": v.ampacity_ok,
+               "breaker_ok": v.breaker_ok, "drop_percent": v.drop.map(|d| round(d.0, 100.0)), "drop_ok": v.drop.map(|d| d.1),
+               "minimum_section_ok": v.minimum_ok})
+    };
+    let Some(n) = d.needed else { return Err(bad(c, e::Fault::TooBig.message())) };
+    Ok(json!({
+        "current_a": round(d.current, 100.0),
+        "volts": d.volts,
+        "minimum_section_mm2": d.minimum,
+        "factors": d.factors.map(|f| json!({"temperature": f.temperature, "grouping": f.grouping, "soil": f.soil})),
+        "section_mm2": n.section,
+        "breaker_a": n.breaker,
+        "carries_a": round(n.carries, 100.0),
+        "drop_percent": n.drop.map(|d| round(d.0, 100.0)),
+        "conductors": e::cable_text(circuit.phases, n.section, circuit.reduced_neutral),
+        "grew": section < n.section - 1e-9 || breaker < n.breaker - 1e-9,
+        "chosen": d.chosen.as_ref().map(evaluation),
+    }))
 }
 
 fn undo(s: &mut Session, p: &Value) -> R {
