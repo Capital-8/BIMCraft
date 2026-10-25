@@ -296,7 +296,7 @@ pub fn from_edges_open(edges: &[Edge]) -> Option<(Vec<Piece>, Vec<usize>)> {
 /// The regions the curves close with the ends that do not meet joined by a straight line, or none where more than
 /// MAX_CLOSING ends are open (that is no sketch but damage), or where the lines they make still close nothing.
 pub fn from_edges_closed(edges: &[Edge]) -> Option<Vec<Piece>> {
-    if edges.len() < 3 {
+    if edges.len() < 3 || edges.len() > MAX_EDGES {
         return None;
     }
     let mut ends: Vec<(Pt, usize)> = Vec::new();
@@ -339,6 +339,10 @@ const MAX_CLOSING: usize = 8;
 /// The regions the curves close, the ends that miss one another by less than [`SNAP_EPS`] taken for the one vertex they are, or
 /// none unless they close with no choice left.
 pub fn from_edges_snapped(edges: &[Edge]) -> Option<Vec<Piece>> {
+    // The matching of ends below compares each with every other: bounded here like the graph's own edges.
+    if edges.len() > MAX_EDGES {
+        return None;
+    }
     if let Some(pieces) = from_edges(edges) {
         return Some(pieces);
     }

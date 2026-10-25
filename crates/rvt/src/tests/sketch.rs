@@ -145,6 +145,15 @@ fn a_sketch_holds_up_to_the_most_curves_it_is_read_from() {
 }
 
 #[test]
+fn a_hostile_sketch_of_a_great_many_loose_curves_is_refused_at_once_by_every_way_of_closing_it() {
+    // Each of these once matched every end against every other: tens of thousands of curves that meet nowhere took minutes.
+    let loose: Vec<Edge> = (0..100_000).map(|k| edge((k as f64 * 10.0, 0.0), (k as f64 * 10.0 + 5.0, 0.0))).collect();
+    let at = std::time::Instant::now();
+    assert!(from_edges_closed(&loose).is_none() && from_edges_snapped(&loose).is_none() && from_edges_open(&loose).is_none());
+    assert!(at.elapsed().as_secs() < 2, "{:?}", at.elapsed());
+}
+
+#[test]
 fn an_arc_that_turns_more_than_a_full_turn_is_no_curve_of_a_sketch() {
     // The frame is turned (x north, y west) so that its arc is not also a line that fits the box: the line it would read as
     // starts at (0, 1) and runs west, out of the box.
