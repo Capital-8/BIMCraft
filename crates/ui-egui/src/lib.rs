@@ -258,7 +258,7 @@ type Buttons<'a> = &'a [(Icon, &'a str, &'a str, Option<Tool>, bool)];
 
 /// The desktop's own two-letter shortcuts, which [`BimApp::shortcut`] takes before the commands'
 /// aliases, and what Keyboard Shortcuts (KS) calls them.
-const SHORTCUTS: [(&str, &str); 60] = [
+const SHORTCUTS: [(&str, &str); 47] = [
     ("3D", "3D View"),
     ("MD", "Modify"),
     ("SB", "Floor: Structural"),
@@ -306,19 +306,6 @@ const SHORTCUTS: [(&str, &str); 60] = [
     ("HL", "Hidden Line"),
     ("SD", "Shaded"),
     ("KS", "Keyboard Shortcuts"),
-    ("SU", "Sun Settings"),
-    ("DL", "Detail Line"),
-    ("LI", "Model Line"),
-    ("SF", "Split Face"),
-    ("MA", "Match Properties"),
-    ("BR", "Brace"),
-    ("BS", "Beam System"),
-    ("RN", "Rebar Numbering"),
-    ("RP", "Reference Plane"),
-    ("CV", "Convert Duct"),
-    ("TF", "Cable Tray Fitting"),
-    ("DA", "Duct Accessory"),
-    ("FD", "Flex Duct"),
 ];
 
 /// Every two-letter shortcut and what it does: the desktop's own, then the commands' aliases.
@@ -1286,9 +1273,6 @@ impl BimApp {
         if pressed(Modifiers::COMMAND, Key::P) {
             self.export(ctx, "PDF", "pdf");
         }
-        if pressed(Modifiers::NONE, Key::F1) {
-            self.show_shortcuts = true;
-        }
         // The rest belongs to a text field while one has the keyboard.
         if ctx.egui_wants_keyboard_input() {
             return;
@@ -1397,63 +1381,6 @@ impl BimApp {
             }
             "NP" => {
                 self.toggle_browser();
-                return true;
-            }
-            "SU" => {
-                self.open_graphics(0);
-                return true;
-            }
-            "DL" => {
-                self.set_tool(Tool::Measure(None));
-                return true;
-            }
-            "LI" => {
-                self.set_tool(Tool::Run("wire", None));
-                return true;
-            }
-            "SF" => {
-                self.set_tool(Tool::Split);
-                return true;
-            }
-            "MA" => {
-                self.match_properties();
-                return true;
-            }
-            "BR" => {
-                self.tab = Tab::Structure;
-                self.set_tool(Tool::Run("beam", None));
-                return true;
-            }
-            "BS" => {
-                self.tab = Tab::Structure;
-                self.set_tool(Tool::Run("beam", None));
-                return true;
-            }
-            "RN" => {
-                self.open_ids_of_selection();
-                return true;
-            }
-            "RP" => {
-                self.set_tool(Tool::Grid(None));
-                return true;
-            }
-            "CV" => {
-                self.tab = Tab::Electrical;
-                self.set_tool(Tool::Run("conduit", None));
-                return true;
-            }
-            "TF" => {
-                self.tab = Tab::Electrical;
-                self.set_tool(Tool::Fixture("fitting"));
-                return true;
-            }
-            "DA" => {
-                self.set_tool(Tool::Fixture("accessory"));
-                return true;
-            }
-            "FD" => {
-                self.tab = Tab::Electrical;
-                self.set_tool(Tool::Run("conduit", None));
                 return true;
             }
             "SA" => {
@@ -1593,6 +1520,10 @@ impl BimApp {
                 Some("section") => Tool::Section(None),
                 Some("measure") => Tool::Measure(None),
                 Some("paint") => Tool::Paint,
+                Some("match_properties") => {
+                    self.match_properties();
+                    return true;
+                }
                 Some("delete") => {
                     self.delete();
                     return true;
@@ -1702,52 +1633,34 @@ impl BimApp {
         self.pick_up(found, Modifiers::NONE);
     }
 
-    /// Match Properties (MA): apply the type and family of the first selected element to all other
-    /// selected elements of the same category, or remember it as the template for subsequent picks.
+    /// Match Properties (MA): with one element selected, its type is the one the next element drawn
+    /// of its category takes; with several, the `match_properties` command gives the first one's type
+    /// to the others of its category.
     pub(crate) fn match_properties(&mut self) {
-        if self.selection.is_empty() {
+        let Some(&first) = self.selection.first() else {
             self.status = Status { text: t("Select an element first to match its properties").into(), error: true };
             return;
-        }
-        let m = Arc::clone(&self.session.model);
-        let first_id = self.selection[0];
-        let Some(first_el) = m.elements.get(first_id) else { return };
-        let cat = first_el.category();
-        let src = element_json(&m, first_id);
-        let family = src["family"].as_str().map(String::from);
-        let typ = src["type"].as_str().unwrap_or_default().to_string();
-
-        if typ.is_empty() {
+        };
+        let src = element_json(&self.session.model, first);
+        let Some(typ) = src["type"].as_str().filter(|t| !t.is_empty()) else {
             self.status = Status { text: t("The selected element has no type to match").into(), error: true };
             return;
-        }
-
+        };
         if self.selection.len() == 1 {
-            self.types.insert(cat, typ.clone());
-            if let Some(f) = &family {
-                self.component = Some((f.clone(), typ.clone()));
+            if let Some(el) = self.session.model.elements.get(first) {
+                self.types.insert(el.category(), typ.to_string());
+            }
+            if let Some(f) = src["family"].as_str() {
+                self.component = Some((f.to_string(), typ.to_string()));
             }
             self.status = Status {
-                text: tf("Match Properties: source type '{}' selected. Select target elements and press MA again.", &[&typ]),
+                text: tf("Match Properties: source type '{}' selected. Select target elements and press MA again.", &[typ]),
                 error: false,
             };
-        } else {
-            let targets: Vec<Id> = self.selection[1..].to_vec();
-            let mut count = 0;
-            for id in targets {
-                let target = element_json(&self.session.model, id);
-                if target["category"].as_str().unwrap_or_default() == cat {
-                    let mut p = json!({"id": id, "type": typ});
-                    if let Some(f) = &family {
-                        p["family"] = json!(f);
-                    }
-                    if self.run("modify", p).is_some() {
-                        count += 1;
-                    }
-                }
-            }
+        } else if let Some(r) = self.run("match_properties", json!({"from": first, "ids": &self.selection[1..]})) {
+            let n = r["modified"].as_array().map_or(0, Vec::len);
             self.status =
-                Status { text: tf("Matched properties: applied type '{}' to {} element(s)", &[&typ, &count.to_string()]), error: false };
+                Status { text: tf("Matched properties: applied type '{}' to {} element(s)", &[typ, &n.to_string()]), error: false };
         }
     }
 
@@ -2996,7 +2909,7 @@ impl BimApp {
             // What the drawings say, and how new things are named.
             let now = self.session.model.language;
             let tip = tf("Project Language: what the drawings say and how new things are named; now {}", &[now.label()]);
-            let r = big_button(ui, Icon::Text, "Language", false, &tip);
+            let r = big_button(ui, Icon::Text, "Project Language", false, &tip);
             Popup::menu(&r).show(|ui| {
                 for l in Language::ALL {
                     if ui.selectable_label(l == now, l.label()).clicked() {

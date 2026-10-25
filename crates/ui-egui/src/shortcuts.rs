@@ -4,12 +4,16 @@ use std::collections::BTreeMap;
 use std::path::Path;
 
 use bimcraft_core::geom::P2;
+use bimcraft_core::snap::Kind as Snap;
 use egui::{Align, ComboBox, Context, Grid, Id as UiId, Layout, Modal, RichText, ScrollArea, TextEdit, vec2};
 
 use crate::graphics;
-use crate::lang::{t, tf};
+use crate::lang::{Lang, t, tf, translated_in};
 use crate::pal;
-use crate::{BimApp, Tab, Tool, phasing};
+use crate::{BimApp, Once, Tab, Tool, phasing};
+
+/// A shortcuts file is a few lines; one over this isn't one.
+const MAX_FILE: u64 = 64 << 10;
 
 /// All available actions that can be bound to shortcuts in BIMCraft.
 pub const ACTIONS: &[&str] = &[
@@ -32,15 +36,10 @@ pub const ACTIONS: &[&str] = &[
     "Column",
     "Structural Column",
     "Beam",
-    "Brace",
-    "Beam System",
     "Isolated Footing",
     "Wall Footing",
     "Grid",
     "Level",
-    "Reference Plane",
-    "Model Line",
-    "Detail Line",
     "Aligned Dimension",
     "Text",
     "Spot Elevation",
@@ -51,7 +50,6 @@ pub const ACTIONS: &[&str] = &[
     "Align",
     "Trim/Extend to Corner",
     "Split",
-    "Split Face",
     "Offset",
     "Demolish",
     "Match Properties",
@@ -68,7 +66,6 @@ pub const ACTIONS: &[&str] = &[
     "Project Browser",
     "Select All Instances",
     "Keyboard Shortcuts",
-    "Sun Settings",
     "Visibility/Graphics",
     "Hide Element",
     "Hide Category",
@@ -117,11 +114,6 @@ pub const ACTIONS: &[&str] = &[
     "Voice Outlet",
     "Rack",
     "Patch Panel",
-    "Convert Duct",
-    "Cable Tray Fitting",
-    "Duct Accessory",
-    "Flex Duct",
-    "Rebar Numbering",
     "Snap to Endpoints",
     "Snap to Midpoints",
     "Snap to Intersections",
@@ -145,237 +137,54 @@ pub struct ShortcutsDialog {
     pub message: Option<String>,
 }
 
-/// Resolves a description, label or keyword in English, Portuguese or Spanish to a canonical action name.
-pub fn resolve_action(desc: &str) -> Option<&'static str> {
-    let d = desc.trim().to_lowercase();
-    for &act in ACTIONS {
-        if act.to_lowercase() == d {
-            return Some(act);
-        }
-        let pt = t(act).to_lowercase();
-        if pt == d {
-            return Some(act);
-        }
-    }
-
-    if d == "3d" || d.contains("3d view") || d.contains("vista 3d") || d.contains("vista/3d") || d.contains("representação 3d") {
-        return Some("3D View");
-    }
-    if d.contains("unidades de projeto") || d.contains("project units") {
-        return Some("Project Units");
-    }
-    if d.contains("configuração do sol") || d.contains("sun settings") {
-        return Some("Sun Settings");
-    }
-    if d.contains("dimensão alinhada") || d.contains("cota alinhada") || d.contains("aligned dimension") {
-        return Some("Aligned Dimension");
-    }
-    if d.contains("específicas da vista") || d.contains("detalhamento") || d.contains("detail line") {
-        return Some("Detail Line");
-    }
-    if d.contains("identificadores") || d.contains("tag by category") {
-        return Some("Tag by Category");
-    }
-    if d.contains("elemento oculto") || d.contains("apareça na vista") || d.contains("unhide elements") {
-        return Some("Unhide Elements");
-    }
-    if d.contains("igualar propriedades") || d.contains("match properties") {
-        return Some("Match Properties");
-    }
-    if d.contains("propriedades") || d.contains("properties") {
-        return Some("Properties");
-    }
-    if d.contains("coloca um nível") || d.contains("colocar um nível") || d.contains("level") {
-        return Some("Level");
-    }
-    if d.contains("nova linha") || d.contains("linha do modelo") || d.contains("model line") {
-        return Some("Model Line");
-    }
-    if d.contains("componente") || d.contains("component") {
-        return Some("Component");
-    }
-    if d.contains("alinha") || d.contains("align") {
-        return Some("Align");
-    }
-    if d.contains("bloqueia") || d.contains("bloquear") || d.contains("fixar") || d.contains("pin") || d.contains("patch panel") {
-        return Some("Patch Panel");
-    }
-    if d.contains("dividir face") || d.contains("split face") {
-        return Some("Split Face");
-    }
-    if d.contains("corta um elemento") || d.contains("dividir") || d.contains("split") {
-        return Some("Split");
-    }
-    if d.contains("sequências de teclas")
-        || d.contains("teclas para ferramentas")
-        || d.contains("atalhos")
-        || d.contains("keyboard shortcuts")
-    {
-        return Some("Keyboard Shortcuts");
-    }
-    if d.contains("navegador de projetos") || d.contains("project browser") {
-        return Some("Project Browser");
-    }
-    if d.contains("corte") || d.contains("section") {
-        return Some("Section");
-    }
-    if d.contains("largura única") || d.contains("linhas finas") || d.contains("thin lines") {
-        return Some("Thin Lines");
-    }
-    if d.contains("esconde aquele objeto") || d.contains("oculta um elemento") || d.contains("hide element") {
-        return Some("Temporary Hide Element");
-    }
-    if d.contains("esconde todos os objetos daquela categoria") || d.contains("oculta todas as categorias") || d.contains("hide category") {
-        return Some("Temporary Hide Category");
-    }
-    if d.contains("restaura") || d.contains("reset temporary") {
-        return Some("Reset Temporary Hide/Isolate");
-    }
-    if d.contains("todas as instâncias") || d.contains("select all instances") {
-        return Some("Select All Instances");
-    }
-    if d.contains("ambiente") || d.contains("room") {
-        return Some("Room");
-    }
-    if d.contains("parede") || d.contains("wall") {
-        return Some("Wall");
-    }
-    if d.contains("piso") || d.contains("floor") {
-        return Some("Floor");
-    }
-    if d.contains("porta") || d.contains("door") {
-        return Some("Door");
-    }
-    if d.contains("janela") || d.contains("window") {
-        return Some("Window");
-    }
-    if d.contains("pilar") || d.contains("suporte de carga vertical") || d.contains("structural column") {
-        return Some("Structural Column");
-    }
-    if d.contains("elemento novo similar") || d.contains("criar similar") || d.contains("create similar") {
-        return Some("Create Similar");
-    }
-    if d.contains("viga estrutural") || d.contains("beam") {
-        return Some("Beam");
-    }
-    if d.contains("membros diagonais") || d.contains("contraventamento") || d.contains("brace") {
-        return Some("Brace");
-    }
-    if d.contains("série de vigas") || d.contains("vigas paralelas") || d.contains("sistema de vigas") || d.contains("beam system") {
-        return Some("Beam System");
-    }
-    if d.contains("fundação") || d.contains("footing") {
-        return Some("Wall Footing");
-    }
-    if d.contains("eixo de coluna") || d.contains("grid") {
-        return Some("Grid");
-    }
-    if d.contains("numeração") || d.contains("rebar numbering") {
-        return Some("Rebar Numbering");
-    }
-    if d.contains("plano de referência") || d.contains("reference plane") {
-        return Some("Reference Plane");
-    }
-    if d.contains("conduíte") || d.contains("conduit") {
-        return Some("Conduit");
-    }
-    if d.contains("acessórios da bandeja") || d.contains("cable tray fitting") {
-        return Some("Cable Tray Fitting");
-    }
-    if d.contains("bandeja de cabos") || d.contains("cable tray") {
-        return Some("Cable Tray");
-    }
-    if d.contains("converte") || d.contains("convert duct") {
-        return Some("Convert Duct");
-    }
-    if d.contains("equipamento elétrico") || d.contains("electrical equipment") {
-        return Some("Electrical Equipment");
-    }
-    if d.contains("fio") || d.contains("wire") {
-        return Some("Wire");
-    }
-    if d.contains("acessórios de duto") || d.contains("duct accessory") {
-        return Some("Duct Accessory");
-    }
-    if d.contains("dutos flexíveis") || d.contains("duto flexível") || d.contains("flex duct") {
-        return Some("Flex Duct");
-    }
-    None
+/// A shortcut key: two letters or digits, which is all the typed buffer holds.
+fn is_key(k: &str) -> bool {
+    k.len() == 2 && k.chars().all(|c| c.is_ascii_alphanumeric())
 }
 
-/// Parses shortcut definitions from file contents (markdown, text, JSON, or XML).
+/// The action a description names: its whole name, in English or in any of the interface's languages, in any case.
+pub fn resolve_action(desc: &str) -> Option<&'static str> {
+    let d = desc.trim().to_lowercase();
+    ACTIONS
+        .iter()
+        .copied()
+        .find(|act| act.to_lowercase() == d || Lang::ALL.iter().any(|l| translated_in(*l, act).is_some_and(|w| w.to_lowercase() == d)))
+}
+
+/// The (key, description) pairs a shortcuts file holds, as written: a JSON object of key to description, Revit's
+/// `<Shortcut CommandName=".." Shortcuts="WA#W1"/>` lines, or lines like `WA - Wall`, `WA = Wall`, `WA: Wall`.
+/// [`BimApp::load_shortcuts_from_file`] checks them.
 pub fn parse_shortcuts_file(content: &str) -> Vec<(String, String)> {
     let mut entries = Vec::new();
-
-    // Check if JSON
-    if let Ok(v) = serde_json::from_str::<serde_json::Value>(content)
-        && let Some(obj) = v.as_object()
-    {
+    if let Ok(serde_json::Value::Object(obj)) = serde_json::from_str(content) {
         for (key, val) in obj {
             if let Some(desc) = val.as_str() {
-                let act = resolve_action(desc).unwrap_or(desc);
-                entries.push((key.to_ascii_uppercase(), act.to_string()));
+                entries.push((key.to_ascii_uppercase(), desc.to_string()));
             }
         }
-        if !entries.is_empty() {
-            return entries;
-        }
+        return entries;
     }
-
     for raw_line in content.lines() {
         let line = raw_line.trim();
         if line.is_empty() || line.starts_with('#') {
             continue;
         }
-
-        // XML: <Shortcut CommandId="..." Shortcuts="WA#W1" ... />
         if line.contains("<Shortcut") {
-            let cmd = line.split("CommandId=\"").nth(1).and_then(|s| s.split('"').next());
-            let scs = line.split("Shortcuts=\"").nth(1).and_then(|s| s.split('"').next());
-            if let (Some(cmd), Some(scs)) = (cmd, scs) {
-                let action = resolve_action(cmd).unwrap_or(cmd);
-                for sc in scs.split('#') {
-                    let k = sc.trim().to_ascii_uppercase();
-                    if !k.is_empty() {
-                        entries.push((k, action.to_string()));
-                    }
-                }
+            let attr = |name: &str| {
+                let pattern = format!("{name}=\"");
+                line.split(pattern.as_str()).nth(1).and_then(|s| s.split('"').next())
+            };
+            if let (Some(cmd), Some(keys)) = (attr("CommandName").or_else(|| attr("CommandId")), attr("Shortcuts")) {
+                entries.extend(keys.split('#').map(|k| (k.trim().to_ascii_uppercase(), cmd.to_string())));
             }
             continue;
         }
-
-        // Markdown: **KEY** – Description or **KEY1 ou KEY2** – Description
-        if let Some(stripped) = line.strip_prefix("**")
-            && let Some(end_bold) = stripped.find("**")
-        {
-            let keys_part = &stripped[..end_bold];
-            let rest = stripped[end_bold + 2..].trim_start_matches([' ', '-', '–', ':']).trim();
-            if let Some(act) = resolve_action(rest) {
-                for key in keys_part.split([' ', '/', ',']) {
-                    let k = key.trim().to_ascii_uppercase();
-                    if k.len() == 2 && k.chars().all(|c| c.is_ascii_alphanumeric()) {
-                        entries.push((k, act.to_string()));
-                    }
-                }
-                continue;
-            }
-        }
-
-        // Plain text: KEY - Description, KEY = Description, KEY: Description
-        let sep = [':', '=', '-', '–'].into_iter().find_map(|c| line.find(c).map(|idx| (idx, c.len_utf8())));
+        let sep = [':', '=', '-', '\u{2013}'].into_iter().find_map(|c| line.find(c).map(|idx| (idx, c.len_utf8())));
         if let Some((pos, char_len)) = sep {
             let key = line[..pos].trim().trim_matches('*').trim().to_ascii_uppercase();
-            let desc = line[pos + char_len..].trim();
-            if key.len() == 2 && key.chars().all(|c| c.is_ascii_alphanumeric()) {
-                if let Some(act) = resolve_action(desc) {
-                    entries.push((key, act.to_string()));
-                } else if !desc.is_empty() {
-                    entries.push((key, desc.to_string()));
-                }
-            }
+            entries.push((key, line[pos + char_len..].trim().to_string()));
         }
     }
-
     entries
 }
 
@@ -396,24 +205,42 @@ pub fn find_conflict(key: &str, for_action: &str, app: &BimApp) -> Option<String
 }
 
 impl BimApp {
+    /// Adds the shortcuts of a file's `parsed` pairs to the custom ones: how many were added, and how many skipped
+    /// (not a two-character key, not an action BIMCraft has, or a key another action already has).
+    fn add_shortcuts(&mut self, parsed: Vec<(String, String)>) -> (usize, usize) {
+        let (mut added, mut skipped) = (0, 0);
+        for (key, desc) in parsed {
+            match resolve_action(&desc) {
+                Some(action) if is_key(&key) && find_conflict(&key, action, self).is_none() => {
+                    self.custom_shortcuts.insert(key, action.to_string());
+                    added += 1;
+                }
+                _ => skipped += 1,
+            }
+        }
+        (added, skipped)
+    }
+
     /// Loads keyboard shortcuts from a file on disk (markdown, txt, json, xml).
     pub(crate) fn load_shortcuts_from_file(&mut self, path: &Path) {
-        let content = match std::fs::read_to_string(path) {
-            Ok(c) => c,
-            Err(e) => {
-                self.shortcuts_dialog.error = Some(tf("Failed to read file: {}", &[&e.to_string()]));
-                self.shortcuts_dialog.message = None;
-                return;
+        let read = match std::fs::metadata(path) {
+            Ok(m) if m.is_file() && m.len() <= MAX_FILE => {
+                std::fs::read_to_string(path).map_err(|e| tf("Failed to read file: {}", &[&e.to_string()]))
+            }
+            Ok(_) => Err(t("That is too big to be a shortcuts file.").to_string()),
+            Err(e) => Err(tf("Failed to read file: {}", &[&e.to_string()])),
+        };
+        let (error, message) = match read {
+            Err(e) => (Some(e), None),
+            Ok(text) => {
+                let (added, skipped) = self.add_shortcuts(parse_shortcuts_file(&text));
+                let loaded = tf("Loaded {} shortcuts from file.", &[&added.to_string()]);
+                let note = if skipped == 0 { loaded } else { tf("{} Skipped {}.", &[&loaded, &skipped.to_string()]) };
+                (None, Some(note))
             }
         };
-
-        let parsed = parse_shortcuts_file(&content);
-        let count = parsed.len();
-        for (k, act) in parsed {
-            self.custom_shortcuts.insert(k, act);
-        }
-        self.shortcuts_dialog.error = None;
-        self.shortcuts_dialog.message = Some(tf("Loaded {} shortcuts from file.", &[&count.to_string()]));
+        self.shortcuts_dialog.error = error;
+        self.shortcuts_dialog.message = message;
     }
 
     /// Project Browser (NP): shown, or hidden.
@@ -426,7 +253,7 @@ impl BimApp {
     pub(crate) fn execute_shortcut_action(&mut self, action: &str) -> bool {
         match action {
             "Modify" => self.set_tool(Tool::Modify),
-            "3D View" | "3D" | "Vista 3D" => self.open_sheet(crate::Sheet::View3D),
+            "3D View" => self.open_sheet(crate::Sheet::View3D),
             "Wall" => self.set_tool(Tool::Wall(Vec::new())),
             "Door" => self.set_tool(Tool::Door),
             "Window" => self.set_tool(Tool::Window),
@@ -446,15 +273,15 @@ impl BimApp {
             "Ramp" => self.set_tool(Tool::Ramp(Vec::new())),
             "Railing" => self.set_tool(Tool::Railing(Vec::new())),
             "Mass" => self.set_tool(Tool::Mass(Vec::new())),
-            "Aligned Dimension" | "Dimension" => self.set_tool(Tool::Dimension(Vec::new())),
+            "Aligned Dimension" => self.set_tool(Tool::Dimension(Vec::new())),
             "Text" => self.set_tool(Tool::Text),
             "Spot Elevation" => self.set_tool(Tool::Spot),
-            "Tag by Category" | "Tag" => self.set_tool(Tool::Tag),
+            "Tag by Category" => self.set_tool(Tool::Tag),
             "Section" => self.set_tool(Tool::Section(None)),
             "Elevation" => self.set_tool(Tool::Elevation),
             "Measure" => self.set_tool(Tool::Measure(None)),
             "Align" => self.set_tool(Tool::Align(None)),
-            "Trim/Extend to Corner" | "Trim" => self.set_tool(Tool::Trim(None)),
+            "Trim/Extend to Corner" => self.set_tool(Tool::Trim(None)),
             "Split" => self.set_tool(Tool::Split),
             "Offset" => self.set_tool(Tool::Offset),
             "Demolish" => self.set_tool(Tool::Demolish),
@@ -462,8 +289,8 @@ impl BimApp {
             "Move" => self.set_tool(Tool::Move(None)),
             "Copy" => self.set_tool(Tool::Copy(None)),
             "Rotate" => self.set_tool(Tool::Rotate { centre: P2(0.0, 0.0), start: None, place: false }),
-            "Mirror Pick Axis" | "Mirror Pick" => self.set_tool(Tool::Mirror { draw: false, start: None }),
-            "Mirror Draw Axis" | "Mirror Draw" => self.set_tool(Tool::Mirror { draw: true, start: None }),
+            "Mirror Pick Axis" => self.set_tool(Tool::Mirror { draw: false, start: None }),
+            "Mirror Draw Axis" => self.set_tool(Tool::Mirror { draw: true, start: None }),
             "Zoom to Fit" => self.fit(),
             "Thin Lines" => self.thin = !self.thin,
             "Create Similar" => self.create_similar(),
@@ -504,40 +331,22 @@ impl BimApp {
                 self.open_units = true;
             }
             "Delete" => self.delete(),
+            // Revit's snap overrides, for the next point picked.
+            "Snap to Endpoints" => self.snap_once = Some(Once::Only(Snap::Endpoint)),
+            "Snap to Midpoints" => self.snap_once = Some(Once::Only(Snap::Midpoint)),
+            "Snap to Intersections" => self.snap_once = Some(Once::Only(Snap::Intersection)),
+            "Snap to Centres" => self.snap_once = Some(Once::Only(Snap::Centre)),
+            "Snap to Perpendiculars" => self.snap_once = Some(Once::Only(Snap::Perpendicular)),
+            "Snap to Nearest" => self.snap_once = Some(Once::Only(Snap::Nearest)),
+            "Snaps Off" => self.snap_once = Some(Once::Off),
+            "Turn Snap Override Off" => self.snap_once = None,
             "Show Mass" => self.show_mass(),
             "Mass Floors" => self.by_mass("mass_floors"),
             "Wall by Face" => self.by_mass("wall_by_face"),
             "Floor by Face" => self.by_mass("floor_by_face"),
             "Roof by Face" => self.by_mass("roof_by_face"),
             "Update to Face" => self.by_mass("update_by_face"),
-            "Sun Settings" => self.open_graphics(0),
-            "Detail Line" => self.set_tool(Tool::Measure(None)),
-            "Model Line" => self.set_tool(Tool::Run("wire", None)),
-            "Split Face" => self.set_tool(Tool::Split),
             "Match Properties" => self.match_properties(),
-            "Brace" => {
-                self.tab = Tab::Structure;
-                self.set_tool(Tool::Run("beam", None));
-            }
-            "Beam System" => {
-                self.tab = Tab::Structure;
-                self.set_tool(Tool::Run("beam", None));
-            }
-            "Rebar Numbering" => self.open_ids_of_selection(),
-            "Reference Plane" => self.set_tool(Tool::Grid(None)),
-            "Convert Duct" => {
-                self.tab = Tab::Electrical;
-                self.set_tool(Tool::Run("conduit", None));
-            }
-            "Cable Tray Fitting" => {
-                self.tab = Tab::Electrical;
-                self.set_tool(Tool::Fixture("fitting"));
-            }
-            "Duct Accessory" => self.set_tool(Tool::Fixture("accessory")),
-            "Flex Duct" => {
-                self.tab = Tab::Electrical;
-                self.set_tool(Tool::Run("conduit", None));
-            }
             "Beam" => self.set_tool(Tool::Run("beam", None)),
             "Pipe" => self.set_tool(Tool::Run("pipe", None)),
             "Conduit" => self.set_tool(Tool::Run("conduit", None)),
@@ -571,7 +380,6 @@ impl BimApp {
 
         let mut close = false;
         let mut load_asked = false;
-        let mut load_teclas_md = false;
 
         let r = Modal::new(UiId::new("shortcuts")).show(ctx, |ui| {
             ui.horizontal(|ui| {
@@ -585,10 +393,6 @@ impl BimApp {
 
                 if ui.button(t("Load File...")).clicked() {
                     load_asked = true;
-                }
-
-                if Path::new("teclas.MD").exists() && ui.button(t("Load teclas.MD")).clicked() {
-                    load_teclas_md = true;
                 }
 
                 let add_label = if self.shortcuts_dialog.adding { t("Cancel") } else { t("Add Shortcut") };
@@ -632,9 +436,8 @@ impl BimApp {
                             let key = self.shortcuts_dialog.new_keys.trim().to_ascii_uppercase();
                             let action = self.shortcuts_dialog.new_action.trim().to_string();
 
-                            if key.is_empty() || key.len() > 4 || !key.chars().all(|c| c.is_ascii_alphanumeric()) {
-                                self.shortcuts_dialog.error =
-                                    Some(t("Shortcut keys must have 1 to 4 characters (letters or numbers).").to_string());
+                            if !is_key(&key) {
+                                self.shortcuts_dialog.error = Some(t("Shortcut keys are two characters, letters or numbers.").to_string());
                                 self.shortcuts_dialog.message = None;
                             } else if action.is_empty() {
                                 self.shortcuts_dialog.error = Some(t("Select an action to assign.").to_string());
@@ -741,8 +544,8 @@ impl BimApp {
 
             if let Some(action) = save_edit {
                 let new_key = self.shortcuts_dialog.edit_keys.trim().to_ascii_uppercase();
-                if new_key.is_empty() || new_key.len() > 4 || !new_key.chars().all(|c| c.is_ascii_alphanumeric()) {
-                    self.shortcuts_dialog.error = Some(t("Shortcut keys must have 1 to 4 characters (letters or numbers).").to_string());
+                if !is_key(&new_key) {
+                    self.shortcuts_dialog.error = Some(t("Shortcut keys are two characters, letters or numbers.").to_string());
                 } else if let Some(conflict) = find_conflict(&new_key, &action, self) {
                     self.shortcuts_dialog.error = Some(tf("The shortcut '{}' already exists for '{}'.", &[&new_key, t(&conflict)]));
                 } else {
@@ -758,10 +561,6 @@ impl BimApp {
             ui.add_space(8.0);
             ui.with_layout(Layout::right_to_left(Align::Min), |ui| close = ui.button(t("Close")).clicked());
         });
-
-        if load_teclas_md {
-            self.load_shortcuts_from_file(Path::new("teclas.MD"));
-        }
 
         if load_asked {
             let dialog =
@@ -788,17 +587,59 @@ mod tests {
     use bimcraft_core::engine::Session;
 
     #[test]
-    fn parse_teclas_md_loads_shortcuts() {
-        let text = std::fs::read_to_string("../../teclas.MD").or_else(|_| std::fs::read_to_string("teclas.MD")).unwrap();
-        let parsed = parse_shortcuts_file(&text);
-        assert!(!parsed.is_empty());
-        assert!(parsed.iter().any(|(k, a)| k == "WA" && a == "Wall"));
-        assert!(parsed.iter().any(|(k, a)| k == "DR" && a == "Door"));
-        assert!(parsed.iter().any(|(k, a)| k == "WN" && a == "Window"));
-        assert!(parsed.iter().any(|(k, a)| k == "UN" && a == "Project Units"));
-        assert!(parsed.iter().any(|(k, a)| k == "BM" && a == "Beam"));
-        assert!(parsed.iter().any(|(k, a)| k == "CR" && a == "Section"));
-        assert!(parsed.iter().any(|(k, a)| k == "3D" && a == "3D View"));
+    fn a_description_is_an_action_by_its_whole_name_in_any_language() {
+        for (desc, action) in [
+            ("Wall", "Wall"),
+            ("  floor ", "Floor"),
+            ("Parede", "Wall"),
+            ("Filters", "Filters"),
+            ("Floor: Structural", "Floor: Structural"),
+        ] {
+            assert_eq!(resolve_action(desc), Some(action), "{desc}");
+        }
+        // What a substring match took for a tool: a word inside a longer one, or a sentence that mentions one.
+        for desc in ["ou", "Patch", "Filter", "the wall of the house", "Walls and doors", "", "x"] {
+            assert_eq!(resolve_action(desc), None, "{desc}");
+        }
+    }
+
+    #[test]
+    fn a_file_binds_only_two_character_keys_to_actions_it_names_and_that_are_free() {
+        let mut app = BimApp::new(Session::new());
+        let text = "ZW - Wall\n**ZZ** \u{2013} Parede\nSB - Floor\nFT = Wall\nQ - Door\nABC - Door\nOU - ou\nZY: Wall with a long note\n";
+        assert_eq!(app.add_shortcuts(parse_shortcuts_file(text)), (2, 6));
+        // SB and FT are Floor: Structural and Filters already; the others are no key or no action.
+        assert_eq!(app.custom_shortcuts.get("ZW").map(String::as_str), Some("Wall"));
+        assert_eq!(app.custom_shortcuts.get("ZZ").map(String::as_str), Some("Wall"));
+        assert_eq!(app.custom_shortcuts.len(), 2);
+        // The same file again adds the same two and nothing else.
+        assert_eq!(app.add_shortcuts(parse_shortcuts_file(text)), (2, 6));
+        assert_eq!(app.custom_shortcuts.len(), 2);
+    }
+
+    #[test]
+    fn json_and_revit_xml_lines_are_read_too() {
+        let json = parse_shortcuts_file(r#"{"zw": "Wall", "zd": "Door", "bad": 5}"#);
+        assert_eq!(json, [("ZD".to_string(), "Door".to_string()), ("ZW".to_string(), "Wall".to_string())]);
+        let xml = parse_shortcuts_file(r#"<Shortcut CommandName="Wall" CommandId="ID_OBJECTS_WALL" Shortcuts="ZW#Z1" />"#);
+        assert_eq!(xml, [("ZW".to_string(), "Wall".to_string()), ("Z1".to_string(), "Wall".to_string())]);
+    }
+
+    #[test]
+    fn a_file_over_the_cap_or_missing_is_refused_with_a_message() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut app = BimApp::new(Session::new());
+        let big = dir.path().join("big.txt");
+        std::fs::write(&big, format!("ZW - Wall\n{}", " ".repeat(MAX_FILE as usize))).unwrap();
+        app.load_shortcuts_from_file(&big);
+        assert!(app.shortcuts_dialog.error.is_some() && app.custom_shortcuts.is_empty());
+        app.load_shortcuts_from_file(&dir.path().join("nope.txt"));
+        assert!(app.shortcuts_dialog.error.is_some() && app.custom_shortcuts.is_empty());
+        let small = dir.path().join("keys.txt");
+        std::fs::write(&small, "ZW - Wall\nSB - Floor\n").unwrap();
+        app.load_shortcuts_from_file(&small);
+        assert!(app.shortcuts_dialog.message.is_some() && app.shortcuts_dialog.error.is_none());
+        assert_eq!(app.custom_shortcuts.len(), 1, "ZW added, SB (Floor: Structural) skipped");
     }
 
     #[test]
@@ -833,5 +674,13 @@ mod tests {
         app.typed = "3D".to_string();
         assert!(app.shortcut());
         assert_eq!(app.sheet, crate::Sheet::View3D);
+    }
+
+    #[test]
+    fn every_action_the_dialog_offers_does_something() {
+        for act in ACTIONS {
+            let mut app = BimApp::new(Session::new());
+            assert!(app.execute_shortcut_action(act), "{act}");
+        }
     }
 }

@@ -835,17 +835,45 @@ fn manage_tab_opens_keyboard_shortcuts_dialog() {
 }
 
 #[test]
-fn typed_3d_opens_3d_view_and_ma_matches_properties() {
+fn typed_3d_opens_the_3d_view() {
     let mut h = app(BOX);
     assert_ne!(h.state().sheet, Sheet::View3D);
     shortcut(&mut h, "3D");
     assert_eq!(h.state().sheet, Sheet::View3D);
+}
 
-    // Match Properties
+#[test]
+fn ma_gives_the_walls_selected_after_the_first_its_type_in_one_undo_step() {
+    let mut h = app(BOX);
     let walls = ids(&h, "wall");
+    h.state_mut().run("modify", json!({"id": walls[0], "type": "Exterior - 300mm"}));
+    let types = |h: &Harness<BimApp>| [walls[0], walls[1], walls[2]].map(|id| field(h, id, "type"));
+    assert_eq!(types(&h), [json!("Exterior - 300mm"), json!("Generic - 200mm"), json!("Generic - 200mm")]);
+    // One selected: its type becomes the one the next wall takes, and nothing changes.
+    h.state_mut().selection = vec![walls[0]];
+    shortcut(&mut h, "MA");
+    assert_eq!(h.state().types.get("wall").map(String::as_str), Some("Exterior - 300mm"));
+    assert_eq!(types(&h)[1], json!("Generic - 200mm"));
+    // Several: the others of its category take the first's type, in one step.
     h.state_mut().selection = vec![walls[0], walls[1], walls[2]];
     shortcut(&mut h, "MA");
-    assert!(h.state().status.text.contains("Matched properties"));
+    assert!(h.state().status.text.contains("Matched properties") && !h.state().status.error, "{}", h.state().status.text);
+    assert_eq!(types(&h), ["Exterior - 300mm"; 3].map(|t| json!(t)));
+    h.state_mut().run("undo", json!({}));
+    assert_eq!(types(&h), [json!("Exterior - 300mm"), json!("Generic - 200mm"), json!("Generic - 200mm")]);
+    // Nothing selected: it says so.
+    h.state_mut().selection.clear();
+    shortcut(&mut h, "MA");
+    assert!(h.state().status.error);
+}
+
+#[test]
+fn keys_for_tools_bimcraft_lacks_are_bound_to_nothing_rather_than_to_another_tool() {
+    for keys in ["SU", "DL", "LI", "SF", "BR", "BS", "RN", "RP", "CV", "TF", "DA", "FD"] {
+        let mut app = BimApp::new(Session::new());
+        app.typed = keys.into();
+        assert!(!app.shortcut(), "{keys}");
+    }
 }
 
 #[test]
