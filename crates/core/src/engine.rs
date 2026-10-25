@@ -64,6 +64,7 @@ impl Step {
 /// The commands that copy what stands: a copy is made in the session's phase and isn't taken down with its original.
 const COPIES: [&str; 3] = ["copy", "mirror", "rotate"];
 
+#[cfg_attr(test, derive(Clone))]
 pub struct Session {
     pub model: Arc<Model>,
     /// Where the model was opened from or last saved to.
