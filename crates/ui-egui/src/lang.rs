@@ -1835,6 +1835,14 @@ const WORDS: &[[&str; 3]] = &[
         "Uma direção a partir do último ponto se prende a múltiplos deste ângulo, a partir do leste e da linha anterior; uma guia tracejada a mostra",
         "Una dirección desde el último punto se pega a múltiplos de este ángulo, desde el este y desde la línea anterior; una guía discontinua la muestra",
     ],
+    ["Alignment Guides", "Guias de alinhamento", "Guías de alineación"],
+    [
+        "Show temporary alignment guides (smart snapping) to other walls when drawing",
+        "Mostrar guias de alinhamento temporárias ao desenhar paredes",
+        "Mostrar guías de alineación temporales al dibujar muros",
+    ],
+    ["Snap tolerance", "Tolerância de snap", "Tolerancia de ajuste"],
+    ["align", "alinhar", "alinear"],
     [
         "Click the ruler's start: points snap as they do drawing.",
         "Clique no início da régua: os pontos se prendem como ao desenhar.",

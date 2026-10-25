@@ -1996,6 +1996,18 @@ impl BimApp {
                 ));
             });
             ui.add_space(8.0);
+            ui.separator();
+            ui.add_space(4.0);
+            ui.checkbox(&mut s.alignment_guides, t("Alignment Guides")).on_hover_text(t(
+                "Show temporary alignment guides (smart snapping) to other walls when drawing",
+            ));
+            if s.alignment_guides {
+                ui.horizontal(|ui| {
+                    ui.label(t("Snap tolerance"));
+                    ui.add(egui::Slider::new(&mut s.alignment_tolerance, 2.0..=32.0).suffix(" px"));
+                });
+            }
+            ui.add_space(8.0);
             ui.with_layout(Layout::right_to_left(Align::Min), |ui| close = ui.button(t("Close")).clicked());
         });
         if close || r.should_close() {

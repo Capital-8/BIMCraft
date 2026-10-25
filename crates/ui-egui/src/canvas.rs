@@ -3,7 +3,7 @@
 //! selection (click, Ctrl adds, Shift takes away, Tab for what's underneath, boxes), dragging,
 //! the tools' points, temporary dimensions, and previews of what a click would do.
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::collections::BTreeMap;
 use std::sync::{Arc, Weak};
 
@@ -112,6 +112,8 @@ pub struct Canvas {
     prior: Option<Vec<Id>>,
     /// What the last point a tool previewed snapped to this frame, if one did.
     pub(crate) found: Cell<Option<Found>>,
+    /// Cached alignment service: (level, model next_id, model elements len, service).
+    alignment_cache: RefCell<Option<(Id, Id, usize, bimcraft_core::alignment::AlignmentGuideService)>>,
 }
 
 impl Default for Canvas {
@@ -133,6 +135,7 @@ impl Default for Canvas {
             lifted: None,
             prior: None,
             found: Cell::new(None),
+            alignment_cache: RefCell::new(None),
         }
     }
 }
@@ -734,6 +737,42 @@ impl BimApp {
         snap::snap(m, level, v.mm(at), reach, from, square, &self.snaps_now())
     }
 
+    /// Finds alignment guides (smart snapping) to reference points of existing walls when drawing a wall.
+    pub(crate) fn wall_alignments(
+        &self,
+        m: &Model,
+        level: Id,
+        v: &View,
+        cursor: P2,
+        start: Option<P2>,
+    ) -> Vec<bimcraft_core::alignment::AlignmentResult> {
+        if !self.snaps.alignment_guides {
+            return Vec::new();
+        }
+        let tol = f64::from(self.snaps.alignment_tolerance) / v.scale;
+        let config = bimcraft_core::alignment::AlignmentConfig {
+            enabled: true,
+            tolerance: tol,
+            endpoints: self.snaps.endpoint,
+            midpoints: self.snaps.midpoint,
+            faces: true,
+            intersections: self.snaps.intersection,
+            angles: false,
+        };
+        let mut cache = self.canvas.alignment_cache.borrow_mut();
+        let reuse = match &*cache {
+            Some((cached_level, cached_next, cached_len, s)) => {
+                *cached_level == level && *cached_next == m.next_id && *cached_len == m.elements.len() && s.config() == &config
+            }
+            None => false,
+        };
+        if !reuse {
+            let s = bimcraft_core::alignment::AlignmentGuideService::from_model(m, level, config);
+            *cache = Some((level, m.next_id, m.elements.len(), s));
+        }
+        if let Some((_, _, _, s)) = &*cache { s.find_alignments(cursor, start, tol) } else { Vec::new() }
+    }
+
     /// What a pick at pixel `q` would land on, shown: its marker and what it is, and the guide it
     /// follows. The point.
     fn found(&self, sc: &Scene, q: (f32, f32), from: &[P2], square: bool) -> P2 {
@@ -1188,7 +1227,14 @@ impl BimApp {
                 // The point an arc passes through follows no guide from the points before it.
                 let chain = if self.wall_arc && matches!(self.tool, Tool::Wall(_)) && chain.len() == 2 { Vec::new() } else { chain };
                 let square = mods.shift || (self.constrain && matches!(self.tool, Tool::Move(_) | Tool::Copy(_)));
-                self.place(level, self.snap(m, level, v, at, &chain, square).at);
+                let mut pt = self.snap(m, level, v, at, &chain, square).at;
+                if self.snaps.alignment_guides && matches!(self.tool, Tool::Wall(_)) && !chain.is_empty() && !self.wall_arc {
+                    let alignments = self.wall_alignments(m, level, v, v.mm(at), chain.last().copied());
+                    if let Some(first) = alignments.first() {
+                        pt = first.snapped_point;
+                    }
+                }
+                self.place(level, pt);
             }
             &Tool::Rotate { centre, start, place } => {
                 self.tool = match (place, start) {
@@ -2533,7 +2579,28 @@ impl BimApp {
         let square = shift || (self.constrain && matches!(self.tool, Tool::Move(_) | Tool::Copy(_)));
         // The point an arc passes through follows no guide from the points before it.
         let arc_through = self.wall_arc && matches!(self.tool, Tool::Wall(_)) && chain.len() == 2;
-        let next = self.found(sc, q, if arc_through { &[] } else { chain }, square);
+        let mut next = self.found(sc, q, if arc_through { &[] } else { chain }, square);
+        if self.snaps.alignment_guides && matches!(self.tool, Tool::Wall(_)) && !chain.is_empty() && !arc_through {
+            let alignments = self.wall_alignments(sc.m, sc.level, sc.v, sc.v.mm(q), chain.last().copied());
+            if let Some(first) = alignments.first() {
+                next = first.snapped_point;
+                let magenta = Color32::from_rgb(255, 0, 255);
+                let magenta_stroke = Stroke::new(1.0, magenta);
+                let marker_stroke = Stroke::new(1.5, Color32::from_rgb(0, 160, 255));
+                for res in &alignments {
+                    let a = sc.screen(res.reference_point);
+                    let b = sc.screen(res.snapped_point);
+                    if a.distance(b) > 0.5 {
+                        let dir = (b - a).normalized();
+                        let ext_a = a - dir * 24.0;
+                        let ext_b = b + dir * 24.0;
+                        p.extend(Shape::dashed_line(&[ext_a, ext_b], magenta_stroke, 6.0, 4.0));
+                    }
+                    p.rect_stroke(Rect::from_center_size(a, vec2(7.0, 7.0)), 0.0, marker_stroke, StrokeKind::Middle);
+                }
+                tag(p, sc.screen(next) + vec2(12.0, 14.0), Align2::LEFT_TOP, t("align"));
+            }
+        }
         if let Tool::Move(Some(base)) | Tool::Copy(Some(base)) = &self.tool {
             let delta = sc.screen(next) - sc.screen(*base);
             ghost(&|pt| pt + delta);

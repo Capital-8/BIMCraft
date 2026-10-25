@@ -64,12 +64,26 @@ pub struct Snaps {
     /// Degrees between the angles a direction snaps to, from east and from the line before it,
     /// from 1 to 180; anything else for none.
     pub angle: f64,
+    /// Whether temporary alignment guides (smart snapping) are active.
+    pub alignment_guides: bool,
+    /// Alignment snap tolerance in screen pixels (default 8.0 px).
+    pub alignment_tolerance: f32,
 }
 
 impl Snaps {
     /// No snap at all, and no angle steps.
     pub fn none() -> Snaps {
-        Snaps { endpoint: false, midpoint: false, intersection: false, centre: false, perpendicular: false, nearest: false, angle: 0.0 }
+        Snaps {
+            endpoint: false,
+            midpoint: false,
+            intersection: false,
+            centre: false,
+            perpendicular: false,
+            nearest: false,
+            angle: 0.0,
+            alignment_guides: false,
+            alignment_tolerance: 8.0,
+        }
     }
 
     /// Just `kind` snapped to (a kind with no switch of its own is none), and no angle steps: what
@@ -90,7 +104,17 @@ impl Snaps {
 
 impl Default for Snaps {
     fn default() -> Snaps {
-        Snaps { endpoint: true, midpoint: true, intersection: true, centre: true, perpendicular: true, nearest: true, angle: 15.0 }
+        Snaps {
+            endpoint: true,
+            midpoint: true,
+            intersection: true,
+            centre: true,
+            perpendicular: true,
+            nearest: true,
+            angle: 15.0,
+            alignment_guides: true,
+            alignment_tolerance: 8.0,
+        }
     }
 }
 

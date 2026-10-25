@@ -2,6 +2,7 @@
 //! rendered to SVG and PNG, sections, elevations, the 3D view, sheets printed to PDF, schedules
 //! and IFC4 export. Nothing here knows about a UI.
 
+pub mod alignment;
 pub mod autosave;
 #[cfg(test)]
 mod autosave_tests;
