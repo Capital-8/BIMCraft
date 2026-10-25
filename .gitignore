@@ -4,3 +4,4 @@
 # Private local performance fixtures; never publish project files or derived results.
 /test_model/
 /COMPILADO/
+/COMPILADO_COMPLETO/
