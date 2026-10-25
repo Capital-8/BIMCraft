@@ -3152,6 +3152,40 @@ fn manage_snaps_toggles_alignment_guides() {
 }
 
 #[test]
+fn grids_drawn_near_alignment_guide_snap_to_other_grids_reference_points() {
+    let mut h = app("");
+    // First grid from (0, 0) to (0, 5000)
+    tool(&mut h, "Grid");
+    click(&mut h, P2(0.0, 0.0));
+    click(&mut h, P2(0.0, 5000.0));
+
+    // Second grid starting at (3000, 0)
+    tool(&mut h, "Grid");
+    click(&mut h, P2(3000.0, 0.0));
+    // Second point near (3000, 5003) aligned with Y=5000
+    click(&mut h, P2(3000.0, 5003.0));
+
+    let grid = ids(&h, "grid");
+    assert_eq!(grid.len(), 2);
+    assert_eq!(field(&h, grid[1], "start"), json!([3000.0, 0.0]));
+    assert_eq!(field(&h, grid[1], "end"), json!([3000.0, 5000.0]));
+}
+
+#[test]
+fn shortcut_toggles_alignment_guides() {
+    let mut h = app("");
+    assert!(h.state().snaps.alignment_guides);
+    key(&mut h, Key::F8);
+    assert!(!h.state().snaps.alignment_guides);
+    key(&mut h, Key::F8);
+    assert!(h.state().snaps.alignment_guides);
+    shortcut(&mut h, "AG");
+    assert!(!h.state().snaps.alignment_guides);
+    shortcut(&mut h, "OG");
+    assert!(h.state().snaps.alignment_guides);
+}
+
+#[test]
 fn the_measure_tool_lays_a_ruler_between_two_snapped_points_and_esc_takes_it_away() {
     let mut h = app(BOX);
     press(&mut h, "Annotate");
@@ -4911,6 +4945,7 @@ mod objectstyles;
 mod planviews;
 mod purge;
 mod revit;
+mod standards;
 mod start;
 mod window;
 

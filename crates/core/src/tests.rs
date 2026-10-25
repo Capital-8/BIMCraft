@@ -4912,3 +4912,58 @@ fn each_undo_step_says_what_it_made_or_took_away_and_undo_and_redo_go_back_sever
     assert_eq!(s.model, before);
     assert_eq!(s.steps(false).len(), 2);
 }
+
+#[test]
+fn technical_standards_configure_line_weights_sheets_and_styles() {
+    let mut s = Session::new();
+    house(&mut s);
+
+    // Initial inspection reports current standard
+    let r = run(&mut s, "standard", json!({}));
+    assert_eq!(r["standard"], "iso");
+    assert!(r["all"].as_array().unwrap().len() >= 4);
+
+    // Switch to NBR (ABNT / Brasil)
+    let nbr = run(&mut s, "standard", json!({"set": "nbr", "adapt_all": true}));
+    assert_eq!(nbr["standard"], "nbr");
+    assert_eq!(nbr["region"], "Brasil");
+    assert_eq!(s.model.standard(), crate::standards::TechnicalStandard::Nbr);
+    assert_eq!(s.history(), ["Wall", "Technical Standards"]);
+
+    // Verify object styles adapted to NBR 6492
+    let wall_style = s.model.object_style("wall");
+    assert_eq!(wall_style.cut, crate::pen::Pen(10), "Cut wall is 0.50mm in NBR 6492");
+    let col_style = s.model.object_style("column");
+    assert_eq!(col_style.cut, crate::pen::Pen(12), "Cut structural column is 0.70mm in NBR 6492");
+
+    // Verify sheet margins follow NBR 16752 (25mm binding margin) and folding marks
+    let margins_a1 = s.model.standard().sheet_margins("A1");
+    assert_eq!(margins_a1.left, 25.0);
+    assert_eq!(margins_a1.title_width, 178.0);
+    assert!(margins_a1.folding_marks);
+
+    // Sheets can be created in both ISO and Arch/ANSI formats
+    let sh_a1 = run(&mut s, "sheet", json!({"name": "Planta Baixa", "size": "A1"}))["id"].as_u64().unwrap();
+    assert_eq!(s.model.sheet(sh_a1).unwrap().size, "A1");
+
+    // Switch to ANSI (United States)
+    let ansi = run(&mut s, "standard", json!({"set": "ansi", "adapt_all": true}));
+    assert_eq!(ansi["standard"], "ansi");
+    assert_eq!(s.model.standard(), crate::standards::TechnicalStandard::Ansi);
+    assert_eq!(s.model.units, crate::units::Units::FeetInches, "ANSI adapts units to Imperial");
+
+    // Creating US Architectural sheet Arch D
+    let sh_arch_d = run(&mut s, "sheet", json!({"name": "Floor Plans", "size": "ARCH D"}))["id"].as_u64().unwrap();
+    assert_eq!(s.model.sheet(sh_arch_d).unwrap().size, "ARCH D");
+
+    // Drawing sheet works with both formats
+    let drawing = crate::sheet::draw(&s.model, sh_a1);
+    assert!(drawing.is_some());
+    let drawing_d = crate::sheet::draw(&s.model, sh_arch_d);
+    assert!(drawing_d.is_some());
+
+    // Undoing sheet then standard reverts back to NBR
+    run(&mut s, "undo", json!({}));
+    run(&mut s, "undo", json!({}));
+    assert_eq!(s.model.standard(), crate::standards::TechnicalStandard::Nbr);
+}

@@ -32,6 +32,7 @@ pub mod recent;
 pub mod revit;
 mod section;
 pub mod settings;
+mod standards;
 mod start;
 mod structure;
 mod style;
@@ -255,7 +256,7 @@ type Buttons<'a> = &'a [(Icon, &'a str, &'a str, Option<Tool>, bool)];
 
 /// The desktop's own two-letter shortcuts, which [`BimApp::shortcut`] takes before the commands'
 /// aliases, and what Keyboard Shortcuts (KS) calls them.
-const SHORTCUTS: [(&str, &str); 43] = [
+const SHORTCUTS: [(&str, &str); 45] = [
     ("MD", "Modify"),
     ("SB", "Floor: Structural"),
     ("MM", "Mirror Pick Axis"),
@@ -270,6 +271,8 @@ const SHORTCUTS: [(&str, &str); 43] = [
     ("CS", "Create Similar"),
     ("PP", "Properties"),
     ("SA", "Select All Instances"),
+    ("AG", "Alignment Guides"),
+    ("OG", "Orthogonal Guides"),
     ("SE", "Snap to Endpoints"),
     ("SM", "Snap to Midpoints"),
     ("SI", "Snap to Intersections"),
@@ -535,6 +538,8 @@ pub struct BimApp {
     line_weights_dialog: Option<lineweights::LineWeightsDialog>,
     /// Manage > Object Styles, while open.
     object_styles_dialog: Option<objectstyles::ObjectStylesDialog>,
+    /// Manage > Technical Standards, while open.
+    standards_dialog: Option<standards::StandardsDialog>,
     options_dialog: Option<phasing::OptionsDialog>,
     purge_dialog: Option<purge::PurgeDialog>,
     /// Manage > Select by ID and IDs of Selection, while open.
@@ -879,6 +884,7 @@ impl BimApp {
             phasing_dialog: None,
             line_weights_dialog: None,
             object_styles_dialog: None,
+            standards_dialog: None,
             options_dialog: None,
             purge_dialog: None,
             select_by_id: None,
@@ -1142,6 +1148,13 @@ impl BimApp {
         self.show_palette(p, !self.docking.shown(p));
     }
 
+    /// Toggle temporary alignment guides (smart snapping) on or off.
+    pub(crate) fn toggle_alignment_guides(&mut self) {
+        self.snaps.alignment_guides = !self.snaps.alignment_guides;
+        let text = if self.snaps.alignment_guides { t("Alignment guides on") } else { t("Alignment guides off") };
+        self.status = Status { text: text.to_string(), error: false };
+    }
+
     /// Follow what the last command removed: the selection, views of levels that are gone, and
     /// the contextual tab once its tool or selection is.
     fn tidy(&mut self) {
@@ -1290,6 +1303,9 @@ impl BimApp {
         if matches!(self.tool, Tool::Component | Tool::Fixture(_)) && pressed(Modifiers::NONE, Key::Space) {
             self.component_angle = (self.component_angle + 90.0) % 360.0;
         }
+        if pressed(Modifiers::NONE, Key::F8) || pressed(Modifiers::NONE, Key::F11) {
+            self.toggle_alignment_guides();
+        }
         let typed: String = ctx.input(|i| {
             i.events
                 .iter()
@@ -1349,6 +1365,10 @@ impl BimApp {
             }
             "SA" => {
                 self.select_all_instances();
+                return true;
+            }
+            "AG" | "OG" => {
+                self.toggle_alignment_guides();
                 return true;
             }
             "KS" => {
@@ -2798,6 +2818,11 @@ impl BimApp {
             if big_button(ui, Icon::ObjectStyles, "Object Styles", self.object_styles_dialog.is_some(), tip).clicked() {
                 self.object_styles_dialog = Some(objectstyles::ObjectStylesDialog::new(&self.session.model));
             }
+            let now_std = self.session.model.standard();
+            let tip = tf("Technical Standards: configure drawing standards (NBR, ISO, ANSI, EU); now {}", &[t(now_std.short_name())]);
+            if big_button(ui, Icon::Settings, "Technical Standards", self.standards_dialog.is_some(), &tip).clicked() {
+                self.standards_dialog = Some(standards::StandardsDialog::new(&self.session.model));
+            }
             let tip = "Snaps: what a picked point sticks to (ends, middles, crossings, centres, perpendiculars), and the angles it steps by; SE, SM, SI, SC, SP and SN take one alone for the next point, SO none";
             if big_button(ui, Icon::Snaps, "Snaps", self.show_snaps, tip).clicked() {
                 self.show_snaps = true;
@@ -3598,6 +3623,7 @@ impl BimApp {
         self.phasing_window(ctx);
         self.line_weights_window(ctx);
         self.object_styles_window(ctx);
+        self.standards_window(ctx);
         self.options_window(ctx);
         self.purge_window(ctx);
         if std::mem::take(&mut self.link_dialog) {

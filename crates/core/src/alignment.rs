@@ -98,6 +98,21 @@ impl Default for AlignmentConfig {
     }
 }
 
+fn micron(p: P2) -> P2 {
+    P2((p.0 * 1e3).round() / 1e3, (p.1 * 1e3).round() / 1e3)
+}
+
+fn dedup_references(refs: &mut Vec<ReferencePoint>) {
+    refs.sort_by_key(|r| r.kind as u8);
+    let mut deduped: Vec<ReferencePoint> = Vec::with_capacity(refs.len());
+    for r in refs.drain(..) {
+        if !deduped.iter().any(|d| d.point.dist(r.point) <= TOL) {
+            deduped.push(r);
+        }
+    }
+    *refs = deduped;
+}
+
 /// Service that indexes wall reference points and detects alignment guides.
 #[derive(Clone, Debug, Default)]
 pub struct AlignmentGuideService {
@@ -128,11 +143,15 @@ impl AlignmentGuideService {
         Self { config, references, by_x, by_y }
     }
 
-    /// Extracts reference points from all walls visible/cut on `level` in `model`.
+    /// Extracts reference points from all elements visible/present on `level` in `model`,
+    /// including walls, grids, runs (beams, pipes...), columns, floors, roofs, ceilings, shafts, and sections.
     pub fn from_model(m: &Model, level: Id, config: AlignmentConfig) -> Self {
         let level_guid = m.guid(level);
-        let mut walls_info = Vec::new();
+        let mut refs = Vec::new();
+        let mut straight_lines: Vec<(P2, P2)> = Vec::new();
 
+        // 1. Walls
+        let mut walls_info = Vec::new();
         for (id, e) in m.elements.iter() {
             if let Element::Wall(w) = e
                 && m.cut_by(w, level_guid)
@@ -140,10 +159,129 @@ impl AlignmentGuideService {
                 let axis = Axis::of(w);
                 let (f0, f1) = walls::faces(m, w);
                 walls_info.push((Some(*id), axis, (f0, f1)));
+                if axis.centre().is_none() && axis.length() > TOL {
+                    straight_lines.push((axis.start, axis.end));
+                }
+            }
+        }
+        refs.extend(Self::extract_references(&walls_info, &config));
+
+        // 2. Grids (visible across all levels)
+        for (id, e) in m.elements.iter() {
+            if let Element::Grid(g) = e {
+                let len = g.start.dist(g.end);
+                if len > TOL {
+                    if config.endpoints {
+                        refs.push(ReferencePoint { point: g.start, kind: ReferenceType::Endpoint, wall_id: Some(*id) });
+                        refs.push(ReferencePoint { point: g.end, kind: ReferenceType::Endpoint, wall_id: Some(*id) });
+                    }
+                    if config.midpoints {
+                        let mid = (g.start + g.end) * 0.5;
+                        refs.push(ReferencePoint { point: mid, kind: ReferenceType::Midpoint, wall_id: Some(*id) });
+                    }
+                    straight_lines.push((g.start, g.end));
+                }
             }
         }
 
-        let refs = Self::extract_references(&walls_info, &config);
+        // 3. Columns, Structural Columns, Footings
+        for (id, e) in m.elements.iter() {
+            match e {
+                Element::Column(c) | Element::StructuralColumn(c) | Element::Footing(c) if c.level == level_guid => {
+                    if config.endpoints {
+                        refs.push(ReferencePoint { point: c.at, kind: ReferenceType::Endpoint, wall_id: Some(*id) });
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        // 4. Runs (Beams, Pipes, Conduits, etc.)
+        for (id, e) in m.elements.iter() {
+            match e {
+                crate::model::run_arm!(r) if r.level == level_guid => {
+                    let len = r.start.dist(r.end);
+                    if len > TOL {
+                        if config.endpoints {
+                            refs.push(ReferencePoint { point: r.start, kind: ReferenceType::Endpoint, wall_id: Some(*id) });
+                            refs.push(ReferencePoint { point: r.end, kind: ReferenceType::Endpoint, wall_id: Some(*id) });
+                        }
+                        if config.midpoints {
+                            let mid = (r.start + r.end) * 0.5;
+                            refs.push(ReferencePoint { point: mid, kind: ReferenceType::Midpoint, wall_id: Some(*id) });
+                        }
+                        straight_lines.push((r.start, r.end));
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        // 5. Sections and Elevations
+        for (id, e) in m.elements.iter() {
+            if let Element::Section(s) | Element::Elevation(s) = e {
+                let len = s.start.dist(s.end);
+                if len > TOL {
+                    if config.endpoints {
+                        refs.push(ReferencePoint { point: s.start, kind: ReferenceType::Endpoint, wall_id: Some(*id) });
+                        refs.push(ReferencePoint { point: s.end, kind: ReferenceType::Endpoint, wall_id: Some(*id) });
+                    }
+                    if config.midpoints {
+                        let mid = (s.start + s.end) * 0.5;
+                        refs.push(ReferencePoint { point: mid, kind: ReferenceType::Midpoint, wall_id: Some(*id) });
+                    }
+                    straight_lines.push((s.start, s.end));
+                }
+            }
+        }
+
+        // 6. Floors, Roofs, Ceilings, Shafts
+        for (id, e) in m.elements.iter() {
+            let loops: Vec<&[P2]> = match e {
+                Element::Floor(f) if f.level == level_guid => {
+                    std::iter::once(f.boundary.as_slice()).chain(f.openings.iter().map(|c| c.as_slice())).collect()
+                }
+                Element::Roof(r) if r.level == level_guid => {
+                    std::iter::once(r.boundary.as_slice()).chain(r.courtyards.iter().map(|c| c.as_slice())).collect()
+                }
+                Element::Ceiling(c) if c.level == level_guid => std::iter::once(c.boundary.as_slice()).collect(),
+                Element::Shaft(s) => std::iter::once(s.boundary.as_slice()).collect(),
+                _ => Vec::new(),
+            };
+            for loop_pts in loops {
+                let n = loop_pts.len();
+                for i in 0..n {
+                    let p1 = loop_pts[i];
+                    let p2 = loop_pts[(i + 1) % n];
+                    if config.endpoints {
+                        refs.push(ReferencePoint { point: p1, kind: ReferenceType::Endpoint, wall_id: Some(*id) });
+                    }
+                    if config.midpoints && p1.dist(p2) > TOL {
+                        refs.push(ReferencePoint { point: (p1 + p2) * 0.5, kind: ReferenceType::Midpoint, wall_id: Some(*id) });
+                    }
+                }
+            }
+        }
+
+        // 7. Intersections between straight lines across all element types
+        if config.intersections && straight_lines.len() >= 2 {
+            for (i, &(a1, b1)) in straight_lines.iter().enumerate() {
+                for &(a2, b2) in straight_lines.iter().skip(i + 1) {
+                    if let Some(q) = geom::line_intersection(a1, b1, a2, b2) {
+                        let on_1 = geom::dist_to_segment(q, a1, b1) <= TOL;
+                        let on_2 = geom::dist_to_segment(q, a2, b2) <= TOL;
+                        if on_1 && on_2 {
+                            let near_end = q.dist(a1) <= TOL || q.dist(b1) <= TOL || q.dist(a2) <= TOL || q.dist(b2) <= TOL;
+                            if !near_end {
+                                refs.push(ReferencePoint { point: q, kind: ReferenceType::Intersection, wall_id: None });
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        dedup_references(&mut refs);
         Self::new(refs, config)
     }
 
@@ -271,7 +409,7 @@ impl AlignmentGuideService {
 
         match (best_x, best_y) {
             (Some((rx, _, _)), Some((ry, _, _))) => {
-                let snapped_point = P2(rx.point.0, ry.point.1);
+                let snapped_point = micron(P2(rx.point.0, ry.point.1));
                 vec![
                     AlignmentResult {
                         snapped_point,
@@ -290,7 +428,7 @@ impl AlignmentGuideService {
                 ]
             }
             (Some((rx, _, _)), None) => {
-                let snapped_point = P2(rx.point.0, cursor.1);
+                let snapped_point = micron(P2(rx.point.0, cursor.1));
                 vec![AlignmentResult {
                     snapped_point,
                     guide_line: GuideLine { from: rx.point, to: snapped_point },
@@ -300,7 +438,7 @@ impl AlignmentGuideService {
                 }]
             }
             (None, Some((ry, _, _))) => {
-                let snapped_point = P2(cursor.0, ry.point.1);
+                let snapped_point = micron(P2(cursor.0, ry.point.1));
                 vec![AlignmentResult {
                     snapped_point,
                     guide_line: GuideLine { from: ry.point, to: snapped_point },
@@ -365,9 +503,10 @@ impl AlignmentGuideService {
         }
 
         if let Some((axis, r, proj, _)) = best {
+            let p = micron(proj);
             vec![AlignmentResult {
-                snapped_point: proj,
-                guide_line: GuideLine { from: r.point, to: proj },
+                snapped_point: p,
+                guide_line: GuideLine { from: r.point, to: p },
                 reference_point: r.point,
                 axis,
                 kind: r.kind,

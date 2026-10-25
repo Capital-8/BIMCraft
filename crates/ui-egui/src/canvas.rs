@@ -737,8 +737,8 @@ impl BimApp {
         snap::snap(m, level, v.mm(at), reach, from, square, &self.snaps_now())
     }
 
-    /// Finds alignment guides (smart snapping) to reference points of existing walls when drawing a wall.
-    pub(crate) fn wall_alignments(
+    /// Finds alignment guides (smart snapping) to reference points of existing elements when drawing.
+    pub(crate) fn alignments(
         &self,
         m: &Model,
         level: Id,
@@ -746,17 +746,18 @@ impl BimApp {
         cursor: P2,
         start: Option<P2>,
     ) -> Vec<bimcraft_core::alignment::AlignmentResult> {
-        if !self.snaps.alignment_guides {
+        let snaps = self.snaps_now();
+        if !snaps.alignment_guides {
             return Vec::new();
         }
-        let tol = f64::from(self.snaps.alignment_tolerance) / v.scale;
+        let tol = f64::from(snaps.alignment_tolerance) / v.scale;
         let config = bimcraft_core::alignment::AlignmentConfig {
             enabled: true,
             tolerance: tol,
-            endpoints: self.snaps.endpoint,
-            midpoints: self.snaps.midpoint,
+            endpoints: snaps.endpoint,
+            midpoints: snaps.midpoint,
             faces: true,
-            intersections: self.snaps.intersection,
+            intersections: snaps.intersection,
             angles: false,
         };
         let mut cache = self.canvas.alignment_cache.borrow_mut();
@@ -773,10 +774,70 @@ impl BimApp {
         if let Some((_, _, _, s)) = &*cache { s.find_alignments(cursor, start, tol) } else { Vec::new() }
     }
 
+    /// Finds alignment guides (smart snapping) to reference points of existing walls when drawing a wall.
+    #[inline]
+    #[allow(dead_code)]
+    pub(crate) fn wall_alignments(
+        &self,
+        m: &Model,
+        level: Id,
+        v: &View,
+        cursor: P2,
+        start: Option<P2>,
+    ) -> Vec<bimcraft_core::alignment::AlignmentResult> {
+        self.alignments(m, level, v, cursor, start)
+    }
+
+    /// Renders visual alignment guide lines, reference markers, and alignment tags.
+    fn show_alignments(&self, sc: &Scene, alignments: &[bimcraft_core::alignment::AlignmentResult]) {
+        let magenta = Color32::from_rgb(255, 0, 255);
+        let magenta_stroke = Stroke::new(1.0, magenta);
+        let marker_stroke = Stroke::new(1.5, Color32::from_rgb(0, 160, 255));
+        for res in alignments {
+            let a = sc.screen(res.reference_point);
+            let b = sc.screen(res.snapped_point);
+            if a.distance(b) > 0.5 {
+                let dir = (b - a).normalized();
+                let ext_a = a - dir * 24.0;
+                let ext_b = b + dir * 24.0;
+                sc.p.extend(Shape::dashed_line(&[ext_a, ext_b], magenta_stroke, 6.0, 4.0));
+            }
+            sc.p.rect_stroke(Rect::from_center_size(a, vec2(7.0, 7.0)), 0.0, marker_stroke, StrokeKind::Middle);
+        }
+        if let Some(first) = alignments.first() {
+            tag(sc.p, sc.screen(first.snapped_point) + vec2(12.0, 14.0), Align2::LEFT_TOP, t("align"));
+        }
+    }
+
+    /// Where a point picked at pixel `at` lands, including temporary alignment guides.
+    pub(crate) fn snap_point(&self, m: &Model, level: Id, v: &View, at: (f32, f32), from: &[P2], square: bool) -> P2 {
+        let f = self.snap(m, level, v, at, from, square);
+        if self.snaps_now().alignment_guides
+            && !from.is_empty()
+            && !matches!(f.kind, Kind::Endpoint | Kind::Midpoint | Kind::Intersection | Kind::Centre | Kind::Perpendicular)
+        {
+            let alignments = self.alignments(m, level, v, f.at, from.last().copied());
+            if let Some(first) = alignments.first() {
+                return first.snapped_point;
+            }
+        }
+        f.at
+    }
+
     /// What a pick at pixel `q` would land on, shown: its marker and what it is, and the guide it
     /// follows. The point.
     fn found(&self, sc: &Scene, q: (f32, f32), from: &[P2], square: bool) -> P2 {
-        let f = self.snap(sc.m, sc.level, sc.v, q, from, square);
+        let mut f = self.snap(sc.m, sc.level, sc.v, q, from, square);
+        if self.snaps_now().alignment_guides
+            && !from.is_empty()
+            && !matches!(f.kind, Kind::Endpoint | Kind::Midpoint | Kind::Intersection | Kind::Centre | Kind::Perpendicular)
+        {
+            let alignments = self.alignments(sc.m, sc.level, sc.v, f.at, from.last().copied());
+            if let Some(first) = alignments.first() {
+                f.at = first.snapped_point;
+                self.show_alignments(sc, &alignments);
+            }
+        }
         self.show_snap(sc, &f);
         self.canvas.found.set(Some(f));
         f.at
@@ -1227,25 +1288,19 @@ impl BimApp {
                 // The point an arc passes through follows no guide from the points before it.
                 let chain = if self.wall_arc && matches!(self.tool, Tool::Wall(_)) && chain.len() == 2 { Vec::new() } else { chain };
                 let square = mods.shift || (self.constrain && matches!(self.tool, Tool::Move(_) | Tool::Copy(_)));
-                let mut pt = self.snap(m, level, v, at, &chain, square).at;
-                if self.snaps.alignment_guides && matches!(self.tool, Tool::Wall(_)) && !chain.is_empty() && !self.wall_arc {
-                    let alignments = self.wall_alignments(m, level, v, v.mm(at), chain.last().copied());
-                    if let Some(first) = alignments.first() {
-                        pt = first.snapped_point;
-                    }
-                }
+                let pt = self.snap_point(m, level, v, at, &chain, square);
                 self.place(level, pt);
             }
             &Tool::Rotate { centre, start, place } => {
                 self.tool = match (place, start) {
-                    (true, _) => Tool::Rotate { centre: self.snap(m, level, v, at, &[], false).at, start: None, place: false },
+                    (true, _) => Tool::Rotate { centre: self.snap_point(m, level, v, at, &[], false), start: None, place: false },
                     (false, None) => Tool::Rotate { centre, start: Some(v.mm(at)), place: false },
                     (false, Some(from)) => return self.turn(centre, angle_between(centre, from, v.mm(at), self.snaps.angle)),
                 };
             }
             // A ruler: its start, then its end, which stays on show until Esc or another start.
             &Tool::Measure(first) => {
-                let p = self.snap(m, level, v, at, first.as_slice(), mods.shift).at;
+                let p = self.snap_point(m, level, v, at, first.as_slice(), mods.shift);
                 match first {
                     None => {
                         self.measured = None;
@@ -1264,7 +1319,7 @@ impl BimApp {
                 }
             }
             &Tool::Mirror { draw: true, start } => {
-                let p = self.snap(m, level, v, at, start.as_slice(), mods.shift).at;
+                let p = self.snap_point(m, level, v, at, start.as_slice(), mods.shift);
                 match start {
                     None => self.tool = Tool::Mirror { draw: true, start: Some(p) },
                     Some(a) => self.reflect((a, p)),
@@ -1372,7 +1427,7 @@ impl BimApp {
             }
             Tool::Component | Tool::Fixture(_) => {
                 if let Some((family, ty)) = self.placing() {
-                    let at = self.snap(m, level, v, at, &[], false).at;
+                    let at = self.snap_point(m, level, v, at, &[], false);
                     self.run(
                         "component",
                         json!({"family": family, "type": ty, "at": point(at), "level": level, "angle": self.component_angle}),
@@ -1380,12 +1435,12 @@ impl BimApp {
                 }
             }
             &Tool::Stand(category) => {
-                let at = self.snap(m, level, v, at, &[], false).at;
+                let at = self.snap_point(m, level, v, at, &[], false);
                 self.place_stand(level, at, category);
             }
             Tool::Column => match top_params(m, level, self.column_top, &self.column_height) {
                 Ok(mut p) => {
-                    p["at"] = point(self.snap(m, level, v, at, &[], false).at);
+                    p["at"] = point(self.snap_point(m, level, v, at, &[], false));
                     p["level"] = json!(level);
                     let p = self.typed("column", p);
                     self.run("column", p);
@@ -1397,7 +1452,7 @@ impl BimApp {
             Tool::Stair(pts) | Tool::Ramp(pts) => {
                 let ramp = matches!(self.tool, Tool::Ramp(_));
                 let mut pts = pts.clone();
-                let p = self.snap(m, level, v, at, &pts, mods.shift).at;
+                let p = self.snap_point(m, level, v, at, &pts, mods.shift);
                 if pts.last().is_some_and(|l| l.dist(p) <= TOL) {
                     return;
                 }
@@ -1425,7 +1480,7 @@ impl BimApp {
                     self.run("railing", p);
                 }
                 _ => {
-                    let p = self.snap(m, level, v, at, path, mods.shift).at;
+                    let p = self.snap_point(m, level, v, at, path, mods.shift);
                     if let Tool::Railing(path) = &mut self.tool
                         && path.last().is_none_or(|l| l.dist(p) > TOL)
                     {
@@ -1435,7 +1490,7 @@ impl BimApp {
             },
             // The footprint's next corner; back on the first, it's done.
             Tool::Mass(path) => {
-                let p = self.snap(m, level, v, at, path, mods.shift).at;
+                let p = self.snap_point(m, level, v, at, path, mods.shift);
                 if path.len() >= 3 && path.first().is_some_and(|f| f.dist(p) <= TOL) {
                     self.finish_mass(level);
                 } else if let Tool::Mass(path) = &mut self.tool
@@ -1462,7 +1517,7 @@ impl BimApp {
             // Its line's start and end, then how far across it's swept; once made, selected.
             Tool::ExtrusionRoof(pts) => {
                 let mut pts = pts.clone();
-                let p = self.snap(m, level, v, at, &pts, mods.shift).at;
+                let p = self.snap_point(m, level, v, at, &pts, mods.shift);
                 if pts.last().is_some_and(|l| l.dist(p) <= TOL) {
                     return;
                 }
@@ -2579,28 +2634,7 @@ impl BimApp {
         let square = shift || (self.constrain && matches!(self.tool, Tool::Move(_) | Tool::Copy(_)));
         // The point an arc passes through follows no guide from the points before it.
         let arc_through = self.wall_arc && matches!(self.tool, Tool::Wall(_)) && chain.len() == 2;
-        let mut next = self.found(sc, q, if arc_through { &[] } else { chain }, square);
-        if self.snaps.alignment_guides && matches!(self.tool, Tool::Wall(_)) && !chain.is_empty() && !arc_through {
-            let alignments = self.wall_alignments(sc.m, sc.level, sc.v, sc.v.mm(q), chain.last().copied());
-            if let Some(first) = alignments.first() {
-                next = first.snapped_point;
-                let magenta = Color32::from_rgb(255, 0, 255);
-                let magenta_stroke = Stroke::new(1.0, magenta);
-                let marker_stroke = Stroke::new(1.5, Color32::from_rgb(0, 160, 255));
-                for res in &alignments {
-                    let a = sc.screen(res.reference_point);
-                    let b = sc.screen(res.snapped_point);
-                    if a.distance(b) > 0.5 {
-                        let dir = (b - a).normalized();
-                        let ext_a = a - dir * 24.0;
-                        let ext_b = b + dir * 24.0;
-                        p.extend(Shape::dashed_line(&[ext_a, ext_b], magenta_stroke, 6.0, 4.0));
-                    }
-                    p.rect_stroke(Rect::from_center_size(a, vec2(7.0, 7.0)), 0.0, marker_stroke, StrokeKind::Middle);
-                }
-                tag(p, sc.screen(next) + vec2(12.0, 14.0), Align2::LEFT_TOP, t("align"));
-            }
-        }
+        let next = self.found(sc, q, if arc_through { &[] } else { chain }, square);
         if let Tool::Move(Some(base)) | Tool::Copy(Some(base)) = &self.tool {
             let delta = sc.screen(next) - sc.screen(*base);
             ghost(&|pt| pt + delta);

@@ -41,6 +41,7 @@ pub mod sheet;
 pub mod skeleton;
 pub mod snap;
 pub mod stairs;
+pub mod standards;
 pub mod step;
 pub mod styles;
 pub mod texture;

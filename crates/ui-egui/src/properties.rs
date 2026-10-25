@@ -1999,7 +1999,7 @@ impl BimApp {
             ui.separator();
             ui.add_space(4.0);
             ui.checkbox(&mut s.alignment_guides, t("Alignment Guides")).on_hover_text(t(
-                "Show temporary alignment guides (smart snapping) to other walls when drawing",
+                "Show temporary alignment guides (smart snapping) when drawing",
             ));
             if s.alignment_guides {
                 ui.horizontal(|ui| {
