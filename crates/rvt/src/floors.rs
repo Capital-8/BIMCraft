@@ -144,6 +144,8 @@ pub(crate) struct Sketched {
     pub level: bimcraft_core::ids::Guid,
     /// How far above its level the box's top (bottom, for a ceiling or a roof) is.
     pub offset: f64,
+    /// Whether its box is as tall as its type is thick. A sloped or stepped one is not: it comes in level, a stand-in for what it is.
+    pub flat: bool,
 }
 
 /// Which sketched element is read: its category, and whether its level and offset are those of the box's top (a floor) or of its
@@ -199,7 +201,8 @@ pub(crate) fn sketched(
             LayeredType { name: None, layers: vec![Layer { thickness: tall, ..Layer::default() }], thickness: tall }
         }
     };
-    if (tall - typ.thickness).abs() > 1.0 {
+    let flat = (tall - typ.thickness).abs() <= 1.0;
+    if !flat {
         // A sloped or stepped one: it comes in level, as thick as its type, at the box's bottom, and the note says so.
         cx.note(
             what,
@@ -215,7 +218,7 @@ pub(crate) fn sketched(
     let model_level = cx.levels.get(&level).copied().ok_or("it stands on no level")?;
     let offset = micron(mm(z) - mm(f.elevations.get(&level).copied().unwrap_or(0.0)));
     let type_name = type_named(cx, tid, &typ);
-    Ok(Sketched { pieces, type_name, level: model_level, offset })
+    Ok(Sketched { pieces, type_name, level: model_level, offset, flat })
 }
 
 pub(crate) fn import(cx: &mut Import, f: &Facts, g: &Gathered) {

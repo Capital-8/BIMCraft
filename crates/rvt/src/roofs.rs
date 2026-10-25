@@ -97,7 +97,11 @@ pub(crate) fn import(cx: &mut Import, f: &Facts, g: &Gathered) {
                     };
                     let id = cx.model.insert(Element::Roof(roof));
                     cx.from.insert(id, format!("Roof {}", r.id));
-                    cx.roofs.insert(r.id, id);
+                    // A wall's top follows only a roof that is what the record says: a level stand-in for a slope, or a roof
+                    // in pieces, would cut a gable wall off at the eaves.
+                    if s.flat && s.pieces.len() == 1 {
+                        cx.roofs.insert(r.id, id);
+                    }
                 }
             }
             Err(why) => cx.left_out(
@@ -136,7 +140,6 @@ fn boxed(
     let roof = Roof { type_name, level: model_level, boundary: ring(&[(x0, y0), (x1, y0), (x1, y1), (x0, y1)]), offset, ..Roof::default() };
     let id = cx.model.insert(Element::Roof(roof));
     cx.from.insert(id, format!("Roof {}", r.id));
-    cx.roofs.insert(r.id, id);
     Ok(())
 }
 

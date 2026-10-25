@@ -76,7 +76,7 @@ fn a_wall_whose_record_names_a_roof_has_its_top_cut_by_it() {
     // wall's top is attached to, and the other does not.
     const WALLS: i64 = -2_000_011;
     let mut p = with_roof_type(2024);
-    roof(&mut p, 100, PROFILE_ROOF, [0.0, 0.0, 9.0, 20.0, 10.0, 9.5]);
+    roof(&mut p, 100, PROFILE_ROOF, [0.0, 0.0, 9.0, 20.0, 10.0, 9.25]);
     rectangle(&mut p, 100, 200, [0.0, 0.0, 20.0, 10.0], 9.0, true);
     for (id, y, named) in [(110u32, 1.0, true), (111, 5.0, false)] {
         let mut refs = vec![10u64, 530, u64::from(id)];
@@ -103,6 +103,28 @@ fn a_wall_whose_record_names_a_roof_has_its_top_cut_by_it() {
     assert!((top - 9.0 * 304.8).abs() < 1.0, "cut by the roof at 9 ft, got {top}");
     assert!(under(1524.0).expect("the wall at 5 ft").attach_top.is_none());
     assert!(i.skipped.iter().any(|s| s.contains("follows the roof it names") && s.contains("110")), "{:?}", i.skipped);
+}
+
+#[test]
+fn a_wall_naming_a_roof_that_only_comes_in_level_keeps_its_own_box() {
+    use crate::project_fixture::line_bytes;
+    // A roof that rises (3 ft tall, a type 0.25 ft thick) comes in level at the bottom of its box, and one of another class as
+    // the footprint of its box. The eaves are no roof over a gable wall: it would be cut off at the eaves, so it keeps its own box.
+    const WALLS: i64 = -2_000_011;
+    for by_face in [false, true] {
+        let mut p = with_roof_type(2024);
+        roof(&mut p, 100, if by_face { 100 } else { PROFILE_ROOF }, [0.0, 0.0, 9.0, 20.0, 10.0, 12.0]);
+        rectangle(&mut p, 100, 200, [0.0, 0.0, 20.0, 10.0], 9.0, true);
+        p.recs.push(Rec::new(110, WALLS).at([0.0, 0.6, 0.0, 20.0, 1.4, 10.0], &[10, 530, 110, 100]));
+        p.data.push(crate::project_fixture::Block { id: 110, payload: line_bytes(0.0, 20.0, [0.0, 1.0, 0.0], [1.0, 0.0, 0.0]) });
+        let i = import(&p);
+        assert!(!roofs(&i).is_empty(), "by face {by_face}: the roof comes in: {:?}", i.skipped);
+        let wall = i.model.elements.values().find_map(|e| match e {
+            Element::Wall(w) => Some(w),
+            _ => None,
+        });
+        assert!(wall.expect("the wall").attach_top.is_none(), "by face {by_face}: {:?}", i.skipped);
+    }
 }
 
 #[test]
