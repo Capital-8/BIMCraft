@@ -110,6 +110,7 @@ One line per module: what it owns. Read the module's file and, for the areas it 
 - `link.rs`: linked models, the project with other projects' built elements drawn in and never edited ([views and graphics](docs/areas/views-and-graphics.md)).
 - `family.rs`, `csg.rs`, `fixtures.rs`, `favorites.rs`: families, solids cut from solids, the starter fixtures, the user's favorites. `texture.rs`, `paint.rs`: textures and paint. Area: [families](docs/areas/families.md).
 - `ifc.rs`, `import.rs`, `step.rs`: IFC export, IFC import, the STEP files they use. `lenient.rs`: what a file holds that this version doesn't know, found so it can be left out. `cloud.rs`: point clouds read from PTS, XYZ, PLY and LAS ([point clouds](docs/areas/point-clouds.md)). `insert.rs`, `inquiry.rs`: Insert from File, Select by ID and IDs of Selection. `autosave.rs`: background snapshots. `units.rs`, `language.rs`: units and a project's language. `sample.rs`, `sample/highrise.rs`: the sample house and the benchmark tower. `component_geometry.rs`: family geometry reused within an operation.
+- `conduit.rs`: the `conduit_fill` command, a conduit's fill by NBR 5410 (makers' catalogues in `conduit/tables.rs`).
 - `nbr5410.rs`: the `circuit` command's sizing of a circuit by NBR 5410 (tables in `nbr5410/tables.rs`; [structure and MEP](docs/areas/structure-and-mep.md)).
 - `tests.rs`, `mep_tests.rs`, `structure_tests.rs`, `autosave_tests.rs`: the engine driven through commands, as a front end drives it.
 

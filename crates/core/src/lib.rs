@@ -9,6 +9,7 @@ pub mod bridge;
 pub mod cloud;
 mod commands;
 mod component_geometry;
+pub mod conduit;
 mod csg;
 pub mod engine;
 pub mod family;

@@ -924,6 +924,18 @@ pub static ALL: &[Command] = &[
         circuit,
     ),
     other(
+        "conduit_fill",
+        "Conduit Fill",
+        "{section, phases?: FN|FF|3F|3FN, circuits?, reduced_neutral?, family?, size?} the fill of a conduit as NBR 5410 asks, for the \
+         conductors of a circuit (its phases, neutral and protective conductor, of `section` mm²) times `circuits` in the same conduit \
+         (1): their cross-sections by outside diameter over the conduit's inside, at most 53 % for one cable, 31 % for two, 40 % for \
+         three or more. `family` (pvc-thread, pvc-solder, steel-heavy, steel-rir; pvc-thread) and `size` (its mark, e.g. 3/4\"; none: \
+         the smallest that fits). The dimensions are the makers' own from their catalogues, each family naming maker, document, page \
+         and address; the inside diameter is the outside less twice the wall. Cables are the flexible 750 V PVC ones of 0.5 to 240 mm²: \
+         EPR or larger sections are `pending`, never guessed. Cable trays are not sized. It changes nothing",
+        conduit_fill,
+    ),
+    other(
         "library",
         "Library",
         "{kind?, name?} the project's library with its ids and GUIDs, as elements have them: each type (`kind` \
@@ -2924,6 +2936,54 @@ fn circuit(_: &mut Session, p: &Value) -> R {
         "conductors": e::cable_text(circuit.phases, n.section, circuit.reduced_neutral),
         "grew": section < n.section - 1e-9 || breaker < n.breaker - 1e-9,
         "chosen": d.chosen.as_ref().map(evaluation),
+    }))
+}
+
+fn conduit_fill(_: &mut Session, p: &Value) -> R {
+    use crate::conduit::{self, FAMILIES};
+    use crate::nbr5410::Phases;
+    let c = "conduit_fill";
+    let o = p.as_object().ok_or_else(|| bad(c, "params must be an object"))?;
+    const KEYS: &[&str] = &["section", "phases", "circuits", "reduced_neutral", "family", "size"];
+    if let Some(key) = o.keys().find(|k| !KEYS.contains(&k.as_str())) {
+        return Err(bad(c, format!("unknown parameter `{key}`")));
+    }
+    let section = within(c, p, "section", 0.0, 0.0, 1000.0)?;
+    if section <= 0.0 {
+        return Err(bad(c, "`section` (mm²) is required"));
+    }
+    let phases = Phases::parse(choice(c, p, "phases", &["FN", "FF", "3F", "3FN"], "FN")?).unwrap_or(Phases::PhaseNeutral);
+    let circuits = within(c, p, "circuits", 1.0, 1.0, 1000.0)?.round() as usize;
+    let keys: Vec<&str> = FAMILIES.iter().map(|f| f.key).collect();
+    let family = conduit::family(choice(c, p, "family", &keys, "pvc-thread")?).ok_or_else(|| bad(c, "no such family"))?;
+    let one = conduit::conductors(phases, section, flag(c, p, "reduced_neutral")?);
+    let all: Vec<f64> = (0..circuits).flat_map(|_| one.iter().copied()).collect();
+    let source = json!({"maker": family.maker, "document": family.document, "page": family.page, "url": family.url, "inside": "outside less twice the wall"});
+    if let Some(s) = one.iter().find(|s| conduit::cable_diameter(**s).is_none()) {
+        return Ok(
+            json!({"conductors": all.len(), "pending": format!("the catalogue has no outside diameter for a cable of {s} mm²"), "source": source}),
+        );
+    }
+    let round = |x: f64, k: f64| (x * k).round() / k + 0.0;
+    let smallest = conduit::smallest(family, &all).map(|s| s.0);
+    let size =
+        match string(c, p, "size")? {
+            None => None,
+            Some(mark) => Some(family.sizes.iter().find(|s| s.0 == mark).ok_or_else(|| {
+                bad(c, format!("`size` must be one of {}", family.sizes.iter().map(|s| s.0).collect::<Vec<_>>().join(", ")))
+            })?),
+        };
+    let fill = size.and_then(|s| conduit::fill(s, &all));
+    Ok(json!({
+        "conductors": all.len(),
+        "sections_mm2": all,
+        "smallest": smallest,
+        "size": size.map(|s| s.0),
+        "inside_mm": size.map(|s| round(conduit::inside(s), 100.0)),
+        "fill_percent": fill.map(|f| round(f.ratio * 100.0, 10.0)),
+        "limit_percent": fill.map(|f| round(f.limit * 100.0, 10.0)),
+        "ok": fill.map(|f| f.ok),
+        "source": source,
     }))
 }
 

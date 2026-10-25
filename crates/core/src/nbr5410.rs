@@ -57,7 +57,7 @@ impl Phases {
     pub fn loaded(self) -> usize {
         if self.three() { 3 } else { 2 }
     }
-    fn count(self) -> usize {
+    pub fn count(self) -> usize {
         match self {
             Phases::PhaseNeutral => 1,
             Phases::TwoPhases => 2,
