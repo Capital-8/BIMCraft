@@ -957,6 +957,18 @@ pub static ALL: &[Command] = &[
         vent_size,
     ),
     other(
+        "hydrant_size",
+        "Size Hydrants",
+        "{column?: 1-5, area?, type?: 1|2|3|4-40|4-65|5, hydrants?, inside?, nominal?, material?: steel|copper|pvc|pex, length?, rise?} \
+         hydrants and hose reels as IT 22/2025 of the CBPMESP asks. With `column` (of Tabela 3, by the occupation) and `area` (m², \
+         built) it replies the system type and the fire reserve (m³). With `type` (Tabela 2; 4 comes as 4-40 or 4-65 by its nozzle) \
+         it replies the design flow, that of the two most unfavourable jets (`hydrants`, 2 by default), and the head at the nozzle; \
+         with `inside` (mm) it also replies the speed (5 m/s at most), the Hazen-Williams head loss over `length` (m) of the \
+         `material` (Tabela 1), the head needed at the start of the pipe with its `rise` (m, up) and, with `nominal` (mm), whether the \
+         pipe is big enough (DN 65; DN 50 for types 1 and 2). It changes nothing",
+        hydrant_size,
+    ),
+    other(
         "water_size",
         "Size Cold Water Pipes",
         "{fixtures?: {wc, lav, sink, shower, laundry: count}, flow?, method?: weights|sum, dn?, length?, fittings?: {elbow90, elbow45, \
@@ -3115,6 +3127,91 @@ fn vent_size(_: &mut Session, p: &Value) -> R {
         let mm = drainage::trap_distance(t).ok_or_else(|| bad(c, "`trap_dn` must be 40, 50, 75 or 100 (Tabela 1)"))?;
         out.insert("trap_to_vent_mm".into(), json!(mm));
     }
+    Ok(Value::Object(out))
+}
+
+fn hydrant_size(_: &mut Session, p: &Value) -> R {
+    use crate::hydrant::{self, MATERIALS, MAX_NOZZLE_HEAD, MAX_SPEED, TYPE_KEYS};
+    let c = "hydrant_size";
+    let o = p.as_object().ok_or_else(|| bad(c, "params must be an object"))?;
+    const KEYS: &[&str] = &["column", "area", "type", "hydrants", "inside", "nominal", "material", "length", "rise"];
+    if let Some(key) = o.keys().find(|k| !KEYS.contains(&k.as_str())) {
+        return Err(bad(c, format!("unknown parameter `{key}`")));
+    }
+    let round = |x: f64, k: f64| (x * k).round() / k + 0.0;
+    let (has_column, has_area) = (!absent(p.get("column")), !absent(p.get("area")));
+    let mut system: Option<(u8, f64)> = None;
+    if has_column || has_area {
+        if !has_column {
+            return Err(bad(c, "`column` (1 to 5, of IT 22's Tabela 3) is required with `area`"));
+        }
+        if !has_area {
+            return Err(bad(c, "`area` (m², built) is required with `column`"));
+        }
+        let column = within(c, p, "column", 1.0, 1.0, 5.0)?;
+        if column.fract() != 0.0 {
+            return Err(bad(c, "`column` must be a whole number from 1 to 5"));
+        }
+        let area = within(c, p, "area", 0.0, f64::MIN_POSITIVE, 1.0e8)?;
+        system = hydrant::system_for(column as u8, area);
+    }
+    let mut out = serde_json::Map::new();
+    if let Some((t, rti)) = system {
+        out.insert("system".into(), json!(t.to_string()));
+        out.insert("reserve_m3".into(), json!(rti));
+    }
+    let key = if absent(p.get("type")) {
+        match system {
+            Some((4, _)) if !absent(p.get("inside")) => {
+                return Err(bad(c, "the system is type 4: give `type` as 4-40 or 4-65, by the nozzle"));
+            }
+            Some((t, _)) if t != 4 => Some(t.to_string()),
+            Some(_) => None,
+            None => return Err(bad(c, "`type` (1, 2, 3, 4-40, 4-65 or 5) or `column` and `area` is required")),
+        }
+    } else {
+        Some(choice(c, p, "type", TYPE_KEYS, "")?.to_string())
+    };
+    let Some(key) = key else { return Ok(Value::Object(out)) };
+    let hydrants = within(c, p, "hydrants", 2.0, 1.0, 1000.0)?;
+    if hydrants.fract() != 0.0 {
+        return Err(bad(c, "`hydrants` must be a whole number from 1 to 1000"));
+    }
+    let Some(t) = hydrant::kind(&key) else { return Err(bad(c, format!("no system type `{key}`"))) };
+    let flow = hydrant::design_flow(&key, hydrants as u32);
+    out.insert("type".into(), json!(key));
+    out.insert("flow_lpm".into(), json!(flow));
+    out.insert("nozzle_head_mca".into(), json!(t.6));
+    out.insert("hose_dn_mm".into(), json!(t.3));
+    out.insert("hose_length_m".into(), json!(t.4));
+    let mut ok = t.6 <= MAX_NOZZLE_HEAD;
+    if absent(p.get("inside")) {
+        if !absent(p.get("nominal")) {
+            return Err(bad(c, "`nominal` needs the pipe's `inside` diameter (mm)"));
+        }
+        return Ok(Value::Object(out));
+    }
+    let inside = within(c, p, "inside", 0.0, f64::MIN_POSITIVE, 5000.0)?;
+    let material = choice(c, p, "material", &MATERIALS.iter().map(|m| m.0).collect::<Vec<_>>(), "steel")?;
+    let cf = hydrant::hazen_c(material).unwrap_or(120.0);
+    let length = within(c, p, "length", 0.0, 0.0, 1.0e6)?;
+    let rise = within(c, p, "rise", 0.0, -1000.0, 1000.0)?;
+    let (v, j) = (hydrant::speed(flow, inside), hydrant::hazen_j(flow, cf, inside));
+    let loss = j * length;
+    let speed_ok = v <= MAX_SPEED + 1e-9;
+    ok = ok && speed_ok;
+    out.insert("speed_ms".into(), json!(round(v, 100.0)));
+    out.insert("speed_ok".into(), json!(speed_ok));
+    out.insert("head_loss_m_per_m".into(), json!(round(j, 1.0e5)));
+    out.insert("loss_mca".into(), json!(round(loss, 100.0)));
+    out.insert("need_mca".into(), json!(round(t.6 + loss + rise, 100.0)));
+    if !absent(p.get("nominal")) {
+        let nominal = within(c, p, "nominal", 0.0, f64::MIN_POSITIVE, 5000.0)?;
+        let size_ok = nominal + 1e-9 >= hydrant::min_nominal(&key);
+        ok = ok && size_ok;
+        out.insert("size_ok".into(), json!(size_ok));
+    }
+    out.insert("ok".into(), json!(ok));
     Ok(Value::Object(out))
 }
 

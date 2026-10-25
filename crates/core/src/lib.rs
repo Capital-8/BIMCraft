@@ -19,6 +19,7 @@ mod fixtures;
 mod font;
 pub mod geom;
 pub mod graphics;
+pub mod hydrant;
 pub mod ids;
 pub mod ifc;
 pub mod import;
