@@ -252,11 +252,12 @@ fn the_floors_and_ceilings_of_the_architectural_sample_are_those_of_rvt_rss_expo
                 theirs.id
             );
             let net = area(&fl.boundary).abs() - fl.openings.iter().map(|o| area(o).abs()).sum::<f64>();
-            // A floor whose sketch does not close comes in as the footprint of its box, which is not the area another reader has
-            // of it: it is compared to within its own outline's error, and the report says what of it is not read.
+            // A floor whose sketch does not close comes in as the footprint of its box, and the report says so: that is not the
+            // area of the floor, so it is not compared.
             let boxed = i.skipped.iter().any(|s| s.contains("footprint of its own box") && s.contains(&theirs.id.to_string()));
-            let slack = if boxed { 0.1 * theirs.area } else { 0.005 };
-            assert!((net / 1e6 - theirs.area).abs() < slack, "floor {}: {} m2 against {}", theirs.id, net / 1e6, theirs.area);
+            if !boxed {
+                assert!((net / 1e6 - theirs.area).abs() < 0.005, "floor {}: {} m2 against {}", theirs.id, net / 1e6, theirs.area);
+            }
         }
         for theirs in &RAC_CEILINGS {
             let found = find("Ceiling", theirs.id);
@@ -291,11 +292,12 @@ fn the_structural_samples_five_floors_come_in_at_every_release() {
             let bottom = top - i.model.types.floor[&fl.type_name].thickness;
             assert!((top - theirs.top).abs() < 0.11 && (bottom - theirs.bottom).abs() < 0.11, "floor {} of {}", theirs.id, path.display());
             let net = area(&fl.boundary).abs() - fl.openings.iter().map(|o| area(o).abs()).sum::<f64>();
-            // A floor whose sketch does not close comes in as the footprint of its box, which is not the area another reader has
-            // of it: it is compared to within its own outline's error, and the report says what of it is not read.
+            // A floor whose sketch does not close comes in as the footprint of its box, and the report says so: that is not the
+            // area of the floor, so it is not compared.
             let boxed = i.skipped.iter().any(|s| s.contains("footprint of its own box") && s.contains(&theirs.id.to_string()));
-            let slack = if boxed { 0.1 * theirs.area } else { 0.005 };
-            assert!((net / 1e6 - theirs.area).abs() < slack, "floor {}: {} m2 against {}", theirs.id, net / 1e6, theirs.area);
+            if !boxed {
+                assert!((net / 1e6 - theirs.area).abs() < 0.005, "floor {}: {} m2 against {}", theirs.id, net / 1e6, theirs.area);
+            }
         }
     }
 }

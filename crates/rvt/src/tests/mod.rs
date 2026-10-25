@@ -538,13 +538,14 @@ fn all_samples() -> Vec<PathBuf> {
     out
 }
 
-/// The samples named `file`, wherever they are.
-/// Whether an import is of a release another reader's export covers (2023 to 2025): a sample saved again by a newer release is a
-/// file of its own, whose boxes and geometry need not be the older one's, so the comparisons pass it by.
+/// Whether a release of the architectural basic sample is one rvt-rs's export (the numbers in `rvt_rs.rs`) was made from, 2023 to
+/// 2025. The 2026 file Autodesk offers is another file, not the older one saved again, so its boxes are not those numbers: the
+/// comparisons of that sample pass it by. The structural sample's comparisons cover every release, and do not use this.
 fn pinned(i: &bimcraft_core::import::Imported) -> bool {
     i.schema.rsplit(' ').next().and_then(|y| y.parse::<u32>().ok()).is_some_and(|y| y <= 2025)
 }
 
+/// The samples named `file`, wherever they are.
 fn samples_of(file: &str) -> Vec<PathBuf> {
     all_samples().into_iter().filter(|p| p.file_name().is_some_and(|n| n == file)).collect()
 }
