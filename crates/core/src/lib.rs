@@ -11,6 +11,7 @@ mod commands;
 mod component_geometry;
 pub mod conduit;
 mod csg;
+pub mod drainage;
 pub mod engine;
 pub mod family;
 pub mod favorites;

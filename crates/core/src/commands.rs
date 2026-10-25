@@ -936,6 +936,27 @@ pub static ALL: &[Command] = &[
         conduit_fill,
     ),
     other(
+        "drain_size",
+        "Size a Sanitary Drain",
+        "{units?, fixtures?: {wc?, lav?, sink?, shower?, laundry?}, role?: branch|main|stack, slope?, floors?, min_dn?} the DN of a \
+         sanitary drain as NBR 8160 asks, by the fixture units (UHC) it carries: `units`, or `fixtures` counted (Tabela 3: a water \
+         closet 6 UHC and DN 100, a lavatory 1 and 40, a sink 3 and 50, a shower 2 and 40, a laundry tub 3 and 40; the drain is never \
+         smaller than the fixtures' own). `role`: a `branch` (ramal de esgoto, Tabela 5, the default), a `main` (subcoletor or coletor \
+         predial, Tabela 7 by `slope`, a fraction, 0.01 by default; DN 100 at least) or a `stack` (tubo de queda, Tabela 6 by the \
+         building's `floors`, up to three or more). `min_dn` is the largest drain flowing into it. Replies with the `dn`, what it \
+         carries (`capacity`) and the `minimum_dn` the fixtures ask. It changes nothing",
+        drain_size,
+    ),
+    other(
+        "vent_size",
+        "Size a Sanitary Vent",
+        "{units, wc?, stack_dn?, length?, trap_dn?} the DN of a sanitary vent as NBR 8160 asks, by the units (UHC) of what it vents: a \
+         branch vent (ramal de ventilação, Tabela 8; `wc` says a water closet is in the group), or, with `stack_dn` (the DN of the \
+         stack or drain served) and `length` (mm, from its foot to its open end), a vent stack or header (Tabela 2). `trap_dn` adds the \
+         longest run from a trap of that DN to its vent (Tabela 1). It changes nothing",
+        vent_size,
+    ),
+    other(
         "library",
         "Library",
         "{kind?, name?} the project's library with its ids and GUIDs, as elements have them: each type (`kind` \
@@ -2985,6 +3006,91 @@ fn conduit_fill(_: &mut Session, p: &Value) -> R {
         "ok": fill.map(|f| f.ok),
         "source": source,
     }))
+}
+
+fn drain_size(_: &mut Session, p: &Value) -> R {
+    use crate::drainage::{self, FIXTURES, Role};
+    let c = "drain_size";
+    let o = p.as_object().ok_or_else(|| bad(c, "params must be an object"))?;
+    const KEYS: &[&str] = &["units", "fixtures", "role", "slope", "floors", "min_dn"];
+    if let Some(key) = o.keys().find(|k| !KEYS.contains(&k.as_str())) {
+        return Err(bad(c, format!("unknown parameter `{key}`")));
+    }
+    let mut units = within(c, p, "units", 0.0, 0.0, 1.0e7)?;
+    let mut minimum = within(c, p, "min_dn", 0.0, 0.0, 1000.0)?;
+    let mut fixtures_dn = 0.0;
+    match p.get("fixtures") {
+        v if absent(v) => {}
+        Some(Value::Object(f)) => {
+            let mut sum = 0.0;
+            for (kind, n) in f {
+                let (u, dn) = drainage::fixture(kind).ok_or_else(|| {
+                    bad(c, format!("`fixtures`: no fixture `{kind}`, use {}", FIXTURES.iter().map(|x| x.0).collect::<Vec<_>>().join(", ")))
+                })?;
+                let n = n
+                    .as_f64()
+                    .filter(|n| n.is_finite() && *n >= 0.0 && *n <= 10_000.0 && n.fract() == 0.0)
+                    .ok_or_else(|| bad(c, format!("`fixtures`: `{kind}` must be a whole number from 0 to 10000, got {n}")))?;
+                sum += u * n;
+                if n > 0.0 {
+                    fixtures_dn = f64::max(fixtures_dn, dn);
+                }
+            }
+            units += sum;
+        }
+        Some(v) => return Err(bad(c, format!("`fixtures` must be an object {{kind: count}}, got {v}"))),
+        None => {}
+    }
+    if units <= 0.0 {
+        return Err(bad(c, "`units` (UHC) or `fixtures` is required"));
+    }
+    minimum = minimum.max(fixtures_dn);
+    let role = Role::parse(choice(c, p, "role", &["branch", "main", "stack"], "branch")?).unwrap_or(Role::Branch);
+    let slope = within(c, p, "slope", 0.01, 0.0, 1.0)?;
+    let floors = within(c, p, "floors", 1.0, 1.0, 1000.0)?.round() as u32;
+    let dn = drainage::smallest(units, slope, role, floors, minimum)
+        .ok_or_else(|| bad(c, format!("{units} UHC is more than the standard's tables carry in one drain: split it")))?;
+    Ok(json!({"units": units, "dn": dn, "capacity": drainage::capacity(dn, slope, role, floors), "minimum_dn": minimum}))
+}
+
+fn vent_size(_: &mut Session, p: &Value) -> R {
+    use crate::drainage;
+    let c = "vent_size";
+    let o = p.as_object().ok_or_else(|| bad(c, "params must be an object"))?;
+    const KEYS: &[&str] = &["units", "wc", "stack_dn", "length", "trap_dn"];
+    if let Some(key) = o.keys().find(|k| !KEYS.contains(&k.as_str())) {
+        return Err(bad(c, format!("unknown parameter `{key}`")));
+    }
+    let units = within(c, p, "units", 0.0, 0.0, 1.0e7)?;
+    if units <= 0.0 {
+        return Err(bad(c, "`units` (UHC of what it vents) is required"));
+    }
+    let dns = drainage::DNS;
+    let mut out = serde_json::Map::new();
+    let dn = if absent(p.get("stack_dn")) {
+        drainage::branch_vent(units, flag(c, p, "wc")?)
+            .ok_or_else(|| bad(c, format!("{units} UHC is more than the table gives a branch vent (Tabela 8)")))?
+    } else {
+        let served = within(c, p, "stack_dn", 0.0, 0.0, 1000.0)?;
+        if !dns.iter().any(|d| (d - served).abs() < 1e-9) {
+            return Err(bad(c, format!("`stack_dn` must be one of {}", dns.iter().map(|d| d.to_string()).collect::<Vec<_>>().join(", "))));
+        }
+        if absent(p.get("length")) {
+            return Err(bad(c, "`length` (mm, from the foot to the open end) is required with `stack_dn`"));
+        }
+        let length = within(c, p, "length", 0.0, 0.0, MAX_COORD)? / 1000.0;
+        let dn = drainage::vent_stack(served, units, length)
+            .ok_or_else(|| bad(c, "no vent of the table (Tabela 2) is long enough for that, or the units pass its last row"))?;
+        out.insert("longest_m".into(), json!(drainage::vent_stack_limit(served, units, dn)));
+        dn
+    };
+    out.insert("dn".into(), json!(dn));
+    if !absent(p.get("trap_dn")) {
+        let t = within(c, p, "trap_dn", 0.0, 0.0, 1000.0)?;
+        let mm = drainage::trap_distance(t).ok_or_else(|| bad(c, "`trap_dn` must be 40, 50, 75 or 100 (Tabela 1)"))?;
+        out.insert("trap_to_vent_mm".into(), json!(mm));
+    }
+    Ok(Value::Object(out))
 }
 
 fn undo(s: &mut Session, p: &Value) -> R {
