@@ -315,16 +315,8 @@ fn levels(cx: &mut Import, inv: &Inventory) {
         cx.from.insert(id, "Level 'Level 1'".into());
         cx.skipped.push("the file has no levels the reader can find: the project has one, Level 1, at zero".into());
     }
-    // A level inside another element (a group's, a family's) is no project level: the project has the levels it shows, and these
-    // are not among them. They are named in the report, not left out of it.
-    if !inv.owned_levels.is_empty() {
-        let ids: Vec<String> = inv.owned_levels.iter().map(u32::to_string).collect();
-        let n = ids.len();
-        let plural = if n == 1 { "" } else { "s" };
-        cx.skipped.push(format!(
-            "{n} level{plural}: it sits inside another element (a group's or a family's), so it is no project level (ids {})",
-            ids.join(", ")
-        ));
+    for id in &inv.owned_levels {
+        cx.left_out("level", *id, "it sits inside other elements, so it is not a project level");
     }
     if inv.unread_levels > 0 {
         let n = inv.unread_levels;

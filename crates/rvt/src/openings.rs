@@ -124,19 +124,14 @@ pub(crate) fn import(cx: &mut Import, f: &Facts, g: &Gathered) {
     for (category, label) in [(OST_DOORS, "door"), (OST_WINDOWS, "window")] {
         let symbols = f.symbols.get(&category).cloned().unwrap_or_default();
         for r in f.of_category(category) {
-            let read = (|| -> Result<Option<Pending>, String> {
+            let read = (|| -> Result<Pending, String> {
                 let named = candidates(r, &walls);
                 if named.is_empty() {
                     // A window set in a roof or a floor is a skylight: BIMCraft's windows stand in walls, and it has no opening
-                    // for another plane. It is named in the report, not left out of it.
+                    // for another plane, so it is left out.
                     let planes = [crate::roofs::OST_ROOFS, crate::floors::OST_FLOORS, crate::floors::OST_CEILINGS];
                     if planes.iter().any(|c| f.of_category(*c).any(|o| r.refs.contains(&u64::from(o.id)))) {
-                        cx.note(
-                            label,
-                            r.id,
-                            "it is set in a roof or a floor (a skylight), and BIMCraft's windows stand in walls: what of it is there is not read",
-                        );
-                        return Ok(None);
+                        return Err("it is set in a roof or a floor (a skylight), and BIMCraft's windows stand in walls".into());
                     }
                     return Err("its record names no wall".into());
                 }
@@ -185,7 +180,6 @@ pub(crate) fn import(cx: &mut Import, f: &Facts, g: &Gathered) {
                         });
                     }
                 };
-                let _ = host;
                 let wall = cx.model.wall(host_id).ok_or("its host wall is gone")?;
                 let (long, tall) = (wall.start.dist(wall.end), cx.model.top_z(wall) - cx.model.own_base(wall));
                 let sill = sill.max(0.0);
@@ -202,7 +196,7 @@ pub(crate) fn import(cx: &mut Import, f: &Facts, g: &Gathered) {
                     return Err(format!("its host wall {host} leaves no room for it"));
                 }
                 let name = symbol_name(r, &symbols, g, category).unwrap_or_else(|| format!("Imported {label}"));
-                Ok(Some(Pending {
+                Ok(Pending {
                     id: r.id,
                     door: label == "door",
                     host: host_id,
@@ -211,11 +205,10 @@ pub(crate) fn import(cx: &mut Import, f: &Facts, g: &Gathered) {
                     height,
                     sill,
                     clamped: overruns,
-                }))
+                })
             })();
             match read {
-                Ok(Some(p)) => pending.push(p),
-                Ok(None) => {}
+                Ok(p) => pending.push(p),
                 Err(why) => cx.left_out(label, r.id, &why),
             }
         }

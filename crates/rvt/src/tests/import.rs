@@ -49,13 +49,13 @@ fn what_the_inventory_cannot_make_a_level_of_is_listed() {
     let i = import(&p);
     assert_eq!(level_list(&i).iter().map(|l| l.0.as_str()).collect::<Vec<_>>(), ["Level 1"]);
     let says = |what: &str| i.skipped.iter().any(|s| s.contains(what));
-    assert!(says("it sits inside another element") && says("ids 11"), "{:?}", i.skipped);
+    assert!(says("inside other elements") && says("ids 11"), "{:?}", i.skipped);
     assert!(says("1 level") && says("no name"), "{:?}", i.skipped);
     assert!(says("Far away"), "a level past the model's limits is left out with the rule: {:?}", i.skipped);
     assert!(i.model.check().is_ok());
     // Each is a note that counts: `N kinds left out, why`, which the desktop adds up for its status line.
     let counted = |kind: &str, what: &str| i.skipped.iter().any(|s| s.starts_with(&format!("1 {kind} left out, ")) && s.contains(what));
-    assert!(says("ids 11") && counted("level", "no name") && counted("level", "Far away"), "{:?}", i.skipped);
+    assert!(counted("level", "inside other elements") && counted("level", "no name") && counted("level", "Far away"), "{:?}", i.skipped);
 }
 
 #[test]

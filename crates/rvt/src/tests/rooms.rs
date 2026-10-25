@@ -83,9 +83,7 @@ fn a_rooms_point_is_moved_off_a_wall_it_would_fall_on_and_a_room_with_no_name_is
     room(&mut q, 301, "1", "Hall", [0.2, 0.2, 0.0, 19.8, 9.8, 8.0]);
     q.recs.push(Rec::new(104, WALLS).at([9.6, 0.0, 0.0, 10.4, 10.0, 10.0], &[10, 11, 500, 104]));
     let i = import(&q);
-    let [r] = rooms(&i)[..] else { panic!("{:?}", i.skipped) };
-    assert!(r.point.0 > 0.0 && r.point.0 <= 3048.0, "at the middle of the room it finds: {:?}", r.point);
-    assert!(i.skipped.iter().any(|s| s.contains("no walls enclose its box") && s.contains("301")), "{:?}", i.skipped);
+    assert!(rooms(&i).is_empty() && i.skipped.iter().any(|s| s.contains("do not enclose its box") && s.contains("301")), "{:?}", i.skipped);
 }
 
 #[test]
@@ -93,9 +91,7 @@ fn rooms_without_walls_or_without_a_level_are_left_out_with_the_reason() {
     let mut p = base(2024);
     room(&mut p, 300, "1", "Open", [0.0, 0.0, 0.0, 10.0, 10.0, 8.0]);
     let i = import(&p);
-    // A room no walls enclose is still a room: it comes in at the middle of its box, and the note says no walls enclose it.
-    let [r] = rooms(&i)[..] else { panic!("{:?}", i.skipped) };
-    assert!(r.name == "Open" && i.skipped.iter().any(|s| s.contains("no walls enclose its box") && s.contains("300")), "{:?}", i.skipped);
+    assert!(rooms(&i).is_empty() && i.skipped.iter().any(|s| s.contains("room") && s.contains("300")), "{:?}", i.skipped);
 }
 
 #[test]
@@ -127,9 +123,9 @@ fn the_rooms_of_the_architectural_sample_have_rvt_rss_numbers_and_names() {
         let i = crate::import_path(&path, "x").unwrap();
         let mut got: Vec<(String, String)> = rooms(&i).iter().map(|r| (r.number.clone(), r.name.clone())).collect();
         got.sort();
-        // Nine of the fourteen rooms are enclosed by walls that come in; the rest are open to curtain walls or room separation
-        // lines, and come in at the middle of their box with a note. The nine that a second reader (rvt-rs) writes as IfcSpace
-        // are these, with these numbers and names.
+        // Ten of the fourteen rooms are enclosed by walls that come in; the rest are open to room separation lines. The nine that a
+        // second reader (rvt-rs) writes as IfcSpace are among them; the tenth, 206, is closed by curtain walls, which come in as
+        // the plane of their boxes.
         let want: Vec<(&str, &str)> = vec![
             ("102", "Mech."),
             ("103", "Bath"),
@@ -138,16 +134,12 @@ fn the_rooms_of_the_architectural_sample_have_rvt_rss_numbers_and_names() {
             ("203", "Bath"),
             ("204", "Bedroom"),
             ("205", "Bath"),
+            ("206", "Master Bedroom"),
             ("207", "Master Bath"),
             ("208", "Linen"),
         ];
-        let got: Vec<(&str, &str)> = got.iter().map(|(a, b)| (a.as_str(), b.as_str())).filter(|g| want.contains(g)).collect();
-        assert_eq!(got, want, "{}: {:?}", path.display(), i.skipped);
-        assert!(
-            i.skipped.iter().any(|s| s.contains("rooms") && s.contains("no walls enclose its box") && s.contains("857279")),
-            "{:?}",
-            i.skipped
-        );
+        assert_eq!(got.iter().map(|(a, b)| (a.as_str(), b.as_str())).collect::<Vec<_>>(), want, "{}: {:?}", path.display(), i.skipped);
+        assert!(i.skipped.iter().any(|s| s.contains("4 rooms left out") && s.contains("do not enclose")), "{:?}", i.skipped);
     }
 }
 
@@ -164,8 +156,8 @@ fn a_mutation_sweep_over_a_project_of_rooms_never_panics_and_what_comes_in_check
 
 #[test]
 fn a_value_far_beyond_revits_limits_is_damage_and_never_reaches_the_geometry() {
-    // One wall of the enclosure starts a googol of feet away: a length the reader does not take, so the wall has no line, and the room
-    // (with only three walls) is left out. Nothing may panic on the way: the room's point is found among the walls made.
+    // One wall of the enclosure starts a googol of feet away: a length the reader does not take, so the wall has no line and comes
+    // in along its own box, which closes the room. Nothing may panic on the way: the room's point is found among the walls made.
     let mut p = walled(2024);
     p.data.retain(|b| b.id != 100);
     let mut b = line_bytes(0.0, 1e300, [0.0, 0.0, 0.0], [1.0, 0.0, 0.0]);
@@ -175,8 +167,7 @@ fn a_value_far_beyond_revits_limits_is_damage_and_never_reaches_the_geometry() {
     let i = import(&p);
     assert_eq!(super::walls::walls(&i).len(), 4, "the wall comes in along its box: {:?}", i.skipped);
     assert!(i.skipped.iter().any(|s| s.contains("no location line") && s.contains("100")), "{:?}", i.skipped);
-    let [r] = rooms(&i)[..] else { panic!("{:?}", i.skipped) };
-    assert!(r.point.0 > 0.0, "{:?}", r.point);
+    assert_eq!(rooms(&i).len(), 1, "the four walls enclose the room: {:?}", i.skipped);
 }
 
 #[test]
