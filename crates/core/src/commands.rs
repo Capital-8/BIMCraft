@@ -957,6 +957,19 @@ pub static ALL: &[Command] = &[
         vent_size,
     ),
     other(
+        "storm_size",
+        "Size a Storm Drain",
+        "{kind: downpipe|horizontal, area?, rainfall?, flow?, outlet?: edge|funnel, gutter?, length?, slope?, inside?} a storm drain as \
+         NBR 10844 asks. The flow is `flow` (L/min), or the rain on `area` (m², as the standard counts a roof) at `rainfall` (mm/h; \
+         150, what it allows for up to 100 m²): Q = I·A/60. A `downpipe` (condutor vertical) takes the inner diameter of the \
+         standard's Figure 3 abacuses by Q, the water depth in the gutter `gutter` (50 to 100 mm), its `length` (mm, 0.3 m or more) \
+         and the gutter's `outlet` (edge: sharp-edged, the default; funnel); 70 mm inside at least. A `horizontal` drain takes \
+         Manning at two thirds full (n 0.011, the standard's Table 4) at its `slope` (a fraction, 0.005 at least): the inner \
+         diameter it needs, and with `inside` (mm) whether that pipe carries the flow. Off the abacuses (more than 150 mm inside) \
+         nothing is read. It changes nothing",
+        storm_size,
+    ),
+    other(
         "library",
         "Library",
         "{kind?, name?} the project's library with its ids and GUIDs, as elements have them: each type (`kind` \
@@ -3091,6 +3104,69 @@ fn vent_size(_: &mut Session, p: &Value) -> R {
         out.insert("trap_to_vent_mm".into(), json!(mm));
     }
     Ok(Value::Object(out))
+}
+
+fn storm_size(_: &mut Session, p: &Value) -> R {
+    use crate::storm::{self, DEFAULT_RAIN, MIN_SLOPE, N_PVC, Off, Outlet};
+    let c = "storm_size";
+    let o = p.as_object().ok_or_else(|| bad(c, "params must be an object"))?;
+    const KEYS: &[&str] = &["kind", "area", "rainfall", "flow", "outlet", "gutter", "length", "slope", "inside"];
+    if let Some(key) = o.keys().find(|k| !KEYS.contains(&k.as_str())) {
+        return Err(bad(c, format!("unknown parameter `{key}`")));
+    }
+    let kind = choice(c, p, "kind", &["downpipe", "horizontal"], "")?;
+    if kind.is_empty() {
+        return Err(bad(c, "`kind` (downpipe or horizontal) is required"));
+    }
+    let outlet = Outlet::parse(choice(c, p, "outlet", &["edge", "funnel"], "edge")?).unwrap_or(Outlet::Edge);
+    let flow = if absent(p.get("flow")) {
+        let area = within(c, p, "area", 0.0, 0.0, 1.0e7)?;
+        if area <= 0.0 {
+            return Err(bad(c, "`area` (m², the roof that drains) or `flow` (L/min) is required"));
+        }
+        storm::design_flow(within(c, p, "rainfall", DEFAULT_RAIN, f64::MIN_POSITIVE, 1000.0)?, area)
+    } else {
+        within(c, p, "flow", 0.0, f64::MIN_POSITIVE, 1.0e9)?
+    };
+    let round = |x: f64, k: f64| (x * k).round() / k + 0.0;
+    if kind == "downpipe" {
+        if absent(p.get("gutter")) {
+            return Err(bad(c, "`gutter` (the water depth in the gutter, 50 to 100 mm) is required"));
+        }
+        if absent(p.get("length")) {
+            return Err(bad(c, "`length` (the downpipe's, mm) is required"));
+        }
+        let (gutter, length) = (within(c, p, "gutter", 0.0, 0.0, 10_000.0)?, within(c, p, "length", 0.0, 0.0, MAX_COORD)? / 1000.0);
+        let d = storm::downpipe_diameter(outlet, flow, gutter, length).map_err(|off| {
+            bad(
+                c,
+                match off {
+                    Off::Depth => "the water depth in the gutter must be 50 to 100 mm: the abacuses stop there",
+                    Off::Length => "a downpipe shorter than 0.3 m is off the abacuses",
+                    Off::Diameter => "more than 150 mm inside is off the abacuses of NBR 10844's Figure 3",
+                },
+            )
+        })?;
+        return Ok(
+            json!({"flow_lpm": round(flow, 100.0), "inside_mm": round(d.diameter, 10.0), "by_depth_mm": round(d.by_depth, 10.0), "by_length_mm": round(d.by_length, 10.0)}),
+        );
+    }
+    if absent(p.get("slope")) {
+        return Err(bad(c, "`slope` (a fraction, 0.005 at least) is required"));
+    }
+    let slope = within(c, p, "slope", 0.0, 0.0, 1.0)?;
+    if slope + 1e-9 < MIN_SLOPE {
+        return Err(bad(c, "`slope` must be 0.5 % (0.005) at least, NBR 10844"));
+    }
+    let need = storm::horizontal_diameter(flow, slope, N_PVC);
+    let inside = within(c, p, "inside", 0.0, 0.0, 10_000.0)?;
+    let carries = (inside > 0.0).then(|| storm::manning_flow(inside, slope, N_PVC));
+    Ok(json!({
+        "flow_lpm": round(flow, 100.0),
+        "inside_mm": round(need, 10.0),
+        "carries_lpm": carries.map(|q| round(q, 10.0)),
+        "ok": carries.map(|q| q + 1e-9 >= flow),
+    }))
 }
 
 fn undo(s: &mut Session, p: &Value) -> R {
