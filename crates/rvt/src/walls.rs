@@ -155,6 +155,9 @@ pub(crate) fn layered_type(f: &Facts, g: &Gathered, id: u32, category: i64) -> O
 pub(crate) fn layered(name: Option<String>, layers: &[CompoundLayer], g: &Gathered, category: i64) -> LayeredType {
     let layers: Vec<Layer> = layers
         .iter()
+        // A structural deck may take its thickness from the layer above it and write none of its own; a layer of no thickness
+        // that is not a membrane is not a layer BIMCraft's model can hold, and it adds nothing to the type.
+        .filter(|l| l.width_feet > 0.0 || l.function == 100)
         .map(|l| Layer {
             function: function(l.function),
             // A layer with no material of its own takes its category's, where the document's object styles give one.
@@ -181,27 +184,130 @@ fn no_layers(f: &Facts, g: &Gathered, tid: u32) -> String {
     }
 }
 
+/// How thick a wall's own box says its body is, in millimetres: the record box is the rectangle of the wall's line and its
+/// thickness, so the side across the line gives the thickness back. None for an arc, whose box is not that rectangle. A type with
+/// no compound structure (a curtain wall, a storefront) is read this way from the file rather than given a thickness of our own.
+/// A wall's line where its record holds none: the long side of its own box, through its middle, with the box's shorter side as its
+/// thickness. A box square in plan (or bigger in the other way) gives no line.
+fn box_line(bbox: &[f64; 6]) -> Option<Curve> {
+    let (dx, dy) = (bbox[3] - bbox[0], bbox[4] - bbox[1]);
+    if !dx.is_finite() || !dy.is_finite() || dx.abs().min(dy.abs()) <= 1e-6 {
+        return None;
+    }
+    let (cx, cy) = ((bbox[0] + bbox[3]) / 2.0, (bbox[1] + bbox[4]) / 2.0);
+    let z = (bbox[2] + bbox[5]) / 2.0;
+    let line = if dx >= dy {
+        BoundedLine { start_parameter: -dx / 2.0, end_parameter: dx / 2.0, origin: [cx, cy, z], direction: [1.0, 0.0, 0.0] }
+    } else {
+        BoundedLine { start_parameter: -dy / 2.0, end_parameter: dy / 2.0, origin: [cx, cy, z], direction: [0.0, 1.0, 0.0] }
+    };
+    Some(Curve::Line(line))
+}
+
+fn box_thickness(c: Curve, bbox: &[f64; 6]) -> Option<f64> {
+    let Curve::Line(l) = c else { return None };
+    let (a, b) = (l.start(), l.end());
+    let len = (b[0] - a[0]).hypot(b[1] - a[1]);
+    if len <= 1e-6 {
+        return None;
+    }
+    let (u, v) = ((b[0] - a[0]) / len, (b[1] - a[1]) / len);
+    let (across_x, across_y) = (u.abs(), v.abs());
+    let (box_x, box_y) = (bbox[3] - bbox[0], bbox[4] - bbox[1]);
+    let t = if across_y > 1e-3 {
+        (box_x - len * across_x) / across_y
+    } else if across_x > 1e-3 {
+        (box_y - len * across_y) / across_x
+    } else {
+        return None;
+    };
+    let t = mm(t);
+    (t.is_finite() && t > 0.0).then_some(micron(t))
+}
+
+/// The name a type's own data gives it, where it has one.
+fn type_name(f: &Facts, g: &Gathered, tid: u32) -> Option<String> {
+    let header = f.tags.data_header();
+    g.data.get(&tid).and_then(|copies| newest(copies, |b| first_name(b, &header, f.release))).map(|(n, _)| n)
+}
+
 pub(crate) fn import(cx: &mut Import, f: &Facts, g: &Gathered) {
     let types = f.types.get(&OST_WALLS).cloned().unwrap_or_default();
     let mut read: BTreeMap<u32, Option<LayeredType>> = BTreeMap::new();
-    let mut made: BTreeMap<u32, String> = BTreeMap::new();
+    let mut made: BTreeMap<(u32, i64), String> = BTreeMap::new();
+    // The types with no compound structure at all (curtain walls, storefronts), and the thickness their own walls' boxes agree
+    // on: a type whose walls disagree is not read as one plane, since that thickness would be our guessing.
+    let mut panel: BTreeMap<u32, f64> = BTreeMap::new();
+    {
+        let bare: Vec<u32> =
+            types.iter().copied().filter(|tid| read.entry(*tid).or_insert_with(|| layered_type(f, g, *tid, OST_WALLS)).is_none()).collect();
+        let mut seen: BTreeMap<u32, Vec<f64>> = BTreeMap::new();
+        if !bare.is_empty() {
+            for r in f.of_category(OST_WALLS) {
+                let Some(tid) = unique_type(&r.refs, &types).filter(|tid| bare.contains(tid)) else { continue };
+                let copies = g.data.get(&r.id).map(Vec::as_slice).unwrap_or_default();
+                if let Some((t, _)) = newest(copies, |b| box_thickness(curve(b)?, &r.bbox)) {
+                    seen.entry(tid).or_default().push(t);
+                }
+            }
+        }
+        for (tid, ts) in seen {
+            // The thickness most of the type's walls agree on, within a millimetre: a type has one thickness, and a wall whose
+            // box says otherwise (a join, a corner) does not make the type two kinds of plane.
+            let mut buckets: BTreeMap<i64, Vec<f64>> = BTreeMap::new();
+            for t in &ts {
+                buckets.entry((t * 1000.0).round() as i64 / 1000).or_default().push(*t);
+            }
+            if let Some((_, agreed)) = buckets.iter().max_by_key(|(_, v)| v.len())
+                && agreed.len() * 10 >= ts.len() * 7
+            {
+                let t = agreed.iter().sum::<f64>() / agreed.len() as f64;
+                if t >= 25.0 {
+                    panel.insert(tid, micron(t));
+                }
+            }
+        }
+    }
     for r in f.of_category(OST_WALLS) {
         let who = |why: &str| (r.id, why.to_string());
         let wall = (|| -> Result<(Wall, String), (u32, String)> {
             let copies = g.data.get(&r.id).map(Vec::as_slice).unwrap_or_default();
-            let (curve, _) = newest(copies, curve).ok_or_else(|| who("no location line the reader can read"))?;
+            // A wall whose record holds no location line — a family instance of the category, a trellis member — comes in along the
+            // long side of its own box, as a column comes in as the rectangle of its box, and the note says so.
+            let (curve, from_box) = match newest(copies, curve) {
+                Some((read, _)) => (read, false),
+                None => (box_line(&r.bbox).ok_or_else(|| who("no location line the reader can read, and no box to read one from"))?, true),
+            };
+            let own_thickness = box_thickness(curve, &r.bbox).map(micron).filter(|t| *t >= 25.0);
             let (start, end, arc) = plan(curve).map_err(who)?;
             let flip = newest(copies, |b| wall_orientation(b, f.release)).map(|(o, _)| o.flip);
-            let tid = unique_type(&r.refs, &types).ok_or_else(|| who("its record does not name one wall type"))?;
-            let typ = read.entry(tid).or_insert_with(|| layered_type(f, g, tid, OST_WALLS));
-            let typ = typ.as_ref().filter(|t| t.thickness > 0.0).ok_or_else(|| who(&no_layers(f, g, tid)))?;
+            // A wall that names no type of the wall category (a family instance, an imported object of the category) comes in with a
+            // type of its own, as thick as its box says; the note below says so.
+            let tid = unique_type(&r.refs, &types).unwrap_or(0);
+            let read_type = read.entry(tid).or_insert_with(|| layered_type(f, g, tid, OST_WALLS));
+            // A curtain wall or a storefront has no compound structure: it comes in as the plane its own box gives, and the note
+            // below says what of it is not read. Whose walls agree on a thickness take that one; a type whose walls disagree (a
+            // roof's tilted panels) has each wall come in with its own, as its box gives it.
+            let agreed = panel.get(&tid).copied();
+            let mut local = None;
+            if read_type.is_none() {
+                let t = agreed.or(own_thickness);
+                if let Some(t) = t {
+                    // The name the file gives the type, or the one the importer gives a type it cannot name, as a floor's is.
+                    let name = type_name(f, g, tid).unwrap_or_else(|| "Imported".to_string());
+                    let name = if agreed.is_some() { name } else { format!("{name} - {t}mm") };
+                    local = Some(LayeredType { name: Some(name), layers: vec![Layer { thickness: t, ..Layer::default() }], thickness: t });
+                }
+            }
+            let typ = local.as_ref().or(read_type.as_ref()).filter(|t| t.thickness > 0.0).ok_or_else(|| who(&no_layers(f, g, tid)))?;
             let (base, top) = constraints(r, &f.elevations);
             let level = base.and_then(|b| cx.levels.get(&b).copied()).ok_or_else(|| who("it stands on no level"))?;
             let elevation = base.and_then(|b| f.elevations.get(&b).copied()).unwrap_or(0.0);
             let top_level = top
                 .filter(|t| f.elevations.get(t).is_some_and(|e| (e - r.bbox[5]).abs() * 304.8 <= 1.0 && *e > r.bbox[2]))
                 .and_then(|t| cx.levels.get(&t).copied());
-            let type_name = match made.get(&tid) {
+            let key = (tid, (typ.thickness * 1000.0).round() as i64);
+            let type_name = match made.get(&key) {
                 Some(n) => n.clone(),
                 None => {
                     let base = typ.name.clone().unwrap_or_else(|| format!("Imported - {}mm", typ.thickness));
@@ -211,7 +317,7 @@ pub(crate) fn import(cx: &mut Import, f: &Facts, g: &Gathered) {
                         |k| (k.thickness - typ.thickness).abs() < 0.05 && k.layers == typ.layers,
                         WallType { thickness: typ.thickness, layers: typ.layers.clone() },
                     );
-                    made.insert(tid, n.clone());
+                    made.insert(key, n.clone());
                     n
                 }
             };
@@ -231,7 +337,16 @@ pub(crate) fn import(cx: &mut Import, f: &Facts, g: &Gathered) {
                 attach_top: None,
                 attach_base: None,
             };
-            let note = if flip.is_none() { "side".to_string() } else { String::new() };
+            let note = if tid == 0 {
+                "no_type".to_string()
+            } else if from_box {
+                "from_box".to_string()
+            } else if flip.is_none() {
+                "side".to_string()
+            } else {
+                String::new()
+            };
+            let note = if agreed.is_some() || local.is_some() { "panels".to_string() } else { note };
             Ok((wall, note))
         })();
         match wall {
@@ -239,8 +354,24 @@ pub(crate) fn import(cx: &mut Import, f: &Facts, g: &Gathered) {
                 let id: Id = cx.model.insert(Element::Wall(wall));
                 cx.from.insert(id, format!("Wall {}", r.id));
                 cx.walls.insert(r.id, id);
-                if !note.is_empty() {
-                    cx.note("wall", r.id, "the data does not say which side is the exterior: kept as drawn");
+                match note.as_str() {
+                    "side" => cx.note("wall", r.id, "the data does not say which side is the exterior: kept as drawn"),
+                    "no_type" => cx.note(
+                        "wall",
+                        r.id,
+                        "its record names no type of the wall category: it comes in with a type of its own, as thick as its own box says",
+                    ),
+                    "from_box" => cx.note(
+                        "wall",
+                        r.id,
+                        "its record holds no location line (a family instance of the wall category): it comes in along the long side of its own box, as a column comes in as the rectangle of its box",
+                    ),
+                    "panels" => cx.note(
+                        "wall",
+                        r.id,
+                        "its type has no layers (a curtain wall or a storefront): it comes in as the plane its own box gives, and the panels and mullions are not read",
+                    ),
+                    _ => {}
                 }
             }
             Err((id, why)) => {

@@ -11,6 +11,7 @@ use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 
+use crate::cloud::Cloud;
 use crate::family::{Family, Piece};
 use crate::geom::{self, P2, Region};
 use crate::graphics::{self, Graphics, ViewFilter, ViewTemplate};
@@ -57,13 +58,15 @@ pub const CEILING_CUT: f64 = 2300.0;
 pub const CEILING_HEIGHT: f64 = 2600.0;
 /// The steepest slope a floor or a roof may have, degrees.
 pub const MAX_SLOPE: f64 = 75.0;
-/// The version of the project file this build writes, and the newest it reads. 4: a line weight is a pen (0 to 16), not
+/// The version of the project file this build writes, and the newest it reads. 5: a project holds scans (`clouds`, library
+/// entries of kind `Cloud`) and point clouds place them; nothing in a file of 4 changes, but a build that reads up to 4 would
+/// answer one of 5 with a serde error, not "saved by a newer BIMCraft". 4: a line weight is a pen (0 to 16), not
 /// pixels of a sheet's drawing. 3: a type's layers and a family's forms and
 /// symbols hold ids and GUIDs; a family's types and parameters are library entries, and what uses them names them by GUID.
 /// 2: the library has ids and GUIDs too
 /// (`library`), and what names a library entry holds its GUID. 1: elements have GUIDs, ids six digits, and what points at
 /// an element holds its GUID. None (0): a file from before.
-pub const FORMAT: u32 = 4;
+pub const FORMAT: u32 = 5;
 /// How far past the model a level reaches without an extent of its own, mm.
 pub const LEVEL_PAST: f64 = 1000.0;
 
@@ -583,6 +586,20 @@ pub struct Note {
 
 fn note_size() -> f64 {
     NOTE_SIZE
+}
+
+/// A scan placed: the project's `cloud`, its middle at `at` in plan and `offset` mm over `level`, turned `angle` degrees
+/// (counter-clockwise) about its middle. It holds no `params`: phases and paint don't reach it.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PointCloud {
+    pub cloud: String,
+    pub level: Guid,
+    pub at: P2,
+    #[serde(default)]
+    pub offset: f64,
+    #[serde(default)]
+    pub angle: f64,
 }
 
 /// A spot elevation in a view: in a level's plan, the height of the top of `host` at `at`; in a
@@ -1132,6 +1149,7 @@ macro_rules! visit_refs {
                 f(& $($m)? s.view);
                 if let Some(g) = & $($m)? s.host { f(g) }
             }
+            Element::PointCloud(pc) => f(& $($m)? pc.level),
         }
     }};
 }
@@ -1180,6 +1198,8 @@ pub enum Element {
     View3D(View3D),
     PlanView(PlanView),
     Link(Link),
+    /// A scan placed in the model.
+    PointCloud(PointCloud),
 }
 
 impl Element {
@@ -1343,6 +1363,7 @@ impl Element {
             Element::Text(_) => "text",
             Element::Spot(_) => "spot",
             Element::Link(_) => "link",
+            Element::PointCloud(_) => "pointcloud",
             Element::Schedule(_) => "schedule",
             Element::View3D(_) => "view3d",
             Element::PlanView(_) => "planview",
@@ -1581,6 +1602,9 @@ pub struct Model {
     /// The pictures its materials' textures are made of, by id.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub images: BTreeMap<String, Picture>,
+    /// The scans its point clouds place, by name.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty", deserialize_with = "crate::cloud::deserialize_scans")]
+    pub clouds: BTreeMap<String, Cloud>,
     /// Its families, by name: what components place.
     #[serde(default)]
     pub families: BTreeMap<String, Family>,
@@ -1651,6 +1675,7 @@ impl Model {
             types: Types::default(),
             materials: BTreeMap::new(),
             images: BTreeMap::new(),
+            clouds: BTreeMap::new(),
             families: BTreeMap::new(),
             parameters: BTreeMap::new(),
             view_filters: BTreeMap::new(),
@@ -2076,6 +2101,7 @@ impl Model {
             }
         }
         self.next_id = self.next_id.max(FIRST_ID);
+        // 4 to 5 (scans, and the point clouds that place them) has no step: a file of 4 holds none of it, or holds it as 5 does.
         self.format = FORMAT;
     }
 
@@ -2148,8 +2174,9 @@ impl Model {
             .iter()
             .flat_map(|s| s.corners())
             .map(|p| P2(p[0], p[1]))
-            .chain(self.elements.values().flat_map(|e| match e {
+            .chain(self.elements.iter().flat_map(|(id, e)| match e {
                 Element::Grid(g) => vec![g.start, g.end],
+                Element::PointCloud(_) => self.cloud_box(*id).map_or(Vec::new(), |(lo, hi)| vec![P2(lo[0], lo[1]), P2(hi[0], hi[1])]),
                 _ => Vec::new(),
             }))
             .collect::<Vec<_>>();
@@ -2210,6 +2237,44 @@ impl Model {
 
     pub fn elevation(&self, level: impl Key) -> f64 {
         self.level(level).map_or(0.0, |l| l.elevation)
+    }
+
+    /// Where a placed scan's points are in the model, mm: each point about the scan's middle, turned by `angle` and moved to
+    /// `at`, `offset` over its level.
+    pub fn cloud_place(&self, pc: &PointCloud) -> impl Fn([f32; 3]) -> [f64; 3] + use<> {
+        let (sin, cos) = pc.angle.to_radians().sin_cos();
+        let (at, z) = (pc.at, self.elevation(pc.level) + pc.offset);
+        move |p: [f32; 3]| {
+            let (x, y) = (f64::from(p[0]), f64::from(p[1]));
+            [at.0 + x * cos - y * sin, at.1 + x * sin + y * cos, z + f64::from(p[2])]
+        }
+    }
+
+    /// The scans no point cloud places.
+    pub fn unplaced_clouds(&self) -> Vec<String> {
+        if self.clouds.is_empty() {
+            return Vec::new();
+        }
+        let placed: BTreeSet<&str> =
+            self.elements.values().filter_map(|e| if let Element::PointCloud(pc) = e { Some(pc.cloud.as_str()) } else { None }).collect();
+        self.clouds.keys().filter(|n| !placed.contains(n.as_str())).cloned().collect()
+    }
+
+    /// The box round a placed scan's points in the model, mm, lowest corner first; none if `id` places no scan.
+    pub fn cloud_box(&self, id: Id) -> Option<([f64; 3], [f64; 3])> {
+        let Some(Element::PointCloud(pc)) = self.elements.get(id) else { return None };
+        let (lo, hi) = self.clouds.get(&pc.cloud)?.bounds();
+        let place = self.cloud_place(pc);
+        let (mut min, mut max) = ([f64::INFINITY; 3], [f64::NEG_INFINITY; 3]);
+        for corner in 0..8 {
+            let pick = |k: usize| (if corner >> k & 1 == 0 { lo[k] } else { hi[k] }) as f32;
+            let p = place([pick(0), pick(1), pick(2)]);
+            for k in 0..3 {
+                min[k] = min[k].min(p[k]);
+                max[k] = max[k].max(p[k]);
+            }
+        }
+        Some((min, max))
     }
 
     /// The next level up from `level`.
@@ -2531,6 +2596,7 @@ impl Model {
     pub fn level_of(&self, e: &Element) -> Option<Guid> {
         let wall_level = |o: &Opening| self.wall(o.host).map(|w| w.level);
         match e {
+            Element::PointCloud(pc) => Some(pc.level),
             Element::Wall(w) => Some(w.level),
             Element::Floor(f) => Some(f.level),
             Element::Ceiling(c) => Some(c.level),
@@ -3290,6 +3356,16 @@ impl Model {
         for id in self.images.keys() {
             text(&format!("picture `{id}`"), "id", id)?;
         }
+        if self.clouds.len() > crate::cloud::MAX_CLOUDS {
+            return Err(format!("the project has {} scans; it holds up to {}", self.clouds.len(), crate::cloud::MAX_CLOUDS));
+        }
+        let held: usize = self.clouds.values().map(crate::cloud::Cloud::len).sum();
+        if held > crate::cloud::MAX_CLOUD_POINTS {
+            return Err(format!("the project's scans hold {held} points; it holds up to {}", crate::cloud::MAX_CLOUD_POINTS));
+        }
+        for name in self.clouds.keys() {
+            text(&format!("scan `{name}`"), "name", name)?;
+        }
         for (n, x) in &self.materials {
             text(&format!("material `{n}`"), "name", n)?;
             if n.trim().is_empty() {
@@ -3668,6 +3744,15 @@ impl Model {
                     if let Some(l) = n.leader {
                         point(&format!("{who} leader"), l)?;
                     }
+                }
+                Element::PointCloud(pc) => {
+                    if !self.clouds.contains_key(&pc.cloud) {
+                        return Err(format!("{who}: the project holds no scan named `{}`", pc.cloud));
+                    }
+                    level_ok(pc.level)?;
+                    point(&format!("{who} at"), pc.at)?;
+                    coord(&format!("{who} offset"), pc.offset)?;
+                    coord(&format!("{who} angle"), pc.angle)?;
                 }
                 Element::Spot(sp) => {
                     view_ok(sp.view, false)?;

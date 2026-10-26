@@ -7,6 +7,7 @@
 
 mod browser;
 mod canvas;
+mod clouds;
 mod context;
 pub mod control;
 mod dialog;
@@ -32,6 +33,7 @@ pub mod recent;
 pub mod revit;
 mod section;
 pub mod settings;
+pub mod shortcuts;
 mod start;
 mod structure;
 mod style;
@@ -214,6 +216,7 @@ enum Tab {
     Electrical,
     Lightning,
     Data,
+    Insert,
     Annotate,
     Massing,
     View,
@@ -255,7 +258,8 @@ type Buttons<'a> = &'a [(Icon, &'a str, &'a str, Option<Tool>, bool)];
 
 /// The desktop's own two-letter shortcuts, which [`BimApp::shortcut`] takes before the commands'
 /// aliases, and what Keyboard Shortcuts (KS) calls them.
-const SHORTCUTS: [(&str, &str); 43] = [
+const SHORTCUTS: [(&str, &str); 47] = [
+    ("3D", "3D View"),
     ("MD", "Modify"),
     ("SB", "Floor: Structural"),
     ("MM", "Mirror Pick Axis"),
@@ -269,6 +273,8 @@ const SHORTCUTS: [(&str, &str); 43] = [
     ("TL", "Thin Lines"),
     ("CS", "Create Similar"),
     ("PP", "Properties"),
+    ("VP", "Properties"),
+    ("NP", "Project Browser"),
     ("SA", "Select All Instances"),
     ("SE", "Snap to Endpoints"),
     ("SM", "Snap to Midpoints"),
@@ -289,6 +295,7 @@ const SHORTCUTS: [(&str, &str); 43] = [
     ("HR", "Reset Temporary Hide/Isolate"),
     ("RH", "Reveal Hidden Elements"),
     ("EU", "Unhide Elements"),
+    ("UE", "Unhide Elements"),
     ("VU", "Unhide Category"),
     ("EO", "Override Graphics by Element"),
     ("FT", "Filters"),
@@ -472,6 +479,10 @@ pub struct BimApp {
     seen: Option<(Arc<Model>, Arc<Model>)>,
     /// Link Model was asked for: its file dialog opens on the next frame, so a shortcut typed alone never waits on one.
     link_dialog: bool,
+    /// Insert > Point Cloud was pressed: its file dialog opens this frame.
+    cloud_dialog: bool,
+    /// Bringing scan files in: the box, while it's open.
+    cloud_box: Option<clouds::CloudBox>,
     /// A selected element's temporary dimension being typed: the element, which of its dimensions (a wall has one, a
     /// door or window two: from its wall's start, from its end), the length so far.
     dim_edit: Option<(Id, usize, String)>,
@@ -492,6 +503,8 @@ pub struct BimApp {
     /// The Keyboard Shortcuts dialog is open (KS); the Manage tab drops its Project Units menu open
     /// the next time it shows (UN).
     show_shortcuts: bool,
+    pub custom_shortcuts: BTreeMap<String, String>,
+    pub shortcuts_dialog: shortcuts::ShortcutsDialog,
     open_units: bool,
     canvas: canvas::Canvas,
     orbit: orbit::Orbit,
@@ -843,9 +856,13 @@ impl BimApp {
             shadow: None,
             seen: None,
             link_dialog: false,
+            cloud_dialog: false,
+            cloud_box: None,
             tab_cycle: false,
             held: Vec::new(),
             show_shortcuts: false,
+            custom_shortcuts: BTreeMap::new(),
+            shortcuts_dialog: shortcuts::ShortcutsDialog::default(),
             angle_edit: None,
             snaps: Snaps::default(),
             show_snaps: false,
@@ -1250,6 +1267,12 @@ impl BimApp {
         if pressed(Modifiers::COMMAND, Key::Comma) {
             self.settings_page = Some(settings::Page::Interface);
         }
+        if pressed(Modifiers::COMMAND, Key::Num1) {
+            self.toggle_properties();
+        }
+        if pressed(Modifiers::COMMAND, Key::P) {
+            self.export(ctx, "PDF", "pdf");
+        }
         // The rest belongs to a text field while one has the keyboard.
         if ctx.egui_wants_keyboard_input() {
             return;
@@ -1310,7 +1333,7 @@ impl BimApp {
                 shortcut.push(ch);
             }
         }
-        for ch in shortcut.chars().filter(char::is_ascii_alphabetic) {
+        for ch in shortcut.chars().filter(|c| c.is_ascii_alphanumeric()) {
             self.typed.push(ch.to_ascii_uppercase());
             if self.typed.len() > 2 {
                 self.typed.remove(0);
@@ -1324,7 +1347,16 @@ impl BimApp {
     /// Revit's two-letter shortcuts: the desktop's own ([`SHORTCUTS`]), then the commands' aliases
     /// (WA, DR, CR…). Whether `typed` is one.
     fn shortcut(&mut self) -> bool {
+        if let Some(action) = self.custom_shortcuts.get(&self.typed).cloned()
+            && self.execute_shortcut_action(&action)
+        {
+            return true;
+        }
         let tool = match self.typed.as_str() {
+            "3D" => {
+                self.open_sheet(Sheet::View3D);
+                return true;
+            }
             "MD" => Tool::Modify,
             "MM" => Tool::Mirror { draw: false, start: None },
             "DM" => Tool::Mirror { draw: true, start: None },
@@ -1343,8 +1375,12 @@ impl BimApp {
                 self.create_similar();
                 return true;
             }
-            "PP" => {
+            "PP" | "VP" => {
                 self.toggle_properties();
+                return true;
+            }
+            "NP" => {
+                self.toggle_browser();
                 return true;
             }
             "SA" => {
@@ -1401,7 +1437,7 @@ impl BimApp {
                 self.duplicate_plan("duplicate");
                 return true;
             }
-            "EU" => {
+            "EU" | "UE" => {
                 if self.hidden_selection().0.is_empty() {
                     self.open_graphics(3);
                 } else {
@@ -1484,6 +1520,10 @@ impl BimApp {
                 Some("section") => Tool::Section(None),
                 Some("measure") => Tool::Measure(None),
                 Some("paint") => Tool::Paint,
+                Some("match_properties") => {
+                    self.match_properties();
+                    return true;
+                }
                 Some("delete") => {
                     self.delete();
                     return true;
@@ -1591,6 +1631,37 @@ impl BimApp {
         }
         let found = self.shown().into_iter().filter(|id| type_of(id).is_some_and(|k| types.contains(&k))).collect();
         self.pick_up(found, Modifiers::NONE);
+    }
+
+    /// Match Properties (MA): with one element selected, its type is the one the next element drawn
+    /// of its category takes; with several, the `match_properties` command gives the first one's type
+    /// to the others of its category.
+    pub(crate) fn match_properties(&mut self) {
+        let Some(&first) = self.selection.first() else {
+            self.status = Status { text: t("Select an element first to match its properties").into(), error: true };
+            return;
+        };
+        let src = element_json(&self.session.model, first);
+        let Some(typ) = src["type"].as_str().filter(|t| !t.is_empty()) else {
+            self.status = Status { text: t("The selected element has no type to match").into(), error: true };
+            return;
+        };
+        if self.selection.len() == 1 {
+            if let Some(el) = self.session.model.elements.get(first) {
+                self.types.insert(el.category(), typ.to_string());
+            }
+            if let Some(f) = src["family"].as_str() {
+                self.component = Some((f.to_string(), typ.to_string()));
+            }
+            self.status = Status {
+                text: tf("Match Properties: source type '{}' selected. Select target elements and press MA again.", &[typ]),
+                error: false,
+            };
+        } else if let Some(r) = self.run("match_properties", json!({"from": first, "ids": &self.selection[1..]})) {
+            let n = r["modified"].as_array().map_or(0, Vec::len);
+            self.status =
+                Status { text: tf("Matched properties: applied type '{}' to {} element(s)", &[typ, &n.to_string()]), error: false };
+        }
     }
 
     /// What the open view shows: what a plan draws, in its view range and crop region; what a
@@ -2267,6 +2338,7 @@ impl BimApp {
                     (Tab::Electrical, "Electrical"),
                     (Tab::Lightning, "Lightning Protection"),
                     (Tab::Data, "Data"),
+                    (Tab::Insert, "Insert"),
                     (Tab::Annotate, "Annotate"),
                     (Tab::Massing, "Massing"),
                     (Tab::View, "View"),
@@ -2349,6 +2421,7 @@ impl BimApp {
                     Tab::Electrical => self.electrical_tab(ui),
                     Tab::Lightning => self.lightning_tab(ui),
                     Tab::Data => self.data_tab(ui),
+                    Tab::Insert => self.insert_tab(ui),
                     Tab::Annotate => self.annotate_tab(ui),
                     Tab::Massing => self.massing_tab(ui),
                     Tab::View => self.view_tab(ui),
@@ -2771,6 +2844,20 @@ impl BimApp {
     }
 
     /// Manage: the project's settings, as Revit's tab has them.
+    /// Insert: what comes into the project from other files, as Revit's tab. Link: other projects, and laser scans.
+    fn insert_tab(&mut self, ui: &mut Ui) {
+        panel(ui, "Link", |ui| {
+            let tip = "Link Model (LK): another project, a BIMCraft file or an IFC, shown in this one as a reference that can't be edited: halftone in the plans, the sections and the 3D view, and snapped to";
+            if big_button(ui, Icon::Link, "Link Model", false, tip).clicked() {
+                self.link_dialog = true;
+            }
+            let tip = "Point Cloud: laser scans (PTS, XYZ, PLY, LAS or E57) brought into the project, one file or a survey's stations as one scan, drawn in the 3D view, plans and sections and snapped to";
+            if big_button(ui, Icon::PointCloud, "Point Cloud", self.cloud_box.is_some(), tip).clicked() {
+                self.cloud_dialog = true;
+            }
+        });
+    }
+
     fn manage_tab(&mut self, ui: &mut Ui) {
         panel(ui, "Settings", |ui| {
             let tip = "Materials: the project's library, each material's colour in 3D and the patterns its cut and its surfaces show";
@@ -2801,6 +2888,10 @@ impl BimApp {
             let tip = "Snaps: what a picked point sticks to (ends, middles, crossings, centres, perpendiculars), and the angles it steps by; SE, SM, SI, SC, SP and SN take one alone for the next point, SO none";
             if big_button(ui, Icon::Snaps, "Snaps", self.show_snaps, tip).clicked() {
                 self.show_snaps = true;
+            }
+            let tip = "Keyboard Shortcuts (KS): customize, edit, and load shortcut keys";
+            if big_button(ui, Icon::Keyboard, "Shortcuts", self.show_shortcuts, tip).clicked() {
+                self.show_shortcuts = true;
             }
             let now = self.session.model.units;
             let tip = tf("Project Units (UN): how lengths show and read; now {}", &[&t(now.label()).to_lowercase()]);
@@ -3603,6 +3694,10 @@ impl BimApp {
         if std::mem::take(&mut self.link_dialog) {
             self.link_model_dialog(ctx);
         }
+        if std::mem::take(&mut self.cloud_dialog) {
+            self.point_cloud_dialog(ctx);
+        }
+        self.point_cloud_window(ctx);
         self.select_by_id_window(ctx);
         self.ids_of_selection_window(ctx);
         self.shortcuts_window(ctx);
