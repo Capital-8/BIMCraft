@@ -17,6 +17,9 @@ use egui::{
 /// A theme's colours.
 pub struct Palette {
     pub accent: Color32,
+    /// The accent where it must be read, as text or an icon or the ring round what has focus, on a card, a tint or a hovered
+    /// row: `accent` is for fills, strokes and the drawing, and falls short of 4.5:1 on a tint.
+    pub accent_ink: Color32,
     /// Pre-selection: what a click would pick.
     pub hover: Color32,
     pub select_fill: Color32,
@@ -33,6 +36,8 @@ pub struct Palette {
     /// Revit's contextual tabs (Modify | …) stand out in green.
     pub context: Color32,
     pub context_fill: Color32,
+    /// Lettering on `context`, the open contextual tab's fill.
+    pub on_context: Color32,
     /// What fields and popups sit on.
     pub surface: Color32,
     /// Around a sheet's paper.
@@ -52,34 +57,37 @@ const fn rgb(c: u32) -> Color32 {
 
 pub const LIGHT: Palette = Palette {
     accent: rgb(0x2678DA),
+    accent_ink: rgb(0x2064B5),
     hover: rgb(0x5B9BE6),
     select_fill: rgb(0xD6E6FA),
     hover_fill: rgb(0xE2EAF6),
     text: rgb(0x262A32),
-    muted: rgb(0x6E7480),
+    muted: rgb(0x636873),
     icon: rgb(0x3A404C),
     panel: rgb(0xFAFBFC),
     bar: rgb(0xECEEF2),
     border: rgb(0xD0D4DC),
-    error: rgb(0xDC2626),
+    error: rgb(0xCC2020),
     context: rgb(0x15803D),
     context_fill: rgb(0xDCFCE7),
+    on_context: rgb(0xFFFFFF),
     surface: rgb(0xFFFFFF),
     desk: rgb(0xD4D4D4),
     app_bar: rgb(0x343840),
     app_bar_text: rgb(0xE6EAF2),
-    app_bar_muted: rgb(0xA4AAB6),
+    app_bar_muted: rgb(0xBEC3CB),
     app_bar_hover: rgb(0x4A4F59),
     shadow: Color32::from_rgba_premultiplied(9, 10, 12, 46),
 };
 
 pub const DARK: Palette = Palette {
     accent: rgb(0x3A88EE),
+    accent_ink: rgb(0x89B8F5),
     hover: rgb(0x60A5FA),
     select_fill: rgb(0x2A466E),
     hover_fill: rgb(0x363D4A),
     text: rgb(0xDEE2E8),
-    muted: rgb(0x949BA8),
+    muted: rgb(0xA2A8B3),
     icon: rgb(0xCFD4DB),
     panel: rgb(0x272B34),
     bar: rgb(0x2F343E),
@@ -87,11 +95,12 @@ pub const DARK: Palette = Palette {
     error: rgb(0xF87171),
     context: rgb(0x4ADE80),
     context_fill: rgb(0x14341F),
+    on_context: rgb(0x0F1F16),
     surface: rgb(0x1E2229),
     desk: rgb(0x2A2E35),
     app_bar: rgb(0x1C1F26),
     app_bar_text: rgb(0xE6EAF2),
-    app_bar_muted: rgb(0x949BA8),
+    app_bar_muted: rgb(0x9FA5B1),
     app_bar_hover: rgb(0x343A46),
     shadow: Color32::from_rgba_premultiplied(0, 0, 0, 110),
 };
@@ -121,6 +130,12 @@ pub fn on_app_bar<R>(add: impl FnOnce() -> R) -> R {
     let r = add();
     ON_APP_BAR.with(|b| b.set(false));
     r
+}
+
+/// The ring round what has keyboard focus: the accent's ink, which holds on a card, a tint and a hovered row, and on the app bar
+/// the lettering's colour, since the accent is dim on the light theme's dark bar.
+pub fn focus_ring() -> Stroke {
+    Stroke::new(2.0, if ON_APP_BAR.with(Cell::get) { pal().app_bar_text } else { pal().accent_ink })
 }
 
 /// An icon's ink and its hover's fill where it's drawn: on the app bar or on a card.
@@ -276,5 +291,73 @@ pub fn apply(ctx: &Context) {
             v.widgets.active.fg_stroke = Stroke::new(1.0, pal.text);
             v.widgets.open.weak_bg_fill = pal.select_fill;
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// WCAG 2.x's contrast ratio of two opaque colours: (L1 + 0.05) / (L2 + 0.05), L the relative luminance.
+    fn contrast(a: Color32, b: Color32) -> f32 {
+        let lum = |c: Color32| {
+            let lin = |v: u8| {
+                let v = f32::from(v) / 255.0;
+                if v <= 0.03928 { v / 12.92 } else { ((v + 0.055) / 1.055).powf(2.4) }
+            };
+            0.2126 * lin(c.r()) + 0.7152 * lin(c.g()) + 0.0722 * lin(c.b())
+        };
+        let (a, b) = (lum(a), lum(b));
+        (a.max(b) + 0.05) / (a.min(b) + 0.05)
+    }
+
+    #[test]
+    fn contrast_is_wcags_ratio() {
+        assert!((contrast(Color32::BLACK, Color32::WHITE) - 21.0).abs() < 0.01);
+        assert!((contrast(Color32::WHITE, Color32::WHITE) - 1.0).abs() < 0.001);
+        // What the Dark theme's open contextual tab once was, white on that green.
+        assert!((contrast(Color32::WHITE, rgb(0x4ADE80)) - 1.74).abs() < 0.01);
+    }
+
+    /// What the window draws one colour over another, in both themes. Text holds 4.5:1 (WCAG 1.4.3); an icon, a focus ring and
+    /// the like hold 3:1 (1.4.11).
+    #[test]
+    fn what_is_read_holds_its_contrast_on_what_it_sits_on_in_both_themes() {
+        let mut fails = Vec::new();
+        for (theme, p) in [("light", &LIGHT), ("dark", &DARK)] {
+            DARK_ON.with(|d| d.set(theme == "dark"));
+            let (ring, ring_on_bar) = (focus_ring().color, on_app_bar(|| focus_ring().color));
+            // Text, on a card, a band, a field and a hovered row; some also on the open tab's tint.
+            let on_cards = [p.panel, p.bar, p.surface, p.hover_fill];
+            let on_tints = [p.panel, p.bar, p.surface, p.hover_fill, p.select_fill];
+            let on_bar = [p.app_bar, p.app_bar_hover];
+            let mut rows: Vec<(&str, Color32, Color32, f32)> = Vec::new();
+            for (what, ink, grounds, least) in [
+                ("text", p.text, &on_tints[..], 4.5),
+                ("muted text", p.muted, &on_cards[..], 4.5),
+                ("the accent as text and icons", p.accent_ink, &on_tints[..], 4.5),
+                ("lettering on the app bar", p.app_bar_text, &on_bar[..], 4.5),
+                ("dimmer lettering on the app bar", p.app_bar_muted, &on_bar[..], 4.5),
+                ("the focus ring", ring, &on_tints[..], 3.0),
+                ("the focus ring on the app bar", ring_on_bar, &on_bar[..], 3.0),
+                ("icons", p.icon, &on_tints[..3], 3.0),
+                ("error text", p.error, &on_tints[..3], 4.5),
+            ] {
+                rows.extend(grounds.iter().map(|ground| (what, ink, *ground, least)));
+            }
+            rows.extend([
+                ("lettering on the open contextual tab", p.on_context, p.context, 4.5),
+                ("an inactive contextual tab's lettering", p.context, p.context_fill, 4.5),
+                ("a caption button's focus ring and glyph", p.app_bar_text, p.app_bar_hover, 3.0),
+                ("Close's focus ring and glyph", Color32::WHITE, crate::titlebar::CLOSE_HOVER, 3.0),
+            ]);
+            for (what, ink, ground, least) in rows {
+                let c = contrast(ink, ground);
+                if c < least {
+                    fails.push(format!("{theme}: {what} on {ground:?} is {c:.2}:1, under {least}:1"));
+                }
+            }
+        }
+        assert!(fails.is_empty(), "{fails:#?}");
     }
 }

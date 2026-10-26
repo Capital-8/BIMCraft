@@ -216,17 +216,17 @@ impl BimApp {
                 };
                 p.rect(rect, 4.0, fill, if on { Stroke::new(1.0, pal().accent) } else { Stroke::NONE }, StrokeKind::Inside);
                 if r.has_focus() {
-                    p.rect_stroke(rect, 4.0, Stroke::new(2.0, pal().accent), StrokeKind::Inside);
+                    p.rect_stroke(rect, 4.0, crate::style::focus_ring(), StrokeKind::Inside);
                 }
                 let ink = match (on, tab.ready()) {
-                    (true, _) => pal().accent,
+                    (true, _) => pal().accent_ink,
                     (false, true) => pal().icon,
                     (false, false) => pal().muted.gamma_multiply(0.6),
                 };
                 let icon = Rect::from_center_size(rect.left_center() + vec2(13.0, 0.0), vec2(16.0, 16.0));
                 icons::paint(p, tab.icon(), icon, ink);
                 if let Some(g) = text {
-                    p.galley(rect.left_center() + vec2(24.0, -g.size().y / 2.0), g, pal().accent);
+                    p.galley(rect.left_center() + vec2(24.0, -g.size().y / 2.0), g, pal().accent_ink);
                 }
                 let r = if tab.ready() { r.on_hover_text(&what) } else { r.on_hover_text(t("Coming in a later version")) };
                 if r.clicked() {

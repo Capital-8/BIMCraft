@@ -18,7 +18,7 @@ pub(crate) const BUTTON_WIDTH: f32 = 46.0;
 /// the Compact layout's ribbon 7, a Compact card's stroke and padding 3 (and a docked-right card pads its scrollbar in by this).
 pub(crate) const EDGE: f32 = 4.0;
 /// Close's fill under the pointer, as the system's.
-const CLOSE_HOVER: Color32 = Color32::from_rgb(196, 43, 28);
+pub(crate) const CLOSE_HOVER: Color32 = Color32::from_rgb(196, 43, 28);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Caption {
@@ -93,6 +93,10 @@ pub(crate) fn caption_buttons(ui: &mut Ui, bar: Rect) {
         };
         let p = ui.painter();
         p.rect_filled(rect, 0.0, fill);
+        // Keyboard focus is a ring in the ink, which holds against the fill: the fill alone is 1.3:1 against the bar.
+        if r.has_focus() {
+            p.rect_stroke(rect.shrink(3.0), 0.0, Stroke::new(2.0, ink), StrokeKind::Inside);
+        }
         glyph(p, c, max, rect.center(), Stroke::new(1.0, ink));
         if r.on_hover_text(label).clicked() {
             ctx.send_viewport_cmd(match c {

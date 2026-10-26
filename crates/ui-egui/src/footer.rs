@@ -62,7 +62,7 @@ fn menu_button(ui: &mut Ui, label: &str, shown: &str, tip: &str, set_by: Option<
             p.rect_filled(rect, 4.0, pal().hover_fill);
         }
         if r.has_focus() {
-            p.rect_stroke(rect, 4.0, Stroke::new(2.0, pal().accent), StrokeKind::Inside);
+            p.rect_stroke(rect, 4.0, crate::style::focus_ring(), StrokeKind::Inside);
         }
         let ink = if enabled { pal().text } else { pal().muted };
         p.galley(pos2(rect.left() + 8.0, rect.center().y - galley.size().y / 2.0), galley, ink);

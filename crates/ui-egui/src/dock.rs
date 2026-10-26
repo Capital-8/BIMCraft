@@ -614,7 +614,7 @@ impl BimApp {
                     let p = ui.painter();
                     p.rect_filled(rect, CornerRadius { nw: 6, ne: 6, sw: 0, se: 0 }, if active { pal().select_fill } else { pal().bar });
                     p.line_segment([rect.left_bottom(), rect.right_bottom()], Stroke::new(1.0, pal().border));
-                    let ink = if active { pal().accent } else { pal().text };
+                    let ink = if active { pal().accent_ink } else { pal().text };
                     p.text(rect.left_center() + vec2(10.0, 0.0), Align2::LEFT_CENTER, &title, FontId::proportional(13.0), ink);
                     if back.drag_started() {
                         self.dragging = Some(Drag::ViewWindow(f.sheet));
@@ -826,7 +826,7 @@ fn palette_tab(ui: &mut Ui, label: &str, active: bool) -> egui::Response {
         StrokeKind::Inside,
     );
     if r.has_focus() {
-        p.rect_stroke(rect, 4.0, Stroke::new(2.0, pal().accent), StrokeKind::Inside);
+        p.rect_stroke(rect, 4.0, crate::style::focus_ring(), StrokeKind::Inside);
     }
     p.text(rect.center(), Align2::CENTER_CENTER, label, font, if active { pal().text } else { pal().muted });
     r

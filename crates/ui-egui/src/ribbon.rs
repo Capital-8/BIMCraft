@@ -182,7 +182,7 @@ fn folded_button(ui: &mut Ui, name: &str) -> Response {
         ui.painter().rect(rect.shrink2(vec2(0.0, 2.0)), 6.0, pal().hover_fill, Stroke::NONE, StrokeKind::Inside);
     }
     if r.has_focus() {
-        ui.painter().rect_stroke(rect, 6.0, Stroke::new(2.0, pal().accent), StrokeKind::Inside);
+        ui.painter().rect_stroke(rect, 6.0, crate::style::focus_ring(), StrokeKind::Inside);
     }
     let font = FontId::proportional(12.0);
     let galley = ui.painter().layout(name.to_string(), font, pal().text, FOLDED - 8.0);

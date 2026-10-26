@@ -662,17 +662,17 @@ fn big_button(ui: &mut Ui, icon: Icon, label: &str, active: bool, tip: &str) -> 
     let enabled = ui.is_enabled();
     r.widget_info(|| WidgetInfo::selected(WidgetType::Button, enabled, active, label));
     let (fill, stroke, ink) = match (active, r.hovered() && enabled) {
-        (true, _) => (pal().select_fill, Stroke::new(1.0, pal().accent), pal().accent),
+        (true, _) => (pal().select_fill, Stroke::new(1.0, pal().accent), pal().accent_ink),
         (false, true) => (pal().hover_fill, Stroke::new(1.0, pal().hover), pal().icon),
         (false, false) => (Color32::TRANSPARENT, Stroke::NONE, if enabled { pal().icon } else { pal().icon.gamma_multiply(0.35) }),
     };
     // Keyboard focus shows as a ring, whatever else the button shows.
-    let stroke = if r.has_focus() { Stroke::new(2.0, pal().accent) } else { stroke };
+    let stroke = if r.has_focus() { style::focus_ring() } else { stroke };
     let p = ui.painter();
     p.rect(rect, 6.0, fill, stroke, StrokeKind::Inside);
     icons::paint(p, icon, Rect::from_center_size(rect.center_top() + vec2(0.0, 18.0), vec2(26.0, 26.0)), ink);
     let text = match (active, enabled) {
-        (true, _) => pal().accent,
+        (true, _) => pal().accent_ink,
         (false, true) => pal().text,
         (false, false) => pal().muted.gamma_multiply(0.6),
     };
@@ -695,11 +695,11 @@ fn small_button(ui: &mut Ui, icon: Icon, label: &str, active: bool, tip: &str) -
     let enabled = ui.is_enabled();
     r.widget_info(|| WidgetInfo::selected(WidgetType::Button, enabled, active, label));
     let (fill, stroke, ink) = match (active, r.hovered() && enabled) {
-        (true, _) => (pal().select_fill, Stroke::new(1.0, pal().accent), pal().accent),
+        (true, _) => (pal().select_fill, Stroke::new(1.0, pal().accent), pal().accent_ink),
         (false, true) => (pal().hover_fill, Stroke::new(1.0, pal().hover), pal().icon),
         (false, false) => (Color32::TRANSPARENT, Stroke::NONE, if enabled { pal().icon } else { pal().icon.gamma_multiply(0.35) }),
     };
-    let stroke = if r.has_focus() { Stroke::new(2.0, pal().accent) } else { stroke };
+    let stroke = if r.has_focus() { style::focus_ring() } else { stroke };
     ui.painter().rect(rect, 6.0, fill, stroke, StrokeKind::Inside);
     icons::paint(ui.painter(), icon, Rect::from_center_size(rect.center(), vec2(19.0, 19.0)), ink);
     r.on_hover_text(tip)
@@ -719,12 +719,12 @@ fn list_row(ui: &mut Ui, icon: Icon, label: &str, active: bool, tip: &str) -> Re
     let p = ui.painter();
     p.rect_filled(rect, 6.0, fill);
     if r.has_focus() {
-        p.rect_stroke(rect, 6.0, Stroke::new(2.0, pal().accent), StrokeKind::Inside);
+        p.rect_stroke(rect, 6.0, style::focus_ring(), StrokeKind::Inside);
     }
     let dim = |c: Color32| if enabled { c } else { c.gamma_multiply(0.4) };
-    let ink = if active { pal().accent } else { pal().icon };
+    let ink = if active { pal().accent_ink } else { pal().icon };
     icons::paint(p, icon, Rect::from_center_size(rect.left_center() + vec2(18.0, 0.0), vec2(20.0, 20.0)), dim(ink));
-    let text = if active { pal().accent } else { pal().text };
+    let text = if active { pal().accent_ink } else { pal().text };
     p.text(rect.left_center() + vec2(38.0, 0.0), Align2::LEFT_CENTER, label, FontId::proportional(13.0), dim(text));
     r.on_hover_text(tip)
 }
@@ -739,7 +739,7 @@ fn icon_button(ui: &mut Ui, icon: Icon, label: &str) -> Response {
         ui.painter().rect_filled(rect, 6.0, hover);
     }
     if r.has_focus() {
-        ui.painter().rect_stroke(rect, 6.0, Stroke::new(2.0, pal().accent), StrokeKind::Inside);
+        ui.painter().rect_stroke(rect, 6.0, style::focus_ring(), StrokeKind::Inside);
     }
     icons::paint(ui.painter(), icon, Rect::from_center_size(rect.center(), vec2(18.0, 18.0)), ink);
     r.on_hover_text(label)
@@ -773,9 +773,9 @@ fn tab_button_with(ui: &mut Ui, label: &str, active: bool, contextual: bool, sen
     r.widget_info(|| WidgetInfo::selected(WidgetType::Button, true, active, label));
     // A pill: the open tab in the accent's soft tint, a contextual one solid green when open and tinted green when not.
     let (fill, stroke, ink) = match (contextual, active, r.hovered()) {
-        (true, true, _) => (pal().context, Stroke::NONE, Color32::WHITE),
+        (true, true, _) => (pal().context, Stroke::NONE, pal().on_context),
         (true, false, _) => (pal().context_fill, Stroke::new(1.0, pal().context.gamma_multiply(0.5)), pal().context),
-        (false, true, _) => (pal().select_fill, Stroke::NONE, pal().accent),
+        (false, true, _) => (pal().select_fill, Stroke::NONE, pal().accent_ink),
         (false, false, true) => (pal().hover_fill, Stroke::NONE, pal().text),
         (false, false, false) => (Color32::TRANSPARENT, Stroke::NONE, pal().text),
     };
@@ -783,7 +783,7 @@ fn tab_button_with(ui: &mut Ui, label: &str, active: bool, contextual: bool, sen
     let radius = CornerRadius::same(6);
     p.rect(rect, radius, fill, stroke, StrokeKind::Inside);
     if r.has_focus() {
-        p.rect_stroke(rect, radius, Stroke::new(2.0, pal().accent), StrokeKind::Inside);
+        p.rect_stroke(rect, radius, style::focus_ring(), StrokeKind::Inside);
     }
     p.text(rect.center() - vec2(room / 2.0, 0.0), Align2::CENTER_CENTER, label, font, ink);
     r
@@ -3586,7 +3586,7 @@ impl BimApp {
                     ui.monospace(format!("x {}  y {}", u.with_unit(p.0), u.with_unit(p.1)));
                 }
                 if let Some(note) = self.snap_note() {
-                    ui.label(RichText::new(note).color(pal().accent));
+                    ui.label(RichText::new(note).color(pal().accent_ink));
                 }
                 if self.dirty() {
                     ui.label(RichText::new(t("Unsaved changes")).color(pal().muted));
@@ -3601,7 +3601,7 @@ impl BimApp {
         if self.status.text.is_empty() {
             return;
         }
-        let (title, color) = if self.status.error { (t("Error"), pal().error) } else { (t("Note"), pal().accent) };
+        let (title, color) = if self.status.error { (t("Error"), pal().error) } else { (t("Note"), pal().accent_ink) };
         let at = self.view_rect.right_bottom() - vec2(16.0, 16.0);
         Area::new(UiId::new("warning")).order(Order::Foreground).fixed_pos(at).pivot(Align2::RIGHT_BOTTOM).show(ctx, |ui| {
             Frame::popup(ui.style()).fill(pal().surface).stroke(Stroke::new(1.0, color)).show(ui, |ui| {
