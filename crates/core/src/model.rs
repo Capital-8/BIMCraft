@@ -2257,6 +2257,27 @@ impl Model {
         id
     }
 
+    /// Where element `id`'s model pattern starts (its `pattern_origin`) once its pattern line `line` lies on `reference`:
+    /// the origin moved across by the gap between the two, which must run the same way (plan mm, a line by its two ends).
+    /// What Align on a pattern asks of the model; set the answer with `modify`. A filled region or a floor has a pattern to
+    /// align; the error says what else is wrong.
+    pub fn align_pattern(&self, id: Id, reference: (P2, P2), line: (P2, P2)) -> Result<P2, String> {
+        let origin = match self.elements.get(id) {
+            Some(Element::FilledRegion(r)) => r.pattern_origin,
+            Some(Element::Floor(f)) => f.pattern_origin,
+            Some(e) => return Err(format!("{} {id} has no model pattern to align; a filled region or a floor has", e.category())),
+            None => return Err(format!("no element {id}")),
+        };
+        if [reference, line].iter().any(|(a, b)| !(a.is_finite() && b.is_finite()) || a.dist(*b) < TOL) {
+            return Err("align: a line of no length, or no number, can't be aligned to".into());
+        }
+        if !crate::geom::parallel(reference.0, reference.1, line.0, line.1) {
+            return Err("align: the lines aren't parallel".into());
+        }
+        let across = (reference.1 - reference.0).unit().perp();
+        Ok(crate::commands::micron(origin + across * (reference.0 - line.0).dot(across)))
+    }
+
     /// Element `k` as messages name it: its id, or, when the project hasn't it, what `k` is.
     pub fn shown(&self, k: impl Key) -> String {
         self.elements.id(k).map_or_else(|| k.to_string(), |id| id.to_string())

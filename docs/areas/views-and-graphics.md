@@ -261,7 +261,11 @@ pattern a material shows can't be deleted, and is renamed with it. `render::fill
 region, a cut layer (its courses along the layer) and a floor's or a ceiling's surface. A model pattern is aligned and
 rotated as Revit's: a filled region and a floor hold `pattern_origin` and `pattern_angle` (`fills::strokes_placed`), which
 Move, Rotate and Mirror carry with the element; Align with a pattern line picked second (`render::pattern_line_at`) moves the
-origin so that line lies on the reference, and Properties shows Pattern Angle.
+origin so that line lies on the reference, and Properties shows Pattern Angle. `Model::align_pattern(id, reference, line)` is
+that arithmetic (the origin moved across by the gap between the two parallel lines, to the micron; the error says when the
+element has no model pattern, or the lines aren't parallel or have no length), so every front end gets the same answer and
+sets it with `modify`. `pattern_origin` and `pattern_angle` are in the `modify`, `filled_region` and `floor` command docs, and
+`elements` shows them for a region and a floor even at their defaults.
 
 ## Linked models
 

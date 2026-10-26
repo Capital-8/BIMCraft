@@ -213,3 +213,46 @@ fn a_mirrored_group_turns_its_notes_with_it_and_keeps_them_readable() {
     assert_eq!(angle(&s, 0.0, true), 30.0, "a pure mirror leaves a note reading the way it did");
     assert_eq!(angle(&s, 40.0, true), 70.0, "mirrored and turned, it turns too");
 }
+
+#[test]
+fn a_regions_or_floors_pattern_origin_and_angle_show_in_elements_and_align_moves_the_origin() {
+    let mut s = Session::new();
+    run(&mut s, "wall", json!({"points": [[0, 0], [4000, 0], [4000, 4000], [0, 4000]], "closed": true}));
+    run(&mut s, "filled_region_type", json!({"name": "Tiles", "foreground": "Tile 300"}));
+    let sq = json!([[[0, 0], [3000, 0]], [[3000, 0], [3000, 3000]], [[3000, 3000], [0, 3000]], [[0, 3000], [0, 0]]]);
+    let region = id_of(&run(&mut s, "filled_region", json!({"sketch": sq, "type": "Tiles", "line_style": null})));
+    let floor = id_of(&run(&mut s, "floor", json!({"boundary": [[0, 0], [4000, 0], [4000, 4000], [0, 4000]]})));
+    for id in [region, floor] {
+        let e = crate::element_json(&s.model, id);
+        assert_eq!((e["pattern_origin"].clone(), e["pattern_angle"].clone()), (json!([0.0, 0.0]), json!(0.0)), "{e}");
+    }
+    // The tile line nearest x = 630 lies on x = 600; a reference at x = 650 asks for the origin 50 mm east.
+    let near = |s: &Session| crate::render::pattern_line_at(&s.model, 100000, region, P2(640.0, 1650.0), 100.0);
+    let line = near(&s).unwrap_or_else(|| panic!("no pattern line there"));
+    assert!((line.0.0 - 600.0).abs() < 0.5 && (line.1.0 - 600.0).abs() < 0.5, "{line:?}");
+    let reference = (P2(650.0, 0.0), P2(650.0, 3000.0));
+    let to = s.model.align_pattern(region, reference, line).unwrap_or_else(|e| panic!("{e}"));
+    assert_eq!(to, P2(50.0, 0.0));
+    run(&mut s, "modify", json!({"id": region, "pattern_origin": [to.0, to.1]}));
+    let after = near(&s).unwrap_or_else(|| panic!("no pattern line there"));
+    assert!((after.0.0 - 650.0).abs() < 0.5, "{after:?}");
+    // Aligned again from there it stays; a floor takes it the same way; and what can't be aligned says why.
+    assert_eq!(s.model.align_pattern(region, reference, after), Ok(to));
+    assert_eq!(s.model.align_pattern(floor, reference, line), Ok(P2(50.0, 0.0)));
+    let e = s.model.align_pattern(region, (P2(0.0, 0.0), P2(1000.0, 0.0)), line).unwrap_err();
+    assert!(e.contains("parallel"), "{e}");
+    let e = s.model.align_pattern(region, (P2(5.0, 5.0), P2(5.0, 5.0)), line).unwrap_err();
+    assert!(e.contains("no length"), "{e}");
+    let wall = s.model.elements.iter().find(|(_, e)| matches!(e, Element::Wall(_))).map(|(i, _)| *i).unwrap_or_default();
+    assert!(s.model.align_pattern(wall, reference, line).unwrap_err().contains("pattern"));
+    assert!(s.model.align_pattern(u64::MAX, reference, line).is_err());
+    // A turned pattern aligns across its own lines' way: a reference at 45 degrees, the lines turned to match.
+    run(&mut s, "modify", json!({"id": region, "pattern_origin": [0, 0], "pattern_angle": 45}));
+    let diag = crate::render::pattern_line_at(&s.model, 100000, region, P2(1500.0, 1560.0), 100.0).unwrap_or_else(|| panic!("no line"));
+    let r45 = (P2(0.0, 100.0), P2(1000.0, 1100.0));
+    let moved = s.model.align_pattern(region, r45, diag).unwrap_or_else(|e| panic!("{e}"));
+    run(&mut s, "modify", json!({"id": region, "pattern_origin": [moved.0, moved.1]}));
+    let again = crate::render::pattern_line_at(&s.model, 100000, region, P2(1500.0, 1640.0), 100.0).unwrap_or_else(|| panic!("no line"));
+    let off = (again.0 - r45.0).dot((r45.1 - r45.0).unit().perp()).abs();
+    assert!(off < 0.5, "{off} mm off the reference");
+}

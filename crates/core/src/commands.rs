@@ -163,7 +163,8 @@ pub static ALL: &[Command] = &[
          [[x,y],[x,y]], structural?} a slab (a structural one with `structural`, as Revit's Floor: Structural), its top at the level, or `offset` mm above it, open through `openings` (holes inside it, apart); no boundary = the outline \
          of the level's walls along their centre lines, open over each loop of them standing free inside, joined to none of \
          the outer ones and with no room in it (a courtyard). Sloped: its top rises `slope` degrees (negative, falls) along \
-         the slope arrow, from its tail, where it's at the offset, toward its head",
+         the slope arrow, from its tail, where it's at the offset, toward its head. Its top's model pattern starts at \
+         `pattern_origin` and turns by `pattern_angle` (see modify)",
         floor,
     ),
     edit(
@@ -690,7 +691,10 @@ pub static ALL: &[Command] = &[
         "modify",
         "Modify",
         &[],
-        "{id | ids: [id,…], …fields} change fields as `elements` shows them, of one element or several; `level` and `top_level` may be names",
+        "{id | ids: [id,…], …fields} change fields as `elements` shows them, of one element or several; `level` and `top_level` may be names. \
+         A filled region's or a floor's model pattern is set by `pattern_origin` [x, y], plan mm, where its lines start, and \
+         `pattern_angle`, degrees counter-clockwise (both shown by `elements`); to put a pattern line of one on a reference \
+         line, Model::align_pattern gives the `pattern_origin` that does",
         modify,
     ),
     edit(
@@ -930,7 +934,8 @@ pub static ALL: &[Command] = &[
          elevation or a sheet, in its own terms; the lowest plan by default): the loops its sketch closes into (see \
          `sketch`: any number of outlines, a loop inside one a hole, one inside that an island), filled as type `type` \
          (Solid Black unless told) says, its boundary in line style `line_style` (Thin Lines unless told; null, unseen: a \
-         masking region's way). It draws over the model, under the annotation; edit its sketch with edit_boundary",
+         masking region's way). It draws over the model, under the annotation; edit its sketch with edit_boundary. A model \
+         pattern starts at the region's `pattern_origin` and turns by its `pattern_angle` (see modify)",
         filled_region,
     ),
     edit(
@@ -1682,6 +1687,9 @@ pub fn element_json(m: &Model, id: Id) -> Value {
             let (lo, hi) =
                 f.boundary.iter().map(|q| top.at(*q)).fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), z| (lo.min(z), hi.max(z)));
             extra.insert("top".into(), json!([hundredth(lo), hundredth(hi)]));
+            // Where its top's model pattern starts and how far it's turned: shown at their defaults too, to be set by modify.
+            extra.insert("pattern_origin".into(), json!(f.pattern_origin));
+            extra.insert("pattern_angle".into(), json!(f.pattern_angle));
         }
         Element::Ceiling(cl) => {
             let left: f64 = m.ceiling_slabs(cl).iter().map(|(face, rise)| area(&m.less_shafts(face, *rise).0)).sum();
@@ -1726,6 +1734,8 @@ pub fn element_json(m: &Model, id: Id) -> Value {
             let area = sketch::solve(&r.sketch).map_or(0.0, |p| p.area());
             extra.insert("area_m2".into(), json!(m2(area)));
             extra.insert("level".into(), json!(m.level_of(e)));
+            extra.insert("pattern_origin".into(), json!(r.pattern_origin));
+            extra.insert("pattern_angle".into(), json!(r.pattern_angle));
         }
         Element::DetailLine(l) => {
             let length = l.curve.length();
