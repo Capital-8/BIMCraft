@@ -1158,16 +1158,35 @@ fn a_selected_doors_temporary_dimensions_set_where_it_stands() {
     let door = ids(&h, "door")[0];
     click(&mut h, P2(2000.0, 0.0));
     assert_eq!(h.state().selection, [door]);
-    // From each end of its wall to the middle of the door.
-    assert!(h.query_by_label("Temporary dimension 2000").is_some());
-    h.get_by_label("Temporary dimension 6000").click();
+    // From the inner face of each wall at the ends of its wall (200 thick, on their centre lines) to the middle of the door.
+    assert!(h.query_by_label("Temporary dimension 1900").is_some());
+    h.get_by_label("Temporary dimension 5900").click();
     h.run();
     h.key_press_modifiers(Modifiers::COMMAND, Key::A);
     h.event(Event::Text("5000".into()));
     h.run();
     key(&mut h, Key::Enter);
-    assert_eq!(field(&h, door, "offset"), json!(3000.0), "5000 from the far end");
-    assert!(h.query_by_label("Temporary dimension 3000").is_some());
+    assert_eq!(field(&h, door, "offset"), json!(2900.0), "5000 from the far wall's face");
+    assert!(h.query_by_label("Temporary dimension 2800").is_some());
+}
+
+#[test]
+fn a_doors_temporary_dimensions_stop_at_the_face_of_a_wall_crossing_its_wall() {
+    let mut h =
+        app(&format!("{BOX}\nwall {{\"points\": [[5000, 0], [5000, 6000]], \"type\": \"Interior - 100mm\"}}\ndoor {{\"at\": [2000, 0]}}"));
+    let door = ids(&h, "door")[0];
+    click(&mut h, P2(2000.0, 0.0));
+    assert_eq!(h.state().selection, [door]);
+    // 100 to 4950, the faces either side: 1900 and 2950.
+    assert!(h.query_by_label("Temporary dimension 2950").is_some());
+    retype_dimension(&mut h, "1900", "2400");
+    assert_eq!(field(&h, door, "offset"), json!(2500.0), "2400 from the west wall's face");
+    assert!(h.query_by_label("Temporary dimension 2450").is_some(), "the rest of the 4850 between the faces");
+    // Past a face is off its stretch of wall: nothing moves.
+    let steps = h.state().session.history().len();
+    retype_dimension(&mut h, "2400", "6000");
+    assert_eq!(h.state().session.history().len(), steps);
+    assert!(h.state().status.error);
 }
 
 /// Click the number of a temporary dimension and type another.
@@ -1455,11 +1474,12 @@ fn the_door_and_window_tools_sketch_what_a_click_would_put_in_the_wall() {
     for label in ["Door", "Window"] {
         let mut h = app(BOX);
         tool(&mut h, label);
-        // Over the south wall, 3 m from its start: 3000 to one end and 5000 to the other, where the opening would be.
+        // Over the south wall, 3 m from its start: 2900 to the west wall's face and 4900 to the east wall's, where the
+        // opening would be.
         h.hover_at(h.state().screen(P2(3000.0, 0.0)));
         h.run();
         let text = painted_text(&h);
-        assert!(text.contains(&"3000".to_string()) && text.contains(&"5000".to_string()), "{label}: {text:?}");
+        assert!(text.contains(&"2900".to_string()) && text.contains(&"4900".to_string()), "{label}: {text:?}");
         assert!(
             h.state().session.model.elements.values().all(|e| !matches!(e, Element::Door(_) | Element::Window(_))),
             "a sketch isn't an element"
@@ -1467,7 +1487,7 @@ fn the_door_and_window_tools_sketch_what_a_click_would_put_in_the_wall() {
         // In the middle of the room there's no wall to put it in.
         h.hover_at(h.state().screen(P2(4000.0, 3000.0)));
         h.run();
-        assert!(!painted_text(&h).contains(&"3000".to_string()), "{label}");
+        assert!(!painted_text(&h).contains(&"2900".to_string()), "{label}");
     }
 }
 
@@ -1480,7 +1500,7 @@ fn a_door_pointed_at_a_wall_shows_how_far_it_stands_from_the_ends() {
     let painter = egui::Painter::new(ctx, egui::LayerId::background(), egui::Rect::from_min_size(Pos2::ZERO, vec2(800.0, 600.0)));
     let v = bimcraft_core::render::View { scale: 0.06, cx: 4000.0, cy: 3000.0, width: 800, height: 600 };
     let spans: Vec<String> = crate::canvas::opening_dimensions(&painter, &m, &v, o).into_iter().map(|(_, text, _)| text).collect();
-    assert_eq!(spans, ["2000", "6000"]);
+    assert_eq!(spans, ["1900", "5900"]);
 }
 
 #[test]
