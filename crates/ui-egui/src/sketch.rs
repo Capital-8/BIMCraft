@@ -301,7 +301,7 @@ impl BimApp {
                     .filter(|n| m.region_types.contains_key(*n))
                     .cloned()
                     .unwrap_or_else(|| first(bimcraft_core::fills::SOLID_BLACK, m.region_types.keys().collect())),
-                Some(first(bimcraft_core::lines::THIN, m.line_styles.keys().collect())).filter(|s| !s.is_empty()),
+                bimcraft_core::lines::default_style(&m.line_styles, m.language).cloned(),
             ),
         };
         let styled = match of {

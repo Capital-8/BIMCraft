@@ -429,10 +429,8 @@ impl BimApp {
     /// The Detail Line tool's Options Bar: the line style it draws in.
     pub(crate) fn line_style_options(&mut self, ui: &mut Ui) {
         let m = &self.session.model;
-        let thin = m.language.word(bimcraft_core::lines::THIN).to_string();
         if !m.line_styles.contains_key(&self.line_style) {
-            self.line_style =
-                if m.line_styles.contains_key(&thin) { thin } else { m.line_styles.keys().next().cloned().unwrap_or_default() };
+            self.line_style = bimcraft_core::lines::default_style(&m.line_styles, m.language).cloned().unwrap_or_default();
         }
         let l = ui.label(t("Line Style:"));
         let c = ComboBox::from_id_salt("detail-line-style").selected_text(&self.line_style).width(160.0).show_ui(ui, |ui| {

@@ -2,7 +2,7 @@
 //! edited as a draft and applied as one step.
 
 use super::*;
-use bimcraft_core::lines::{LineStyle, Segment};
+use bimcraft_core::lines::{self, LineStyle, Segment};
 use bimcraft_core::pen::Pen;
 
 #[test]
@@ -227,4 +227,24 @@ fn repeating_detail_lays_the_group_on_the_options_bar_along_two_clicks_every_spa
     assert_eq!(made.len(), 1);
     assert_eq!((field(&h, made[0], "type"), field(&h, made[0], "spacing")), (json!("Group 1"), json!(500.0)));
     assert_eq!(h.state().tool, Tool::RepeatingDetail(None), "ready for the next");
+}
+
+#[test]
+fn the_default_line_style_is_thin_lines_in_a_project_of_any_language_in_the_options_bar_and_a_region_sketch() {
+    use bimcraft_core::language::Language;
+    // A Portuguese project whose styles carry Portuguese names, and one from before they were named in a language.
+    for (named, thin) in [(true, "Linhas finas"), (false, "Thin Lines")] {
+        let mut h = app(BOX);
+        let m = h.state_mut().session.model_mut();
+        m.language = Language::Portuguese;
+        if named {
+            (m.line_styles, m.line_patterns) = (lines::styles(Language::Portuguese), lines::patterns(Language::Portuguese));
+        }
+        h.state_mut().line_style.clear();
+        shortcut(&mut h, "DL");
+        assert_eq!(h.state().line_style, thin, "the Options Bar's, named: {named}");
+        key(&mut h, Key::Escape);
+        shortcut(&mut h, "FR");
+        assert_eq!(h.state().sketch.as_ref().and_then(|s| s.region.1.clone()).as_deref(), Some(thin), "a region's, named: {named}");
+    }
 }
