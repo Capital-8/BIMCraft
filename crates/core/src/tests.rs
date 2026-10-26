@@ -1737,6 +1737,10 @@ fn hostile_params_never_panic_or_break_the_model() {
     let _ = base.execute("mass", &json!({"boundary": block(), "height": 9000}));
     // Another, lofted, which is 8.
     let _ = base.execute("mass", &json!({"boundary": block(), "height": 9000, "lean": [1500, 500]}));
+    // Detailing, one of each (detail lines, regions, a group, a repeating detail, a sketch floor, Linework), and the payloads
+    // that name them: some for every command, some for the one they are for.
+    let (detailing, targeted) = crate::detail_tests::sweep_payloads(&mut base);
+    let hostile: Vec<Value> = hostile.into_iter().chain(detailing.into_iter().map(|(_, p)| p)).collect();
     // Each command against each value, on a copy of the same session; the commands shared out between the cores.
     let cmds: Vec<_> = commands().iter().filter(|c| !matches!(c.id, "open" | "save")).collect();
     let threads = std::thread::available_parallelism().map_or(4, |n| n.get());
@@ -1765,6 +1769,11 @@ fn hostile_params_never_panic_or_break_the_model() {
             });
         }
     });
+    for (cmd, p) in &targeted {
+        let mut s = base.clone();
+        let _ = s.execute(cmd, p);
+        assert_eq!(s.model.check(), Ok(()), "{cmd} {p} left a broken model");
+    }
 }
 
 fn temp(name: &str) -> std::path::PathBuf {

@@ -275,3 +275,219 @@ fn a_regions_or_floors_pattern_origin_and_angle_show_in_elements_and_align_moves
     let off = (again.0 - r45.0).dot((r45.1 - r45.0).unit().perp()).abs();
     assert!(off < 0.5, "{off} mm off the reference");
 }
+
+/// Payloads for the hostile sweep, each with the command it is written for.
+pub(crate) type Payloads = Vec<(&'static str, Value)>;
+
+/// The square of side `w` with its corner at `(x, y)`, as the lines of a sketch.
+fn square(x: f64, y: f64, w: f64) -> Value {
+    json!([[[x, y], [x + w, y]], [[x + w, y], [x + w, y + w]], [[x + w, y + w], [x, y + w]], [[x, y + w], [x, y]]])
+}
+
+/// What the hostile sweep (`tests::hostile_params_never_panic_or_break_the_model`) needs of detailing. `s` is the sweep's
+/// base project, a box of walls (ids 100002 to 100005) and two masses: this gives it one of each thing the detailing
+/// commands act on (detail lines of several shapes, a revision cloud, filled regions, a text note, a detail group, a
+/// repeating detail of it, a floor drawn from a sketch, a plan with Linework), so that they reach a target, and returns
+/// the payloads that name them, each with the command it is written for and that command's real keys, and values wrong in
+/// the ways its checks look for: `.0` are run against every command, `.1` against the one they are for.
+pub(crate) fn sweep_payloads(s: &mut Session) -> (Payloads, Payloads) {
+    let line = |s: &mut Session, p: Value| id_of(&run(s, "detail_line", p));
+    let a = line(s, json!({"start": [0, 0], "end": [2000, 0]}));
+    let b = line(s, json!({"start": [0, 500], "end": [2000, 500]}));
+    let poly = line(s, json!({"points": [[0, 1000], [1000, 1000], [1000, 2000]]}));
+    let spline = line(s, json!({"fit": [[0, 3000], [500, 3500], [1500, 2500], [2000, 3000]]}));
+    let circle = line(s, json!({"centre": [3000, 3000], "radius": 500}));
+    let crossing = line(s, json!({"start": [500, -500], "end": [500, 400]}));
+    let tail = line(s, json!({"start": [2000, 0], "end": [3000, 500]}));
+    line(s, json!({"points": [[3000, 0], [4000, 0], [4000, 700], [3000, 700]], "closed": true, "cloud": 300, "revision": "Rev 1"}));
+    let region = id_of(&run(s, "filled_region", json!({"sketch": square(5000.0, 0.0, 800.0), "type": "Brick"})));
+    let note = id_of(&run(s, "text", json!({"text": "Fix", "at": [6000, 100]})));
+    let member = line(s, json!({"start": [6000, 500], "end": [6500, 500]}));
+    let boxed = id_of(&run(s, "filled_region", json!({"sketch": square(6000.0, 1000.0, 300.0)})));
+    let group = id_of(&run(s, "create_group", json!({"ids": [note, member, boxed], "name": "Grp"})));
+    let repeat = id_of(&run(s, "repeating_detail", json!({"type": "Grp", "start": [0, 4000], "end": [4000, 4000], "spacing": 1000})));
+    let floor = id_of(&run(s, "floor", json!({"sketch": square(0.0, 0.0, 8000.0)})));
+    run(s, "linework", json!({"view": 100000, "id": 100002, "at": [4000, 95], "style": "Wide Lines"}));
+    let bow = json!([[[0, 0], [4000, 4000]], [[4000, 4000], [4000, 0]], [[4000, 0], [0, 2000]], [[0, 2000], [0, 0]]]);
+    let open = json!([[[0, 0], [1000, 0]], [[1000, 0], [1000, 1000]]]);
+    let far = json!([[[0, 0], [1e300, 0]], [[1e300, 0], [0, 1e300]], [[0, 1e300], [0, 0]]]);
+    let overlap = json!([[[0, 0], [1000, 0]], [[1000, 0], [0, 0]]]);
+    let cross = vec![
+        // The sketch of a floor, a ceiling, a roof, a shaft, a region; sketch itself; edit_boundary.
+        ("sketch", json!({"lines": bow})),
+        ("sketch", json!({"lines": open})),
+        ("sketch", json!({"lines": far})),
+        ("sketch", json!({"lines": overlap})),
+        ("sketch", json!({"lines": "x"})),
+        ("floor", json!({"sketch": bow})),
+        ("ceiling", json!({"sketch": open, "level": 100000})),
+        ("shaft", json!({"sketch": far})),
+        ("filled_region", json!({"sketch": overlap, "type": "Masking"})),
+        ("roof", json!({"sketch": "x"})),
+        ("edit_boundary", json!({"id": floor, "sketch": bow})),
+        ("edit_boundary", json!({"id": floor, "sketch": open})),
+        ("edit_boundary", json!({"id": floor})),
+        ("edit_boundary", json!({"id": region, "sketch": far})),
+        ("edit_boundary", json!({"id": region, "sketch": square(0.0, 0.0, 1000.0)})),
+        // Detail lines of every shape, with the wrong numbers.
+        ("detail_line", json!({"start": [0, 0], "end": [1000, 0], "arc": 359.9999999999})),
+        ("detail_line", json!({"start": [0, 0], "end": [1000, 0], "through": [500, 1e300]})),
+        ("detail_line", json!({"points": [[0, 0], [1000, 0], [1000, 1000]], "arcs": [0, 1e300], "closed": true})),
+        ("detail_line", json!({"points": [[0, 0], [1000, 0]], "arcs": [0, 90, 180]})),
+        ("detail_line", json!({"centre": [0, 0], "radius": 1e9, "cloud": 1.5})),
+        ("detail_line", json!({"centre": [1e9, 1e9], "radius": 1e9, "style": "No Such Style"})),
+        ("detail_line", json!({"centre": [0, 0], "radii": [1e300, 1], "angle": 1e300, "span": [0, 1e300]})),
+        ("detail_line", json!({"control": [[0, 0], [1000, 1000], [2000, 0]], "knots": [0, 0, 0.5, 1, 1]})),
+        ("detail_line", json!({"control": [[0, 0], [1, 1]], "knots": [0, 0, 1]})),
+        ("detail_line", json!({"fit": [[0, 0], [0, 0], [0, 0]], "start_tangent": [0, 0], "end_tangent": [1e300, 0]})),
+        ("detail_line", json!({"start": [0, 0], "end": [1000, 0], "cloud": 100, "insulation": 100, "revision": 5, "centre_mark": "yes"})),
+        // Edits of them.
+        ("split", json!({"id": a, "at": [1e300, 0]})),
+        ("vertex", json!({"id": poly, "at": [1000, 1000], "delete": true})),
+        ("vertex", json!({"id": spline, "at": [1e300, 0], "delete": true})),
+        ("fillet", json!({"ids": [a, b], "radius": 100})),
+        ("fillet", json!({"ids": [a, poly], "radius": 1e300})),
+        ("offset", json!({"id": a, "distance": 1e300, "toward": [0, 1], "copy": false})),
+        ("trim_extend", json!({"boundary": a, "ids": [poly, b], "keep": [[100, 0], [5, 5]]})),
+        ("create_group", json!({"ids": [a, region, group]})),
+        // Model patterns, Linework, groups.
+        ("modify", json!({"id": region, "pattern_origin": [1e300, 0], "pattern_angle": 1e300})),
+        ("modify", json!({"id": floor, "pattern_origin": "x", "pattern_angle": [1]})),
+        (
+            "modify",
+            json!({"id": 100000, "graphics": {"linework": [{"element": "x", "from": [1e300, 0], "to": [0, 0], "style": "No Such Style"}]}}),
+        ),
+        ("detail_group", json!({"type": "Grp", "at": [1e300, 0], "angle": 1e300, "mirrored": 5})),
+    ];
+    let targeted = vec![
+        // Each command once as it is meant to be used, so that the base has what it needs to do something.
+        ("sketch", json!({"lines": square(0.0, 0.0, 1000.0)})),
+        ("edit_boundary", json!({"id": floor, "sketch": square(0.0, 0.0, 6000.0)})),
+        ("detail_line", json!({"start": [100, 100], "end": [900, 100]})),
+        ("trim_extend", json!({"boundary": a, "ids": [crossing], "keep": [[500, 400]]})),
+        ("fillet", json!({"ids": [a, crossing], "radius": 100})),
+        ("offset", json!({"id": a, "distance": 100, "toward": [0, 1]})),
+        ("split", json!({"id": a, "at": [1000, 0]})),
+        ("join_polyline", json!({"ids": [a, tail]})),
+        ("line_pattern", json!({"name": "Fence", "segments": [{"dash": 4}, {"space": 1}]})),
+        ("line_style", json!({"name": "Fence Line", "pen": 3})),
+        ("fill_pattern", json!({"name": "Hatch", "lines": [{"angle": 45, "spacing": 10}]})),
+        ("filled_region_type", json!({"name": "Hatched", "foreground": "Sand"})),
+        ("filled_region", json!({"sketch": square(0.0, 0.0, 500.0), "type": "Sand"})),
+        ("export_fill_patterns", json!({"names": ["Sand"]})),
+        ("import_fill_patterns", json!({"text": "*Hatch\n45,0,0,0,10\n"})),
+        ("create_group", json!({"ids": [a, b]})),
+        ("detail_group", json!({"type": "Grp", "at": [100, 100], "angle": 30, "mirrored": true})),
+        ("repeating_detail", json!({"type": "Grp", "start": [0, 0], "end": [3000, 0], "spacing": 1000})),
+        ("duplicate_view", json!({"view": 100000, "mode": "detailing", "name": "Detailed"})),
+        // And with what is wrong in each.
+        ("duplicate_view", json!({"view": 100000, "mode": "dependent", "name": ""})),
+        ("trim_extend", json!({"boundary": 100002, "ids": [a], "keep": [[1e300, 0]]})),
+        ("trim_extend", json!({"boundary": a, "ids": [a], "keep": [[0, 0]]})),
+        ("trim_extend", json!({"boundary": 5, "ids": [circle, spline], "keep": "x"})),
+        ("vertex", json!({"id": poly, "at": [500, 1000]})),
+        ("vertex", json!({"id": a, "at": [0, 0], "delete": true})),
+        ("convert_spline", json!({"id": spline})),
+        ("convert_spline", json!({"id": circle})),
+        ("fillet", json!({"ids": [100002, 100003], "radius": 1e300})),
+        ("fillet", json!({"ids": [a, a], "radius": 5})),
+        ("fillet", json!({"ids": [circle, spline], "radius": 5})),
+        ("offset", json!({"id": circle, "distance": -500, "toward": [3000, 3000]})),
+        ("offset", json!({"id": spline, "distance": 1e9, "toward": [0, 0], "copy": "x"})),
+        ("split", json!({"id": poly, "at": [1e300, 1e300]})),
+        ("split", json!({"id": circle, "at": [3500, 3000]})),
+        ("join_polyline", json!({"ids": [a, b]})),
+        ("join_polyline", json!({"ids": [poly]})),
+        ("join_polyline", json!({"ids": [a, 100002]})),
+        ("explode", json!({"id": poly})),
+        ("explode", json!({"id": a})),
+        ("line_pattern", json!({"name": "X", "segments": [{"dash": 1e300}, {"space": -1}, "dot", 5]})),
+        ("line_pattern", json!({"name": "Dash", "delete": true, "rename": "Dot"})),
+        ("line_style", json!({"name": "X", "pen": 99, "color": "#zz", "pattern": 5})),
+        ("line_style", json!({"name": "Thin Lines", "delete": true})),
+        ("line_style", json!({"name": "Wide Lines", "delete": true})),
+        ("fill_pattern", json!({"name": "P", "lines": [{"angle": 1e300, "spacing": 0}], "target": "x"})),
+        ("fill_pattern", json!({"name": "P", "lines": [{"angle": 0, "spacing": 10, "dashes": [-1]}]})),
+        ("fill_pattern", json!({"name": "P", "lines": [{"angle": 0, "spacing": 0.05, "dashes": [-0.05]}]})),
+        ("fill_pattern", json!({"name": "Brick", "delete": true})),
+        ("filled_region_type", json!({"name": "T", "foreground": "nope", "background": 5, "masking": "x", "foreground_color": [999]})),
+        ("filled_region_type", json!({"name": "Brick", "delete": true})),
+        ("filled_region", json!({"sketch": bow, "type": "Masking", "view": 100002})),
+        ("filled_region", json!({"sketch": square(0.0, 0.0, 1000.0), "line_style": 5})),
+        ("linework", json!({"view": 100000, "id": 100002, "at": [1e300, 0], "style": "nope", "invisible": true, "remove": true})),
+        ("linework", json!({"view": 100000, "id": 100002, "at": [4000, 95], "remove": true})),
+        ("linework", json!({"view": 100000, "id": a, "at": [1000, 0], "invisible": true})),
+        ("import_fill_patterns", json!({"text": "*a\n0,0,0,0,10,-1\n*b\n1e999,0,0,0,1\n*c\n0,0,0,0,0\n", "replace": true})),
+        ("import_fill_patterns", json!({"text": "*Sand\n0,0,0,0,10\n", "replace": false})),
+        ("import_fill_patterns", json!({"text": 5, "path": "/nonexistent/x.pat"})),
+        ("import_fill_patterns", json!({"path": "/nonexistent/x.pat"})),
+        ("export_fill_patterns", json!({"path": "/nonexistent/dir/out.pat", "names": ["nope"]})),
+        ("export_fill_patterns", json!({"names": "x"})),
+        ("create_group", json!({"ids": [100002]})),
+        ("create_group", json!({"ids": [group]})),
+        ("create_group", json!({"ids": [a, b], "name": "Grp"})),
+        ("detail_group", json!({"type": "Grp", "at": [0, 0], "view": 100002})),
+        ("detail_group", json!({"type": "Nope", "at": [0, 0], "angle": 90})),
+        ("repeating_detail", json!({"type": "Grp", "start": [0, 0], "end": [100000, 0], "spacing": 1})),
+        ("repeating_detail", json!({"type": "Grp", "start": [0, 0], "end": [0, 0], "spacing": 100})),
+        ("ungroup", json!({"id": group})),
+        ("ungroup", json!({"id": repeat})),
+        ("group_type", json!({"name": "Grp", "rename": "Grp 2"})),
+        ("group_type", json!({"name": "Grp", "delete": true})),
+        ("modify", json!({"id": repeat, "spacing": 1.0, "end": [4000, 4000]})),
+    ];
+    (cross, targeted)
+}
+
+#[test]
+fn the_sweeps_detailing_payloads_use_real_keys_and_the_base_holds_something_for_each_to_reach() {
+    let mut base = Session::new();
+    run(&mut base, "wall", json!({"points": [[0, 0], [8000, 0], [8000, 6000], [0, 6000]], "closed": true}));
+    let (cross, targeted) = sweep_payloads(&mut base);
+    // One of each kind of thing the detailing commands act on.
+    for category in ["line", "region", "detailgroup", "repeatingdetail", "floor"] {
+        let n = run(&mut base, "elements", json!({"category": category}))["count"].clone();
+        assert!(n.as_u64().is_some_and(|n| n > 0), "no {category} in the base: {n}");
+    }
+    assert_eq!(crate::graphics::graphics_of(&base.model, 100000).map(|g| g.linework.len()), Some(1));
+    assert!(base.model.elements.values().any(|e| matches!(e, Element::Floor(f) if !f.sketch.is_empty())), "a floor with a sketch");
+    // Each payload names keys its command has: an error may be about the values, never about a key it doesn't take.
+    let mut accepted = std::collections::BTreeSet::new();
+    for (c, p) in cross.iter().chain(&targeted) {
+        match base.clone().execute(c, p) {
+            Ok(_) => {
+                accepted.insert(*c);
+            }
+            Err(e) => assert!(!e.contains("isn't one of its parameters") && !e.contains("unknown field"), "{c} {p}: {e}"),
+        }
+    }
+    // Every command the detailing stack added has a payload that it takes: the base has the target it needs.
+    let added = [
+        "convert_spline",
+        "create_group",
+        "detail_group",
+        "detail_line",
+        "edit_boundary",
+        "explode",
+        "export_fill_patterns",
+        "fill_pattern",
+        "filled_region",
+        "filled_region_type",
+        "fillet",
+        "group_type",
+        "import_fill_patterns",
+        "join_polyline",
+        "line_pattern",
+        "line_style",
+        "linework",
+        "offset",
+        "repeating_detail",
+        "sketch",
+        "split",
+        "trim_extend",
+        "ungroup",
+        "vertex",
+    ];
+    let missing: Vec<&str> = added.into_iter().filter(|c| !accepted.contains(c)).collect();
+    assert!(missing.is_empty(), "no payload is accepted by {missing:?}");
+}
