@@ -804,9 +804,9 @@ pub static ALL: &[Command] = &[
     edit(
         "explode",
         "Explode Polyline",
-        &["PX"],
+        &["EX"],
         "{id} takes a detail line that is a polyline apart into a line or an arc for each segment, in its view and style; \
-         the first keeps its id",
+         the first keeps its id. Revit has no shortcut for it: EX is ours, PX being the Plumbing Fixture's on the desktop",
         explode,
     ),
     edit(
@@ -816,33 +816,6 @@ pub static ALL: &[Command] = &[
         "{ids: [id,…]} deleting a wall deletes its doors and windows, deleting those their tags; a view takes its notes and \
          spot elevations, and what a spot elevation reads takes it; dimensions lose what's deleted",
         delete,
-    ),
-    edit(
-        "line_weights",
-        "Line Weights",
-        &[],
-        "{model?: [{scale, widths}, …], annotation?: [16 widths], reset?: true} the project's line weights, as Revit's \
-         Manage > Line Weights: what each pen draws on paper, mm. `model` gives, whole, the model's pens 1 to 16 at each of \
-         its scales (1 to 32 of them, 1 : `scale`): a view draws its walls, doors, patterns and the rest of the model in the \
-         column of the scale nearest its own (by how many times finer or coarser; the finer of two as near). `annotation` \
-         gives the 16 pens that dimensions, tags, text, grids, levels and marks draw in, at any scale. Each width is 0.01 to \
-         20 mm; pen 0 is always a hairline. `reset` goes back to what a project in its units starts with (the model's pens \
-         wider at finer scales; at 1 : 100, pen 4 is 0.18 mm and pen 10 0.35 mm). Without any, it says what they are, each \
-         scale named as the project's units name it, and `own` whether the project has set them",
-        line_weights,
-    ),
-    edit(
-        "object_styles",
-        "Object Styles",
-        &[],
-        "{categories?: {category: {projection?: pen, cut?: pen}, …}, reset?: true} the project's object styles, as Revit's \
-         Manage > Object Styles: the pen (0, a hairline, to 16) each model category draws its lines in where it is seen \
-         (`projection`) and where a view cuts it (`cut`), in every plan and section; a view's Visibility/Graphics overrides \
-         them. A category given keeps the pen it isn't given. The rest of an element's lines keep their own: a compound \
-         wall's layers, a door's jambs, a stair's walk line. `reset` goes back to what a project starts with (cut pen 10 and \
-         seen pen 4; a door's and a window's cut 6, a railing seen 6, a mass 4 both). Without either, it says each model \
-         category's, `own` whether the project has set it apart",
-        object_styles,
     ),
     edit(
         "line_pattern",
@@ -6469,7 +6442,13 @@ fn corner(s: &mut Session, p: &Value) -> R {
     let m = &s.model;
     let [a, b] = ids.as_slice() else { return Err(bad(c, "`ids` takes two walls")) };
     if let (Some(Element::DetailLine(la)), Some(Element::DetailLine(lb))) = (m.elements.get(*a), m.elements.get(*b)) {
-        let keep = points(c, p, "keep").ok().filter(|k| k.len() == 2).unwrap_or_else(|| vec![la.curve.middle(), lb.curve.middle()]);
+        if la.view != lb.view {
+            return Err(bad(c, format!("detail lines {a} and {b} are in different views; trim lines of one view")));
+        }
+        let keep = if absent(p.get("keep")) { vec![la.curve.middle(), lb.curve.middle()] } else { points(c, p, "keep")? };
+        if keep.len() != 2 {
+            return Err(bad(c, "`keep` is a point on each line, [[x, y], [x, y]]"));
+        }
         let (ca, cb) = crate::draw::corner(&la.curve, keep[0], &lb.curve, keep[1]).ok_or_else(|| {
             bad(c, "the lines don't meet, run on as far as need be: they're parallel, or an arc's circle misses the other")
         })?;
@@ -6612,11 +6591,9 @@ fn join_polyline(s: &mut Session, p: &Value) -> R {
     let curves: Vec<crate::curves::Curve> = lines.iter().map(|l| l.curve.clone()).collect();
     let curve =
         crate::curves::join(&curves).ok_or_else(|| bad(c, "the lines don't make one chain, each end meeting the next within 1 mm"))?;
-    let m = s.model_mut();
-    for &id in &ids[1..] {
-        m.elements.remove(id);
-    }
-    m.elements.insert(ids[0], Element::DetailLine(DetailLine { curve, ..first }));
+    // The lines joined in go as Delete takes them: a dimension that measured one loses it (and goes, left with fewer than two).
+    delete(s, &json!({"ids": &ids[1..]}))?;
+    s.model_mut().elements.insert(ids[0], Element::DetailLine(DetailLine { curve, ..first }));
     Ok(json!({"id": ids[0]}))
 }
 
@@ -6645,6 +6622,17 @@ fn offset(s: &mut Session, p: &Value) -> R {
     }
 }
 
+/// Whether `boundary` is drawn where detail line `l` is: another detail line of its view, or a plan element on the level
+/// of the plan it is in (a grid, which has no level, in any plan). Its coordinates are the view's: a section's along and
+/// up, a sheet's paper mm, not the plan's.
+fn drawn_in_view(m: &Model, l: &DetailLine, boundary: Id) -> bool {
+    match m.elements.get(boundary) {
+        Some(Element::DetailLine(b)) => b.view == l.view,
+        Some(e) => m.plan_level(l.view).is_some_and(|plan| m.level_of(e).is_none_or(|level| m.guid(plan) == level)),
+        None => false,
+    }
+}
+
 fn trim_extend(s: &mut Session, p: &Value) -> R {
     let c = "trim_extend";
     let m = &s.model;
@@ -6660,6 +6648,12 @@ fn trim_extend(s: &mut Session, p: &Value) -> R {
     let mut done = Vec::new();
     for (&id, &k) in ids.iter().zip(&keep) {
         let Some(Element::DetailLine(l)) = m.elements.get(id) else { return Err(bad(c, format!("{id} is not a detail line"))) };
+        if !drawn_in_view(m, l, boundary) {
+            return Err(bad(
+                c,
+                format!("detail line {id} is in another view than {boundary} is drawn in; trim it to a line of its own view"),
+            ));
+        }
         let x = crate::draw::meet(&l.curve, &edge, k).ok_or_else(|| bad(c, format!("detail line {id} never meets {boundary}")))?;
         let curve = crate::draw::trim_to(&l.curve, k, x)
             .ok_or_else(|| bad(c, format!("detail line {id} can't be cut there: nothing would be left")))?;
@@ -6670,6 +6664,30 @@ fn trim_extend(s: &mut Session, p: &Value) -> R {
         m.elements.insert(id, Element::DetailLine(l));
     }
     Ok(json!({"ids": ids}))
+}
+
+/// The doors and windows of straight wall `id` as they are once it is `before` becomes `after` (cut back at an end): each
+/// where it was in the plan, so its offset along the wall moves by what the start moved. An error if one would be cut off.
+fn keep_openings(c: &str, m: &Model, id: Id, before: &Wall, after: &Wall) -> Result<Vec<(Id, Element)>, String> {
+    let (was, now) = (Axis::of(before), Axis::of(after));
+    let mut out = Vec::new();
+    for (&oid, e) in &m.elements {
+        let (Element::Door(o) | Element::Window(o)) = e else { continue };
+        if !m.same(o.host, id) {
+            continue;
+        }
+        let half = m.opening_type(e).map_or(0.0, |t| t.width / 2.0);
+        let along = ((was.at(o.offset, 0.0) - after.start).dot(now.tangent(0.0)) * 1e3).round() / 1e3;
+        if along - half < -TOL || along + half > now.length() + TOL {
+            return Err(bad(
+                c,
+                format!("{} {oid} is in the part of wall {id} the fillet cuts away; move it along the wall first", e.category()),
+            ));
+        }
+        let o = Opening { offset: along, ..o.clone() };
+        out.push((oid, if matches!(e, Element::Door(_)) { Element::Door(o) } else { Element::Window(o) }));
+    }
+    Ok(out)
 }
 
 fn fillet(s: &mut Session, p: &Value) -> R {
@@ -6699,9 +6717,17 @@ fn fillet(s: &mut Session, p: &Value) -> R {
         let (&[a0, a1], &[b0, b1]) = (pa.as_slice(), pb.as_slice()) else { return Err(bad(c, "the walls can't be rounded")) };
         let mut round = Wall { start: micron(arc.start()), end: micron(arc.end()), arc: degrees(sweep), ..wa.clone() };
         massing::detach(&mut round.params);
+        let (cut_a, cut_b) =
+            (Wall { start: micron(a0), end: micron(a1), ..wa.clone() }, Wall { start: micron(b0), end: micron(b1), ..wb.clone() });
+        // Doors and windows stay where they are in the plan, as `corner` leaves them, or the fillet is refused if it cuts one off.
+        let mut hosted = keep_openings(c, m, a, &wa, &cut_a)?;
+        hosted.extend(keep_openings(c, m, b, &wb, &cut_b)?);
         let m = s.model_mut();
-        m.elements.insert(a, Element::Wall(Wall { start: micron(a0), end: micron(a1), ..wa }));
-        m.elements.insert(b, Element::Wall(Wall { start: micron(b0), end: micron(b1), ..wb }));
+        m.elements.insert(a, Element::Wall(cut_a));
+        m.elements.insert(b, Element::Wall(cut_b));
+        for (id, e) in hosted {
+            m.elements.insert(id, e);
+        }
         let id = m.insert(Element::Wall(round));
         return Ok(json!({"id": id, "ids": [a, b]}));
     }
@@ -7156,17 +7182,10 @@ fn detail_line(s: &mut Session, p: &Value) -> R {
     let view = view_param(c, m, p, true)?;
     let style = match name_param(c, p, "style")? {
         Some(n) => n,
-        // Thin Lines, in the project's language, or its first style.
-        None => {
-            let thin = m.language.word(crate::lines::THIN);
-            let first = m.line_styles.keys().next();
-            m.line_styles
-                .get_key_value(thin)
-                .map(|(k, _)| k)
-                .or(first)
-                .cloned()
-                .ok_or_else(|| bad(c, "the project has no line style; make one first"))?
-        }
+        // Thin Lines, in the project's language or the English of a file from before them.
+        None => crate::lines::default_style(&m.line_styles, m.language)
+            .cloned()
+            .ok_or_else(|| bad(c, "the project has no line style; make one first"))?,
     };
     let l = DetailLine { view: m.guid(view), curve, style, insulation, centre_mark, cloud, revision };
     let id = s.model_mut().insert(Element::DetailLine(l));
@@ -7550,10 +7569,7 @@ fn filled_region(s: &mut Session, p: &Value) -> R {
     };
     // Thin Lines unless told; null (or "Invisible") draws none.
     let line_style = match p.get("line_style") {
-        None => {
-            let thin = m.language.word(crate::lines::THIN);
-            m.line_styles.get_key_value(thin).map(|(k, _)| k).or(m.line_styles.keys().next()).cloned()
-        }
+        None => crate::lines::default_style(&m.line_styles, m.language).cloned(),
         Some(Value::Null) => None,
         Some(Value::String(n)) if n.trim().eq_ignore_ascii_case("invisible") => None,
         Some(Value::String(n)) => Some(n.trim().to_string()),

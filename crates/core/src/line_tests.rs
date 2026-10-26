@@ -312,6 +312,26 @@ fn points_snap_to_detail_lines_ends_centres_quadrants_tangents_and_their_nearest
 }
 
 #[test]
+fn every_command_is_listed_once_and_every_shortcut_names_one_command_but_the_one_documented() {
+    let mut ids = std::collections::BTreeSet::new();
+    let mut keys: std::collections::BTreeMap<String, &str> = std::collections::BTreeMap::new();
+    for c in crate::engine::commands() {
+        assert!(ids.insert(c.id), "command `{}` is listed twice", c.id);
+        for a in c.aliases {
+            if let Some(other) = keys.insert(a.to_uppercase(), c.id) {
+                // CL is Column's and Structural Column's by the help of both; the desktop's Structure tab takes it for its own.
+                assert_eq!(a.to_uppercase(), "CL", "{a} is both `{other}`'s and `{}`'s", c.id);
+            }
+        }
+    }
+    // Explode Polyline kept clear of the Plumbing Fixture's PX, which the desktop tries first.
+    assert!(!keys.contains_key("PX"));
+    let mut s = Session::new();
+    let pl = line(&mut s, json!({"points": [[0, 0], [1000, 0], [1000, 1000]]}));
+    assert_eq!(run(&mut s, "EX", json!({"id": pl}))["ids"].as_array().map(Vec::len), Some(2));
+}
+
+#[test]
 fn fillet_rounds_two_walls_with_an_arc_wall_of_the_first_ones_type() {
     let mut s = Session::new();
     let a = run(&mut s, "wall", json!({"points": [[-4000, 0], [0, 0]]}))["ids"][0].as_u64().unwrap_or_default();
@@ -323,6 +343,76 @@ fn fillet_rounds_two_walls_with_an_arc_wall_of_the_first_ones_type() {
     assert_eq!((wa.start, wa.end), (P2(-4000.0, 0.0), P2(-1500.0, 0.0)));
     assert_eq!((wb.start, wb.end), (P2(0.0, 1500.0), P2(0.0, 4000.0)));
     assert_eq!((wr.start, wr.end, wr.arc.abs(), wr.type_name.clone()), (P2(-1500.0, 0.0), P2(0.0, 1500.0), 90.0, wa.type_name));
+}
+
+#[test]
+fn fillet_leaves_a_wall_s_doors_where_they_are_in_the_plan_and_refuses_to_cut_one_off() {
+    let mut s = Session::new();
+    // Wall a starts at the corner, so a fillet moves its start along it by 1500.
+    let a = run(&mut s, "wall", json!({"points": [[0, 0], [-6000, 0]]}))["ids"][0].as_u64().unwrap_or_default();
+    let b = run(&mut s, "wall", json!({"points": [[0, 0], [0, 6000]]}))["ids"][0].as_u64().unwrap_or_default();
+    let d = run(&mut s, "door", json!({"wall": a, "offset": 3000}))["id"].as_u64().unwrap_or_default();
+    let near = run(&mut s, "door", json!({"wall": b, "offset": 500}))["id"].as_u64().unwrap_or_default();
+    let before = s.model.clone();
+    let e = s.execute("fillet", &json!({"ids": [a, b], "radius": 1500})).unwrap_err();
+    assert!(e.contains(&format!("door {near}")) && e.contains("cuts away"), "{e}");
+    assert_eq!(*s.model, *before, "refused, nothing changed");
+    run(&mut s, "delete", json!({"ids": [near]}));
+    run(&mut s, "fillet", json!({"ids": [a, b], "radius": 1500}));
+    let (Some(Element::Door(o)), Some(w)) = (s.model.elements.get(d), s.model.wall(a)) else { panic!("the door and its wall") };
+    assert_eq!(w.start, P2(-1500.0, 0.0), "the wall's start moved");
+    let spot = crate::walls::Axis::of(w).at(o.offset, 0.0);
+    assert!(spot.dist(P2(-3000.0, 0.0)) < 1e-6, "the door stands where it stood, not {spot:?}");
+}
+
+#[test]
+fn joining_lines_takes_the_ones_joined_in_as_delete_does_a_dimension_measuring_one_goes_with_it() {
+    let mut s = Session::new();
+    let a = line(&mut s, json!({"start": [0, 0], "end": [1000, 0]}));
+    let b = line(&mut s, json!({"start": [1000, 0], "end": [2000, 0]}));
+    let c = line(&mut s, json!({"start": [0, 3000], "end": [2000, 3000]}));
+    let d = run(&mut s, "dimension", json!({"refs": [{"id": b}, {"id": c}], "at": [1000, 1500]}))["id"].as_u64().unwrap_or_default();
+    let joined = run(&mut s, "join_polyline", json!({"ids": [a, b]}))["id"].as_u64().unwrap_or_default();
+    assert_eq!(joined, a);
+    assert!(s.model.elements.get(b).is_none() && s.model.elements.get(d).is_none(), "the line and its dimension are gone");
+    assert_eq!(curve(&s, a).kind(), "polyline");
+    run(&mut s, "undo", json!({}));
+    assert!(s.model.elements.get(b).is_some() && s.model.elements.get(d).is_some(), "one undo step puts them back");
+}
+
+#[test]
+fn trimming_and_cornering_keep_to_one_view_and_say_what_is_wrong_with_keep() {
+    let mut s = Session::new();
+    run(&mut s, "section", json!({"start": [-1000, 2000], "end": [3000, 2000], "name": "S"}));
+    let wall = run(&mut s, "wall", json!({"points": [[5000, 0], [5000, 4000]]}))["ids"][0].as_u64().unwrap_or_default();
+    let plan = line(&mut s, json!({"start": [0, 0], "end": [2000, 0]}));
+    let cut = line(&mut s, json!({"view": "S", "start": [0, 500], "end": [2000, 500]}));
+    let cut2 = line(&mut s, json!({"view": "S", "start": [3000, 0], "end": [3000, 3000]}));
+    // A line of a section is not extended to a plan's wall at its plan coordinates; the plan's own is.
+    let before = s.model.clone();
+    let e = s.execute("trim_extend", &json!({"boundary": wall, "ids": [cut], "keep": [[100, 500]]})).unwrap_err();
+    assert!(e.contains("another view"), "{e}");
+    assert_eq!(*s.model, *before);
+    run(&mut s, "trim_extend", json!({"boundary": wall, "ids": [plan], "keep": [[100, 0]]}));
+    assert!(curve(&s, plan).end().dist(P2(5000.0, 0.0)) < 1e-6);
+    // Lines of two views are not cornered, and a line of the section is trimmed to a line of the section.
+    let e = s.execute("corner", &json!({"ids": [plan, cut]})).unwrap_err();
+    assert!(e.contains("different views"), "{e}");
+    let e = s.execute("trim_extend", &json!({"boundary": cut2, "ids": [plan], "keep": [[100, 0]]})).unwrap_err();
+    assert!(e.contains("another view"), "{e}");
+    run(&mut s, "trim_extend", json!({"boundary": cut2, "ids": [cut], "keep": [[100, 500]]}));
+    assert!(curve(&s, cut).end().dist(P2(3000.0, 500.0)) < 1e-6);
+    // `keep` given wrong is said, not dropped: nonsense, or three points.
+    let (x, y) = (
+        line(&mut s, json!({"start": [0, 10000], "end": [800, 10000]})),
+        line(&mut s, json!({"start": [1000, 10200], "end": [1000, 11000]})),
+    );
+    for keep in [json!("nonsense"), json!([[0, 0], [1, 1], [2, 2]])] {
+        let e = s.execute("corner", &json!({"ids": [x, y], "keep": keep})).unwrap_err();
+        assert!(e.contains("keep"), "{e}");
+    }
+    run(&mut s, "corner", json!({"ids": [x, y], "keep": [[100, 10000], [1000, 10900]]}));
+    assert!(curve(&s, x).end().dist(P2(1000.0, 10000.0)) < 1e-6);
 }
 
 #[test]

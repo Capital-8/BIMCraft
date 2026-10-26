@@ -2205,6 +2205,14 @@ impl Model {
             }
         }
         self.next_id = self.next_id.max(FIRST_ID);
+        // A file from before line styles leaves the patterns and styles out, so it has the English ones, whatever its
+        // language: named in its language (a file that holds them has them by GUID, never equal to these).
+        if self.language != Language::English
+            && self.line_styles == lines::default_styles()
+            && self.line_patterns == lines::default_patterns()
+        {
+            (self.line_styles, self.line_patterns) = (lines::styles(self.language), lines::patterns(self.language));
+        }
         // 4 to 5 (scans, and the point clouds that place them) has no step: a file of 4 holds none of it, or holds it as 5 does.
         self.format = FORMAT;
     }
