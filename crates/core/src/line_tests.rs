@@ -298,8 +298,9 @@ fn points_snap_to_detail_lines_ends_centres_quadrants_tangents_and_their_nearest
     assert_eq!((at(P2(40.0, -30.0), &[], &all).at, at(P2(40.0, -30.0), &[], &all).kind), (P2(0.0, 0.0), Kind::Centre));
     assert_eq!(at(P2(20.0, 1060.0), &[], &all).kind, Kind::Quadrant);
     assert_eq!(at(P2(20.0, 1060.0), &[], &all).at, P2(0.0, 1000.0));
-    assert_eq!((at(P2(3050.0, 20.0), &[], &all).at, at(P2(3050.0, 20.0), &[], &all).kind), (P2(3000.0, 0.0), Kind::Endpoint));
-    assert_eq!(at(P2(1990.0, 2950.0), &[], &all).at, P2(2000.0, 3000.0), "a spline's end");
+    let endpoint = at(P2(3050.0, 20.0), &[], &all);
+    assert!(endpoint.at.dist(P2(3000.0, 0.0)) < 1e-9 && endpoint.kind == Kind::Endpoint, "{endpoint:?}");
+    assert!(at(P2(1990.0, 2950.0), &[], &all).at.dist(P2(2000.0, 3000.0)) < 1e-9, "a spline's end");
     // From (2000, 0), a line touches the circle at 60° either side of the way back to its centre.
     let t = at(P2(500.0, 880.0), &[P2(2000.0, 0.0)], &all);
     assert_eq!(t.kind, Kind::Tangent);

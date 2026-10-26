@@ -145,7 +145,9 @@ impl Curve {
                 None => (0.0, 360.0),
             },
             Curve::Spline { control, knots } => {
-                let (p, u) = (degree(control.len()), knot_vector(control.len(), knots.as_deref()));
+                // The degree its knots give it (given knots may make it other than the uniform ones' three).
+                let u = knot_vector(control.len(), knots.as_deref());
+                let p = degree_of(control.len(), &u);
                 (u.get(p).copied().unwrap_or(0.0), u.get(control.len()).copied().unwrap_or(1.0))
             }
             Curve::Fit { points, .. } => (0.0, chords(points).last().copied().unwrap_or(0.0)),
@@ -198,17 +200,24 @@ impl Curve {
         (self.at(b) - self.at(a)).unit()
     }
 
-    /// Where it starts.
+    /// Where it starts: the first point it was given, as given (not worked out again through trigonometry), for all but a
+    /// circle and an ellipse.
     pub fn start(&self) -> P2 {
-        self.at(self.domain().0)
+        match self {
+            Curve::Poly { points, .. } | Curve::Fit { points, .. } | Curve::Spline { control: points, .. } => points.first().copied(),
+            Curve::Circle { .. } | Curve::Ellipse { .. } => None,
+        }
+        .unwrap_or_else(|| self.at(self.domain().0))
     }
 
-    /// Where it ends: where it starts, when it's closed.
+    /// Where it ends, as given likewise: where it starts, when it's closed.
     pub fn end(&self) -> P2 {
         match self {
-            Curve::Poly { closed: true, .. } => self.start(),
-            _ => self.at(self.domain().1),
+            Curve::Poly { closed: true, .. } => Some(self.start()),
+            Curve::Poly { points, .. } | Curve::Fit { points, .. } | Curve::Spline { control: points, .. } => points.last().copied(),
+            Curve::Circle { .. } | Curve::Ellipse { .. } => None,
         }
+        .unwrap_or_else(|| self.at(self.domain().1))
     }
 
     /// A polyline's segments, the closing one too, each straight or an arc.
@@ -227,10 +236,17 @@ impl Curve {
         let mut out: Vec<(f64, P2)> = Vec::new();
         match self {
             Curve::Poly { .. } => {
-                for (i, ax) in self.segments().iter().enumerate() {
+                // Each segment's own ends, as given, and for an arc the chords between, none further than FLAT from it.
+                let segs = self.segments();
+                if let Some(first) = segs.first() {
+                    out.push((0.0, first.start));
+                }
+                for ((i, ax), (n, _)) in segs.iter().enumerate().zip(self.poly_chords()) {
                     let len = ax.length().max(f64::MIN_POSITIVE);
-                    let skip = usize::from(i > 0);
-                    out.extend(ax.stations(0.0, ax.length()).into_iter().skip(skip).map(|s| (i as f64 + s / len, ax.at(s, 0.0))));
+                    for k in 1..=n {
+                        let s = ax.length() * k as f64 / n as f64;
+                        out.push((i as f64 + s / len, if k == n { ax.end } else { ax.at(s, 0.0) }));
+                    }
                 }
             }
             Curve::Circle { radius, .. } => {
@@ -272,6 +288,43 @@ impl Curve {
     /// Its points as drawn: see [`Curve::samples`].
     pub fn points(&self) -> Vec<P2> {
         self.samples().into_iter().map(|(_, p)| p).collect()
+    }
+
+    /// How many points [`Curve::samples`] gives it, worked out without making them: what a sketch's pieces and a line's
+    /// drawing are held to. A spline's or a fitted spline's is as many as it can be.
+    pub fn drawn_len(&self) -> usize {
+        match self {
+            Curve::Poly { .. } => 1 + self.poly_chords().iter().map(|(n, _)| n).sum::<usize>(),
+            Curve::Circle { radius, .. } => round_steps(*radius, TAU) + 1,
+            Curve::Ellipse { radii, .. } => {
+                let (t0, t1) = self.domain();
+                round_steps(radii[0].abs().max(radii[1].abs()), (t1 - t0).to_radians()).saturating_mul(2).min(MAX_DRAWN) + 1
+            }
+            Curve::Spline { control, knots } => {
+                let (t0, t1) = self.domain();
+                let mut spans: Vec<f64> =
+                    knot_vector(control.len(), knots.as_deref()).into_iter().filter(|k| *k >= t0 && *k <= t1).collect();
+                spans.dedup();
+                spans.len().saturating_sub(1) * (MAX_DRAWN / spans.len().max(1)).clamp(2, 32) + 1
+            }
+            Curve::Fit { points, .. } => points.len().saturating_sub(1) * (MAX_DRAWN / points.len().max(1)).clamp(2, 32) + 1,
+        }
+    }
+
+    /// Each segment of a polyline: how many chords it is drawn with (one if it is straight; an arc's as many as keep it
+    /// within [`FLAT`] of the arc and turn no more than 5° each, though no more extra ones in all than [`MAX_DRAWN`]) and
+    /// how many it would take.
+    fn poly_chords(&self) -> Vec<(usize, usize)> {
+        let mut extra = MAX_DRAWN;
+        self.segments()
+            .iter()
+            .map(|ax| {
+                let wanted = ax.radius().map_or(1, |r| arc_chords(r, ax.length() / r));
+                let given = 1 + (wanted - 1).min(extra);
+                extra -= given - 1;
+                (given, wanted)
+            })
+            .collect()
     }
 
     /// How long it is.
@@ -601,10 +654,9 @@ impl Curve {
                     Some(Curve::Poly { points: b_pts, arcs: tidy(b_arcs), closed: false }),
                 ))
             }
-            Curve::Circle { centre, radius } => {
+            Curve::Circle { centre, .. } => {
                 // Opened into two half circles from the point round to the point.
                 let opposite = *centre * 2.0 - p;
-                let _ = radius;
                 Some((Curve::Poly { points: vec![p, opposite, p], arcs: vec![180.0, 180.0], closed: false }, None))
             }
             Curve::Ellipse { centre, radii, angle, span } => match span {
@@ -794,12 +846,30 @@ impl Curve {
         }
     }
 
-    /// Whether every point it holds is a number within [`MAX_COORD`].
+    /// Whether every point it holds is a number within [`MAX_COORD`], and so are the circles of its round parts
+    /// ([`Curve::reaches`]).
     pub fn in_range(&self) -> bool {
         let fine = |p: &P2| p.is_finite() && p.0.abs() <= MAX_COORD && p.1.abs() <= MAX_COORD;
-        match self {
+        let held = match self {
             Curve::Poly { points, .. } | Curve::Fit { points, .. } | Curve::Spline { control: points, .. } => points.iter().all(fine),
             Curve::Circle { centre, .. } | Curve::Ellipse { centre, .. } => fine(centre),
+        };
+        held && self.reaches()
+    }
+
+    /// Whether all of every round part of it (an arc's circle, a circle, an ellipse's longer axis about its centre) lies
+    /// within [`MAX_COORD`] of the origin, as a wall's arc must: an arc turning 359.9999999999° is a circle of radius
+    /// 5.7e14 mm, 1,000 kilometres out and further. A spline lies inside its control points, and a fitted spline is held to
+    /// its points.
+    fn reaches(&self) -> bool {
+        let within = |c: P2, r: f64| r.is_finite() && c.0.abs().max(c.1.abs()) + r.abs() <= MAX_COORD;
+        match self {
+            Curve::Poly { arcs, .. } if arcs.iter().any(|a| *a != 0.0) => {
+                self.segments().iter().all(|ax| ax.centre().zip(ax.radius()).is_none_or(|(c, r)| within(c, r)))
+            }
+            Curve::Circle { centre, radius } => within(*centre, *radius),
+            Curve::Ellipse { centre, radii, .. } => within(*centre, radii[0].abs().max(radii[1].abs())),
+            _ => true,
         }
     }
 
@@ -840,12 +910,27 @@ impl Curve {
                 if let Some(a) = arcs.iter().find(|a| !(a.is_finite() && a.abs() < 360.0)) {
                     return Err(format!("{who}: an arc turns {a}°; it turns less than a whole circle, either way"));
                 }
+                if !self.reaches() {
+                    return Err(format!(
+                        "{who}: an arc of it is part of a circle that reaches further than {MAX_COORD} mm from the origin: it turns almost nothing, or almost a whole circle, so its circle is huge"
+                    ));
+                }
+                if self.poly_chords().iter().any(|(given, wanted)| given < wanted) {
+                    return Err(format!(
+                        "{who}: its arcs take more than {MAX_DRAWN} points to draw within {FLAT} mm; use fewer, or smaller ones"
+                    ));
+                }
             }
             Curve::Circle { centre, radius } => {
                 if !fine(centre) {
                     return Err(format!("{who}: its centre isn't a point within {MAX_COORD} mm"));
                 }
                 size(*radius, "radius")?;
+                if !self.reaches() {
+                    return Err(format!(
+                        "{who}: the circle reaches further than {MAX_COORD} mm from the origin; move it in or make it smaller"
+                    ));
+                }
             }
             Curve::Ellipse { centre, radii, angle, span } => {
                 if !fine(centre) {
@@ -853,6 +938,11 @@ impl Curve {
                 }
                 size(radii[0].abs(), "first radius")?;
                 size(radii[1].abs(), "second radius")?;
+                if !self.reaches() {
+                    return Err(format!(
+                        "{who}: the ellipse reaches further than {MAX_COORD} mm from the origin; move it in or make it smaller"
+                    ));
+                }
                 if !angle.is_finite() || angle.abs() > 1e6 {
                     return Err(format!("{who}: its angle {angle}° isn't a number of degrees"));
                 }
@@ -920,6 +1010,14 @@ impl Curve {
         }
         Ok(())
     }
+}
+
+/// How many chords an arc of `radius` turning `sweep` radians is cut into: none further than [`FLAT`] from it, none turning
+/// more than 5°. At least one.
+fn arc_chords(radius: f64, sweep: f64) -> usize {
+    let r = radius.abs().max(FLAT * 2.0);
+    let step = (2.0 * (1.0 - FLAT / r).acos()).min(5f64.to_radians()).max(1e-9);
+    (sweep.abs() / step).ceil().max(1.0) as usize
 }
 
 /// How many steps a round of `radius` takes to turn `sweep` radians, none further than [`FLAT`] from it or 5° round.
@@ -1159,8 +1257,15 @@ fn refit_with(truth: &dyn Fn(f64) -> P2, range: (f64, f64), mut points: Vec<P2>,
     for _ in 0..64 {
         let fit = Curve::Fit { points: points.clone(), tangents };
         let drawn = fit.points();
-        let off = |q: P2| drawn.windows(2).map(|w| geom::dist_to_segment(q, w[0], w[1])).fold(f64::INFINITY, f64::min);
-        let Some((s, q, d)) = samples.iter().map(|(s, q)| (*s, *q, off(*q))).max_by(|a, b| a.2.total_cmp(&b.2)) else { break };
+        // A sample is off the fit by how far it is from the chords drawn near it: those of its own span of the fit and the
+        // two either side (all of them, for each sample, was the cost of this: 64 passes of 257 samples over every chord).
+        let per = (drawn.len().saturating_sub(1) / points.len().saturating_sub(1).max(1)).max(1);
+        let off = |s: f64, q: P2| {
+            let span = along.partition_point(|a| *a <= s).clamp(1, points.len().max(2) - 1) - 1;
+            let (from, to) = (span.saturating_sub(2) * per, ((span + 3) * per).min(drawn.len().saturating_sub(1)));
+            drawn.get(from..=to).unwrap_or_default().windows(2).map(|w| geom::dist_to_segment(q, w[0], w[1])).fold(f64::INFINITY, f64::min)
+        };
+        let Some((s, q, d)) = samples.iter().map(|(s, q)| (*s, *q, off(*s, *q))).max_by(|a, b| a.2.total_cmp(&b.2)) else { break };
         if d <= FIT_TOL || points.len() >= MAX_POINTS {
             break;
         }
@@ -1957,5 +2062,107 @@ mod tests {
             let e = c.check("it").err().unwrap_or_default();
             assert!(e.contains(says), "{c:?}: {e}");
         }
+    }
+
+    #[test]
+    fn a_round_part_reaches_no_further_than_the_model_does_as_a_walls_arc_must() {
+        // 359.9999999999° is a circle of radius 5.7e14 mm through two points a metre apart.
+        let wide = Curve::arc(P2(0.0, 0.0), P2(1000.0, 0.0), 359.9999999999);
+        assert!(!wide.in_range());
+        assert!(wide.check("it").unwrap_err().contains("reaches further"), "{:?}", wide.check("it"));
+        // A circle at the corner of the model with the model's own radius lies outside it; at its centre, it fits to the edge.
+        let out = Curve::Circle { centre: P2(1.0e9, 1.0e9), radius: 1.0e9 };
+        assert!(out.check("it").unwrap_err().contains("reaches further"));
+        assert!(Curve::Circle { centre: P2(0.0, 0.0), radius: 1.0e9 }.check("it").is_ok());
+        assert!(Curve::Circle { centre: P2(0.0, 0.0), radius: 1.0e9 + 1.0 }.check("it").is_err());
+        // The arc a tangent arc makes straight back from far out is a huge circle too.
+        let back = Curve::arc_tangent(P2(1.0e9, 1.0e9), P2(1.0, 0.0), P2(-1.0e9, 1.0e9 - 1.0));
+        assert!(back.check("it").is_err(), "{back:?}");
+        let ellipse = Curve::Ellipse { centre: P2(9.0e8, 0.0), radii: [2.0e8, 100.0], angle: 0.0, span: None };
+        assert!(ellipse.check("it").unwrap_err().contains("reaches further"));
+        // A sensible arc is as it was.
+        let arc = Curve::arc_through(P2(0.0, 0.0), P2(2000.0, 0.0), P2(1000.0, 300.0));
+        assert!(arc.in_range() && arc.check("it").is_ok());
+    }
+
+    #[test]
+    fn a_polyline_is_drawn_within_flat_of_its_arcs_and_never_in_more_points_than_the_cap() {
+        // An arc of radius 1000 mm sagged 0.95 mm in the chords the walls draw with: a line is within FLAT.
+        for radius in [300.0, 1000.0, 20_000.0, 1.0e6] {
+            let arc = Curve::arc(P2(0.0, 0.0), P2(2.0 * radius, 0.0), -180.0);
+            let centre = P2(radius, 0.0);
+            let worst = arc.points().windows(2).map(|w| radius - ((w[0] + w[1]) * 0.5).dist(centre)).fold(0.0, f64::max);
+            assert!(worst <= FLAT + 1e-9, "radius {radius}: a chord sags {worst} mm");
+        }
+        // A thousand arcs of 175° and 5.7 m radius each take 2000 chords or so; ten thousand are the finding's 7 million.
+        let many = |n: usize| Curve::Poly {
+            points: (0..n).map(|i| P2(i as f64 * 1.0e4, if i % 2 == 0 { 0.0 } else { 100.0 })).collect(),
+            arcs: vec![175.0; n - 1],
+            closed: false,
+        };
+        let big = many(10_000);
+        assert!(big.check("it").unwrap_err().contains("points to draw within"), "{:?}", big.check("it"));
+        // Unchecked, it still draws no more than its vertices and the extra chords the cap allows.
+        assert!(big.points().len() <= MAX_POINTS + MAX_DRAWN, "{} points", big.points().len());
+        assert!(many(30).check("it").is_ok() && many(2).check("it").is_ok());
+        // What it says it is drawn in is what it is drawn in.
+        let shapes = [
+            Curve::arc(P2(0.0, 0.0), P2(1000.0, 0.0), 120.0),
+            many(50),
+            big,
+            Curve::Circle { centre: P2(0.0, 0.0), radius: 5.0e6 },
+            Curve::Ellipse { centre: P2(0.0, 0.0), radii: [3000.0, 1000.0], angle: 20.0, span: Some([10.0, 200.0]) },
+            Curve::Spline {
+                control: vec![P2(0.0, 0.0), P2(1000.0, 2000.0), P2(3000.0, 2000.0), P2(4000.0, 0.0), P2(5000.0, 900.0)],
+                knots: None,
+            },
+            Curve::Fit { points: vec![P2(0.0, 0.0), P2(1500.0, 1200.0), P2(3000.0, -800.0)], tangents: [None, None] },
+            polygon(P2(0.0, 0.0), P2(1000.0, 0.0), 7, true).unwrap_or_else(|| Curve::line(P2(0.0, 0.0), P2(1.0, 0.0))),
+        ];
+        for c in shapes {
+            assert_eq!(c.drawn_len(), c.points().len(), "{:?}", c.kind());
+        }
+    }
+
+    #[test]
+    fn a_curve_starts_and_ends_at_the_points_it_was_given_not_where_trigonometry_puts_them() {
+        let mut seed = 3u64;
+        let mut next = || {
+            seed = crate::model::mix(seed);
+            (seed % 2_000_000) as f64 / 1000.0 - 1000.0
+        };
+        for _ in 0..2000 {
+            let (a, b, t) = (P2(next(), next()), P2(next(), next()), P2(next(), next()));
+            for c in [Curve::arc_through(a, b, t), Curve::arc(a, b, next() / 6.0)] {
+                assert_eq!((c.start(), c.end()), (a, b), "{c:?}");
+                let pts = c.points();
+                assert_eq!((pts.first().copied(), pts.last().copied()), (Some(a), Some(b)), "drawn from one to the other");
+            }
+        }
+        let ring = Curve::Poly { points: vec![P2(0.1, 0.2), P2(1000.3, 0.0), P2(500.0, 900.7)], arcs: vec![0.0, 33.0, 0.0], closed: true };
+        let pts = ring.points();
+        assert_eq!((ring.start(), ring.end()), (P2(0.1, 0.2), P2(0.1, 0.2)));
+        assert_eq!((pts.first(), pts.last()), (Some(&P2(0.1, 0.2)), Some(&P2(0.1, 0.2))));
+        let spline = Curve::Spline { control: vec![P2(0.1, 0.7), P2(1000.0, 2000.0), P2(3000.0, 2000.3)], knots: None };
+        assert_eq!((spline.start(), spline.end()), (P2(0.1, 0.7), P2(3000.0, 2000.3)));
+        let fit = Curve::Fit { points: vec![P2(0.1, 0.7), P2(1000.0, 2000.0), P2(3000.0, 2000.3)], tangents: [None, Some(P2(1.0, 1.0))] };
+        assert_eq!((fit.start(), fit.end()), (P2(0.1, 0.7), P2(3000.0, 2000.3)));
+    }
+
+    #[test]
+    fn a_spline_over_knots_given_runs_over_the_degree_they_give_it() {
+        // Three control points over five knots are a degree-one spline: the polyline through them, its knot at the middle one.
+        let s =
+            Curve::Spline { control: vec![P2(0.0, 0.0), P2(1000.0, 1000.0), P2(2000.0, 0.0)], knots: Some(vec![0.0, 0.0, 0.5, 1.0, 1.0]) };
+        assert!(s.check("it").is_ok(), "{:?}", s.check("it"));
+        assert_eq!(s.domain(), (0.0, 1.0));
+        assert_eq!((s.start(), s.end()), (P2(0.0, 0.0), P2(2000.0, 0.0)));
+        assert!(
+            close(s.at(0.0), P2(0.0, 0.0), 1e-9) && close(s.at(0.5), P2(1000.0, 1000.0), 1e-9) && close(s.at(1.0), P2(2000.0, 0.0), 1e-9)
+        );
+        // The same points with the uniform knots keep their degree, and their domain.
+        let uniform = Curve::Spline { control: vec![P2(0.0, 0.0), P2(1000.0, 1000.0), P2(2000.0, 0.0)], knots: None };
+        assert_eq!(uniform.domain(), (0.0, 1.0));
+        assert!(close(uniform.at(0.5), P2(1000.0, 500.0), 1e-9), "degree two: {:?}", uniform.at(0.5));
     }
 }
