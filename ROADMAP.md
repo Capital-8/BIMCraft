@@ -19,7 +19,7 @@ The README lists what the engine, the desktop, the CLI and the MCP server do. Wh
 - **Done lately, so not repeated below:** families (revolves and voids, doors and windows as hosted families, the Family
   Editor), textures by material or from a picture, Paint, favorites kept for every project, and packages for Windows,
   Linux (AppImage, Flatpak, deb, rpm, Arch, tarball, riscv64) and macOS. Auto-update from GitHub releases is done for the Windows installer's copy, an AppImage and the macOS app, though none of it has run on a real system yet.
-- **The file** is `.bimcraft` JSON with a `format` version (5 now): an older file is migrated on open, and a newer one is
+- **The file** is `.bimcraft` JSON with a `format` version (6 now): an older file is migrated on open, and a newer one is
   refused, saying so. A field this version doesn't know (a newer one's, in the same format) is left out and named, and the
   rest opens; commands still refuse a key they don't know.
 - **Ids and GUIDs**, as Revit's ElementId and UniqueId: every element, every library entry (types, materials, families,
@@ -104,16 +104,16 @@ The goal is a printable, coordinated drawing set.
 | Detail lines, filled regions, masking regions, line styles: done (line patterns and styles, detail lines a line a click or as a polyline, the shared sketch solver, fill patterns, filled region types, filled and masking regions); left: the rows below | M |
 | Line draw tools for detail lines, sketches and walls: done (rectangle, inscribed and circumscribed polygon, circle, start-end-radius, centre-ends, tangent end and fillet arcs, spline by control points and through points, ellipse and partial ellipse, polyline, Pick Lines, Sides, Radius and Offset; Join into Polyline and Explode Polyline); Fillet Arc and Pick Lines for walls too; left: Pick Faces | M |
 | A line style for each of a region's boundary lines, or invisible: done | S |
-| Split, Trim/Extend to Corner, Trim/Extend Single and Multiple Elements and Offset for detail lines and sketch lines: done (Split takes splines, a spline through points within 0.05 mm; grips on a detail line's handles; snaps to their ends, centres, quadrants, tangents and nearest points; Align, to another line or a wall) | M |
+| Split, Trim/Extend to Corner, Trim/Extend Single and Multiple Elements and Offset for detail lines and sketch lines: done (Split takes splines, a spline through points within 0.05 mm; grips on a detail line's handles; snaps to their ends, centres, quadrants, tangents and nearest points; Align, to another line or a wall; on the desktop a sketch's Trim, Offset, Split, Fillet, Join, Vertex and Convert Spline are the window's, not commands) | M |
 | Draw tools, from trying them: done (typed numbers for shapes with Tab, Show Centre, Fillet and Offset previews, picks lit, Trim/Extend to Corner on the selection, double click and right-click Finish Drawing, the Offset bugs in sketches, icons) | S |
-| Fill patterns: `.pat` import and export, an editor for patterns of many line families, and model patterns aligned and rotated on regions and floors (Align, Pattern Angle): done; left: aligning them on walls' faces in sections and elevations | M |
-| Detail annotation: done (insulation along any curve; Linework in plans; Detail Groups, placed, turned, mirrored and ungrouped; repeating details along a line); left: Edit Group in place, model groups | M |
+| Fill patterns: `.pat` import and export, an editor for patterns of many line families, and model patterns aligned and rotated on regions and floors (Align, Pattern Angle): done; left: aligning them on walls' faces in sections and elevations; a `.pat` file is read up to 2,000 patterns and the reply names 100 of those left out | M |
+| Detail annotation: done (insulation along any curve; Linework in plans; Detail Groups, placed, turned, mirrored and ungrouped; repeating details along a line); left: Edit Group in place, model groups, group types renamed, deleted or edited on the desktop (the `group_type` command does), groups placed outside plans | M |
 | Better than Revit: line patterns and fill patterns made from lines drawn on a plan (select them, then Create Line Pattern or Create Fill Pattern), as Archicad and pyRevit's pattern maker do | M |
 | Drafting views, detail components (2D families), legends | L |
 | Annotation types: text, dimension and tag styles; room tags with fields and tag families that look like Revit's (`tag` names any element with a field of its schedule, drawn as plain text, a door's in a box and a window's in a hexagon) | M |
 | Area plans, area schemes (gross, rentable) and colour-fill legends by parameter | L |
 | Plan regions (a local view range) and depth cueing in elevations | M |
-| Revisions and a revision schedule on title blocks (revision clouds: done, as a detail line drawn as scallops, with its revision as text) | M |
+| Revisions and a revision schedule on title blocks (revision clouds: done, as a detail line drawn as scallops, with its revision as a label that `elements` lists; nothing else reads it) | M |
 | Editable title blocks (a 2D family with label fields), view titles under viewports, a sheet list | M |
 | Viewports as windows onto their views (activate one to work through it, crop it, viewport types), and Object Styles' annotation categories, subcategories, colours and patterns. Paper space, Line Weights and Object Styles (each model category's pens, cut and seen) are in: every view has a scale (named in feet and inches as architects and engineers do), lines are pens 1 to 16 whose widths the project's Line Weights give by scale, and 0 a hairline at any scale | M |
 | Print dialog: sheets to PDF or a printer, sizes, ranges, colour or monochrome | S |
