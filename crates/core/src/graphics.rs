@@ -1100,7 +1100,9 @@ mod tests {
             r#"column {"at": [5000, 1000]}
                stair {"start": [1000, 1000], "end": [3500, 1000], "railings": true}
                ramp {"start": [1000, 2500], "angle": 0, "height": 500}
-               shaft {"boundary": [[7000, 5000], [7800, 5000], [7800, 5800], [7000, 5800]]}"#,
+               shaft {"boundary": [[7000, 5000], [7800, 5000], [7800, 5800], [7000, 5800]]}
+               detail_line {"points": [[1000, 4800], [3000, 4800]]}
+               filled_region {"type": "Diagonal Up", "sketch": [[[500, 4900], [2500, 4900]], [[2500, 4900], [2500, 5600]], [[2500, 5600], [500, 5600]], [[500, 5600], [500, 4900]]]}"#,
         )
         .unwrap();
         let ids = |s: &mut Session, category: &str| -> Vec<u64> {

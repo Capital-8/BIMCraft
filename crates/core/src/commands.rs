@@ -2174,7 +2174,7 @@ fn render_view(s: &mut Session, p: &Value) -> R {
     });
     if let Some((id, number, size)) = paper_of {
         let d = sheet::draw(m, id).ok_or_else(|| bad(c, format!("sheet {number} can't be drawn")))?;
-        let info = json!({"width": d.view.width, "height": d.view.height, "view": number, "kind": "sheet"});
+        let info = with_notes(json!({"width": d.view.width, "height": d.view.height, "view": number, "kind": "sheet"}), &d);
         if let Some(path) = string(c, p, "path")?.filter(|path| ext(Path::new(path)) == "pdf") {
             std::fs::write(&path, pdf::pdf(&[(&d, size)])).map_err(|e| bad(c, format!("{path}: {e}")))?;
             return Ok(json!({"path": path, "view": info["view"], "kind": "sheet"}));
@@ -2190,10 +2190,21 @@ fn render_view(s: &mut Session, p: &Value) -> R {
         Some(path) => {
             let path = PathBuf::from(path);
             write_plan(&d, &path)?;
-            Ok(json!({"path": path, "width": w, "height": h, "view": level_name(m, level), "kind": kind}))
+            Ok(with_notes(json!({"path": path, "width": w, "height": h, "view": level_name(m, level), "kind": kind}), &d))
         }
-        None => Ok(json!({"pngBase64": base64(&render::png(&d)?), "width": w, "height": h, "view": level_name(m, level), "kind": kind})),
+        None => Ok(with_notes(
+            json!({"pngBase64": base64(&render::png(&d)?), "width": w, "height": h, "view": level_name(m, level), "kind": kind}),
+            &d,
+        )),
     }
+}
+
+/// `reply` with what the drawing could not draw as asked (`notes`), when it could not.
+fn with_notes(mut reply: Value, d: &render::Drawing) -> Value {
+    if !d.notes.is_empty() {
+        reply["notes"] = json!(d.notes);
+    }
+    reply
 }
 
 fn schedule(s: &mut Session, p: &Value) -> R {
@@ -4957,6 +4968,10 @@ fn duplicate_view(s: &mut Session, p: &Value) -> R {
             Element::Tag(t) => t.view = Some(guid),
             Element::Text(n) => n.view = guid,
             Element::Spot(sp) => sp.view = guid,
+            Element::DetailLine(l) => l.view = guid,
+            Element::FilledRegion(r) => r.view = guid,
+            Element::DetailGroup(g) => g.view = guid,
+            Element::RepeatingDetail(r) => r.view = guid,
             _ => {}
         }
         m.insert(e);

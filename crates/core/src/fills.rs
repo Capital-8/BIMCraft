@@ -115,8 +115,15 @@ impl FillPattern {
             if l.dashes.iter().any(|x| !x.is_finite() || x.abs() > MAX_SPACING) {
                 return Err(format!("{fam}: a dash or a space is a length within {MAX_SPACING}"));
             }
-            if !l.dashes.is_empty() && (l.dashes.iter().map(|x| x.abs()).sum::<f64>() < MIN_SPACING || !l.dashes.iter().any(|x| *x < 0.0)) {
-                return Err(format!("{fam}: dashes need a space among them (a negative length) and some length in all"));
+            // Something drawn (a dash, or a dot: 0), a space between, and a pattern that repeats no closer than lines may lie.
+            if !l.dashes.is_empty()
+                && (l.dashes.iter().map(|x| x.abs()).sum::<f64>() < MIN_SPACING
+                    || !l.dashes.iter().any(|x| *x < 0.0)
+                    || !l.dashes.iter().any(|x| *x >= 0.0))
+            {
+                return Err(format!(
+                    "{fam}: dashes need a dash (0 is a dot) and a space (a negative length) among them, and {MIN_SPACING} or more in all"
+                ));
             }
         }
         Ok(())
@@ -171,6 +178,8 @@ pub fn strokes(p: &FillPattern, rings: &[Vec<P2>], k: f64, window: (P2, P2), max
         return Some(out);
     }
     let corners = [lo, P2(hi.0, lo.1), hi, P2(lo.0, hi.1)];
+    let edges = rings.iter().map(Vec::len).sum::<usize>().max(1);
+    let mut work = 0usize;
     for l in &p.lines {
         let (sin, cos) = l.angle.to_radians().sin_cos();
         let (u, n) = (P2(cos, sin), P2(-sin, cos));
@@ -182,12 +191,25 @@ pub fn strokes(p: &FillPattern, rings: &[Vec<P2>], k: f64, window: (P2, P2), max
         if !(first.is_finite() && last.is_finite()) || last - first > max as f64 {
             return None;
         }
+        // Each line is tried against every edge, and each dash stepped over: too much to ask of a drawing, when it comes to it.
+        work = work.saturating_add(((last - first + 1.0).max(0.0) as usize).saturating_mul(edges));
+        if work > MAX_WORK {
+            return None;
+        }
         let dashes: Vec<f64> = l.dashes.iter().map(|x| x * k).collect();
         let repeat: f64 = dashes.iter().map(|x| x.abs()).sum();
+        if !dashes.is_empty() && !(repeat.is_finite() && repeat > 0.0) {
+            continue;
+        }
         let mut j = first;
         while j <= last {
             let base = origin + n * (j * step) + u * (j * shift);
-            for (t0, t1) in spans(rings, base, u, n) {
+            // Only the stretch of the line over the box is wanted: what lies past it is never drawn.
+            let Some((w0, w1)) = reach(base, u, lo, hi) else {
+                j += 1.0;
+                continue;
+            };
+            for (t0, t1) in spans(rings, base, u, n).into_iter().map(|(a, b)| (a.max(w0), b.min(w1))).filter(|(a, b)| b > a) {
                 if dashes.is_empty() {
                     out.push([base + u * t0, base + u * t1]);
                 } else {
@@ -206,7 +228,8 @@ pub fn strokes(p: &FillPattern, rings: &[Vec<P2>], k: f64, window: (P2, P2), max
                             s += len;
                         }
                         r += 1.0;
-                        if out.len() > max {
+                        work = work.saturating_add(dashes.len());
+                        if out.len() > max || work > MAX_WORK {
                             return None;
                         }
                     }
@@ -219,6 +242,25 @@ pub fn strokes(p: &FillPattern, rings: &[Vec<P2>], k: f64, window: (P2, P2), max
         }
     }
     Some(out)
+}
+
+/// The most work (an edge tried against a line, a dash stepped over) one pattern may ask of a drawing, however dense it is.
+pub const MAX_WORK: usize = 5_000_000;
+
+/// The stretch of the line through `base` along unit `u` that lies in the box from `lo` to `hi`, as distances from `base`.
+fn reach(base: P2, u: P2, lo: P2, hi: P2) -> Option<(f64, f64)> {
+    let mut t = (f64::NEG_INFINITY, f64::INFINITY);
+    for (b, d, a, z) in [(base.0, u.0, lo.0, hi.0), (base.1, u.1, lo.1, hi.1)] {
+        if d.abs() < 1e-12 {
+            if b < a || b > z {
+                return None;
+            }
+        } else {
+            let (x, y) = ((a - b) / d, (z - b) / d);
+            t = (t.0.max(x.min(y)), t.1.min(x.max(y)));
+        }
+    }
+    (t.0 < t.1).then_some(t)
 }
 
 /// Where the line through `base` along unit `u` (`n` square to it) is inside `rings`, as runs along it from `base`: it
@@ -782,5 +824,166 @@ mod tests {
         run(&mut s, "rotate", json!({"ids": [id], "about": [1500, 1500], "angle": 15}));
         assert_eq!(angles(&s), [45, 135]);
         assert!(s.execute("modify", &json!({"id": id, "pattern_angle": f64::MAX})).is_err());
+    }
+
+    fn timed<T>(f: impl FnOnce() -> T) -> (T, std::time::Duration) {
+        let at = std::time::Instant::now();
+        (f(), at.elapsed())
+    }
+
+    #[test]
+    fn dashes_must_draw_something_and_leave_a_space_and_add_up_to_a_line() {
+        let with = |dashes: Vec<f64>| {
+            FillPattern { lines: vec![HatchLine { dashes, ..HatchLine::simple(0.0, 1.0) }], ..Default::default() }.check("x")
+        };
+        for bad in [vec![-1.0], vec![-0.05], vec![-1.0, -2.0], vec![1.0, 2.0], vec![0.0, 0.0], vec![0.0, -0.01]] {
+            assert!(with(bad.clone()).is_err(), "{bad:?}");
+        }
+        for good in [vec![0.0, -1.0], vec![2.0, -1.0, 0.0, -1.0], vec![0.0, -0.05], vec![-1.0, 1.0]] {
+            assert_eq!(with(good.clone()), Ok(()), "{good:?}");
+        }
+        // Through the command, so a file or an agent can't make one either.
+        let mut s = Session::new();
+        let e = s.execute("fill_pattern", &json!({"name": "Gap", "lines": [{"angle": 0, "spacing": 1, "dashes": [-1]}]})).unwrap_err();
+        assert!(e.contains("dash"), "{e}");
+    }
+
+    #[test]
+    fn a_pattern_over_more_than_the_view_shows_draws_only_what_the_view_shows() {
+        // Sand at 1 : 100 over 200 m square, seen through a window 20 by 15 m: 200 rows of 200 dots, not 2000 dots in each of them.
+        let sand = &default_patterns()["Sand"];
+        let window = (P2(90_000.0, 90_000.0), P2(110_000.0, 105_000.0));
+        let s = strokes(sand, &[square(0.0, 0.0, 200_000.0)], 100.0, window, 50_000).expect("what the window holds is under the cap");
+        assert!((30_000..=50_000).contains(&s.len()), "{}", s.len());
+        assert!(s.iter().all(|l| l.iter().all(|q| q.0 >= 90_000.0 - 1e-6 && q.0 <= 110_000.0 + 1e-6)), "none past the window");
+    }
+
+    #[test]
+    fn a_pattern_too_dense_for_its_view_says_so_and_a_sparser_view_draws_it() {
+        let mut s = Session::new();
+        let lines: Vec<Value> = (0..32).map(|i| json!({"angle": f64::from(i) * 5.6, "spacing": 100})).collect();
+        run(&mut s, "fill_pattern", json!({"name": "Mesh", "target": "model", "lines": lines}));
+        run(&mut s, "filled_region_type", json!({"name": "Meshed", "foreground": "Mesh"}));
+        run(&mut s, "filled_region", json!({"sketch": lines_of_square(-100_000.0, 200_000.0), "type": "Meshed", "line_style": null}));
+        let level = s.model.levels()[0].0;
+        let near = crate::render::draw(&s.model, level, View { scale: 0.05, cx: 0.0, cy: 0.0, width: 8192, height: 8192 });
+        assert_eq!(near.notes.len(), 1, "{:?}", near.notes);
+        assert!(near.notes[0].contains("more lines"), "{}", near.notes[0]);
+        let far = crate::render::draw(&s.model, level, View { scale: 0.05, cx: 0.0, cy: 0.0, width: 800, height: 800 });
+        assert!(far.notes.is_empty() && far.prims.len() > 1000, "{} prims, {:?}", far.prims.len(), far.notes);
+        // The command that draws it says it too.
+        let path = std::env::temp_dir().join(format!("bimcraft-dense-{}.svg", std::process::id()));
+        let said = run(&mut s, "render", json!({"view": "Level 1", "width": 4096, "height": 4096, "path": path}));
+        let _ = std::fs::remove_file(&path);
+        assert!(said["notes"][0].as_str().is_some_and(|n| n.contains("more lines")), "{said}");
+    }
+
+    fn lines_of_square(x: f64, size: f64) -> Vec<Value> {
+        lines(x, x, size)
+    }
+
+    #[test]
+    fn a_dense_pattern_over_an_outline_of_thousands_of_corners_is_refused_in_time() {
+        let p = FillPattern { target: Target::Model, lines: (0..32).map(|i| HatchLine::simple(f64::from(i) * 5.0, 20.0)).collect() };
+        let ring: Vec<P2> = (0..10_000)
+            .map(|i| {
+                let a = std::f64::consts::TAU * f64::from(i) / 10_000.0;
+                P2(1e5 * a.cos(), 1e5 * a.sin())
+            })
+            .collect();
+        let (r, took) = timed(|| strokes(&p, &[ring], 1.0, (P2(-1e5, -1e5), P2(1e5, 1e5)), 50_000));
+        assert_eq!(r, None);
+        assert!(took < std::time::Duration::from_millis(500), "{took:?}");
+    }
+
+    #[test]
+    fn dots_a_twentieth_of_a_millimetre_apart_cost_a_bounded_amount() {
+        let p =
+            FillPattern { target: Target::Model, lines: vec![HatchLine { dashes: vec![0.0, -0.05], ..HatchLine::simple(0.0, 10_000.0) }] };
+        assert_eq!(p.check("dots"), Ok(()));
+        let (r, took) = timed(|| strokes(&p, &[square(0.0, 0.0, 100_000.0)], 1.0, (P2(-1.0, -1.0), P2(101_000.0, 101_000.0)), 50_000));
+        assert_eq!(r, None);
+        assert!(took < std::time::Duration::from_millis(900), "{took:?}");
+    }
+
+    #[test]
+    fn a_hatch_keeps_its_spacing_on_the_paper_at_every_scale_and_a_model_pattern_its_own_in_the_building() {
+        let mut s = Session::new();
+        run(&mut s, "filled_region", json!({"sketch": lines(0.0, 0.0, 4000.0), "type": "Diagonal Up", "line_style": null}));
+        run(&mut s, "filled_region", json!({"sketch": lines(6000.0, 0.0, 4000.0), "type": "Brick", "line_style": null}));
+        let level = s.model.levels()[0].0;
+        let at = |n: f64| {
+            let view = View { scale: crate::sheet::DENSITY / n, cx: 5000.0, cy: 2000.0, width: 2000, height: 600 };
+            crate::render::draw_at(&s.model, level, view, 1.0)
+        };
+        // Perpendicular distances between neighbouring lines of the 45 degree hatch, in px, and how many lines each has.
+        let hatch = |d: &Drawing| -> Vec<f64> {
+            let mut offsets: Vec<f64> = d
+                .prims
+                .iter()
+                .filter_map(|p| match p {
+                    Prim::Line { pts, .. } if pts.len() == 2 && (pts[0].0 - pts[1].0).abs() > 1.0 && (pts[0].1 - pts[1].1).abs() > 1.0 => {
+                        Some(f64::from(pts[0].0 + pts[0].1) / std::f64::consts::SQRT_2)
+                    }
+                    _ => None,
+                })
+                .collect();
+            offsets.sort_by(f64::total_cmp);
+            offsets.dedup_by(|a, b| (*a - *b).abs() < 0.01);
+            offsets
+        };
+        let (d100, d50) = (hatch(&at(100.0)), hatch(&at(50.0)));
+        let gap = |o: &[f64]| o.windows(2).map(|w| w[1] - w[0]).sum::<f64>() / (o.len() - 1) as f64;
+        // 1.5 mm of paper is 7.5 px at either scale (and the lines stay 1.5 mm apart on it): so 1 : 50 has twice the lines.
+        assert!((gap(&d100) - 7.5).abs() < 0.05 && (gap(&d50) - 7.5).abs() < 0.05, "{} and {}", gap(&d100), gap(&d50));
+        assert!((d50.len() as f64 / d100.len() as f64 - 2.0).abs() < 0.1, "{} lines at 1 : 50, {} at 1 : 100", d50.len(), d100.len());
+        // Brick's courses are 75 mm of the building, so the same number of them at each scale.
+        let courses = |d: &Drawing| -> usize {
+            d.prims
+                .iter()
+                .filter(|p| matches!(p, Prim::Line { pts, .. } if pts.len() == 2 && (pts[0].1 - pts[1].1).abs() < 1e-3 && (pts[0].0 - pts[1].0).abs() > 100.0))
+                .count()
+        };
+        assert_eq!(courses(&at(100.0)), courses(&at(50.0)));
+    }
+
+    #[test]
+    fn a_region_whose_sketch_no_longer_closes_is_refused_by_the_check() {
+        let mut s = Session::new();
+        let id = run(&mut s, "filled_region", json!({"sketch": lines(0.0, 0.0, 1000.0)}))["id"].as_u64().unwrap();
+        let mut file: Value = serde_json::from_str(&s.model.to_json().unwrap()).unwrap();
+        let sketch = file["elements"][id.to_string()]["sketch"].as_array_mut().unwrap();
+        sketch.pop();
+        let m = crate::model::Model::from_json(&file.to_string()).unwrap();
+        let e = m.check().unwrap_err();
+        assert!(e.contains("doesn't close") && e.contains("open"), "{e}");
+    }
+
+    #[test]
+    fn a_detailing_duplicate_of_a_plan_takes_its_detail_lines_and_regions_into_its_own_view() {
+        let mut s = Session::new();
+        let line = run(&mut s, "detail_line", json!({"points": [[0, 0], [2000, 0]]}));
+        let region =
+            run(&mut s, "filled_region", json!({"sketch": lines(0.0, 1000.0, 1000.0), "type": "Diagonal Up"}))["id"].as_u64().unwrap();
+        let line = line["id"].as_u64().unwrap();
+        let copy = run(&mut s, "duplicate_view", json!({"view": "Level 1", "name": "Detail", "mode": "detailing"}));
+        assert_eq!(copy["annotations"], 2);
+        let view = copy["id"].as_u64().unwrap();
+        let (source, copied) = (s.model.guid(100000), s.model.guid(view));
+        let views = |kind: fn(&Element) -> bool, of: crate::ids::Guid| {
+            s.model.elements.values().filter(|e| kind(e) && s.model.annotation_plan(e) == Some(of)).count()
+        };
+        for kind in [|e: &Element| matches!(e, Element::DetailLine(_)), |e: &Element| matches!(e, Element::FilledRegion(_))] {
+            assert_eq!((views(kind, source), views(kind, copied)), (1, 1), "one in each view, not two in the source");
+        }
+        // Drawn once in each: the source's own are the only ones there, and the copy's are its own.
+        let owners = |d: &Drawing| -> std::collections::BTreeSet<Id> { d.owners.iter().flatten().copied().collect() };
+        let a = owners(&crate::render::draw(&s.model, 100000, View { scale: 0.1, cx: 1000.0, cy: 1000.0, width: 400, height: 300 }));
+        let b = owners(&crate::render::draw(&s.model, view, View { scale: 0.1, cx: 1000.0, cy: 1000.0, width: 400, height: 300 }));
+        assert!(a.contains(&line) && a.contains(&region), "the source keeps its own");
+        assert!(
+            !b.contains(&line) && !b.contains(&region) && b.iter().filter(|id| **id > region).count() >= 2,
+            "the copy has its own: {b:?}"
+        );
     }
 }

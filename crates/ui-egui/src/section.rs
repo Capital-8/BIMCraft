@@ -39,11 +39,20 @@ impl BimApp {
         let Some((view, local)) = self.canvas.navigate(ui, &response, rect, id, fit) else { return };
         let crop = self.crop_grips(ui, &response, rect, &view, id);
         let datum = self.level_grips(ui, &response, rect, &view, id);
-        let d = render::section(&model, id, view);
         // The picture at the screen's pixels, framed as the drawing is in points.
         let ppp = f64::from(ui.ctx().pixels_per_point());
         let side = |v: u32| ((f64::from(v) * ppp).round().max(1.0) as u32).min(MAX_SIDE);
         let pixels = View { scale: view.scale * ppp, width: side(view.width), height: side(view.height), ..view };
+        let dark = crate::style::canvas_dark();
+        // Its regions keep the ink of the picture on screen when that is this model's, in this view and size: drawing it
+        // again for them costs as much as the picture did, every frame.
+        let held = self.cut.image.as_ref().filter(
+            |_| matches!(&self.cut.shown, Some((m, v, f, _, k)) if Arc::ptr_eq(m, &model) && *v == id && *f == pixels && *k == dark),
+        );
+        let d = match held {
+            Some(image) => render::section_over(&model, id, view, image),
+            None => render::section(&model, id, view),
+        };
         // Under the cursor: what's drawn over the picture, else what the picture shows.
         let pick = |cut: &Cut, (x, y): (f32, f32)| {
             d.pick((x, y), PICK).or_else(|| cut.image.as_ref()?.pick(f64::from(x) * ppp, f64::from(y) * ppp))
@@ -57,7 +66,6 @@ impl BimApp {
             .collect();
         let scene = scene_of(&mut self.orbit.scene, &model);
         let cut = &mut self.cut;
-        let dark = crate::style::canvas_dark();
         if !matches!(&cut.shown, Some((m, v, f, t, k)) if Arc::ptr_eq(m, &model) && *v == id && *f == pixels && *t == tints && *k == dark) {
             if let Some(image) = render::section_image(&model, scene, id, pixels, &tints) {
                 // A hidden-line picture, so dark as the drawing over it is.

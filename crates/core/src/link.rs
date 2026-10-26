@@ -41,6 +41,10 @@ fn built(e: &Element) -> bool {
             | Element::Sheet(_)
             | Element::Viewport(_)
             | Element::Text(_)
+            | Element::DetailLine(_)
+            | Element::FilledRegion(_)
+            | Element::DetailGroup(_)
+            | Element::RepeatingDetail(_)
             | Element::Spot(_)
             | Element::Schedule(_)
             | Element::View3D(_)
@@ -451,5 +455,41 @@ mod tests {
         d.linked_under();
         assert_eq!(d.owners, [Some(LINKED), Some(7)]);
         assert_eq!(d.pens, [Some(Pen::PROJECTION), Some(Pen::CUT)], "each line's pen goes with it");
+    }
+
+    #[test]
+    fn a_link_brings_no_detail_lines_or_regions_into_the_projects_views() {
+        use crate::render::{self, View};
+        let mut other = Session::new();
+        run(&mut other, "wall", json!({"points": [[0, 0], [8000, 0]]}));
+        run(&mut other, "detail_line", json!({"points": [[0, 500], [6000, 500]]}));
+        let square: Vec<Value> =
+            [[[0, 1000], [3000, 1000]], [[3000, 1000], [3000, 3000]], [[3000, 3000], [0, 3000]], [[0, 3000], [0, 1000]]]
+                .into_iter()
+                .map(|l| json!(l))
+                .collect();
+        run(&mut other, "filled_region", json!({"sketch": square, "type": "Masking"}));
+        let path = std::env::temp_dir().join(format!("bimcraft-link-detail-{}.bimcraft", std::process::id()));
+        let path = path.to_string_lossy().into_owned();
+        run(&mut other, "save", json!({"path": path}));
+        let mut s = Session::new();
+        run(&mut s, "link", json!({"path": path}));
+        let _ = std::fs::remove_file(&path);
+        let seen = seen(&s.model);
+        let kinds: Vec<&str> = seen.elements.iter().filter(|(id, _)| is_linked(**id)).map(|(_, e)| e.category()).collect();
+        assert!(kinds.contains(&"wall"), "its walls come in: {kinds:?}");
+        assert!(!kinds.contains(&"line") && !kinds.contains(&"region"), "its annotation stays in it: {kinds:?}");
+        // A masking region of the link's would hide this project's wall.
+        run(&mut s, "wall", json!({"points": [[500, 1500], [2500, 1500]]}));
+        let view = View { scale: 0.08, cx: 3000.0, cy: 1500.0, width: 600, height: 400 };
+        let level = s.model.levels()[0].0;
+        let d = render::draw(&seen, level, view);
+        let linked_fills = d
+            .prims
+            .iter()
+            .zip(&d.owners)
+            .filter(|(p, o)| matches!(p, render::Prim::Fill { color, .. } if *color == render::PAPER) && o.is_some_and(is_linked))
+            .count();
+        assert_eq!(linked_fills, 0);
     }
 }

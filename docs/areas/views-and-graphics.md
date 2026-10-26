@@ -206,8 +206,14 @@ Browser's right-click, which also has Delete for a plan view; `Sheet::Plan` and 
 Fill patterns, filled region types and filled regions (`fills.rs`) follow line patterns and styles. A `FillPattern` is
 families of parallel lines as a PAT file has them (`HatchLine`: an angle, an origin, a spacing across, a shift along, and
 dashes, a space negative and a dot 0), drafting (mm on paper, so the same at any scale) or model (mm in the building); no
-lines, it fills solid. `fills::strokes` lays a pattern over any outlines with holes (inside an odd number of rings), within
-the view's window, and gives up rather than draw past a cap, too dense to read; `render::filled_region` draws a region's
+lines, it fills solid. `fills::strokes` lays a pattern over any outlines with holes (inside an odd number of rings), each line
+cut to the view's window (what lies past it is never counted or drawn), and gives up rather than draw past a cap: more than
+50,000 strokes, or more work than `fills::MAX_WORK` (a line tried against every edge, a dash stepped over), which bounds a
+dense pattern over an outline of thousands of corners and dots a twentieth of a millimetre apart. A pattern that gives up draws
+none of its lines and says so in `Drawing::notes` (`the fill pattern of element 100012 has more lines than a view can hold at
+this scale`), which the `render` command returns as `notes` for plans and sheets; a front end can show them. `FillPattern::check`
+wants a dash (a dot, 0, is one), a space and a pattern at least `MIN_SPACING` long in a family's dashes, so a list of spaces
+only draws nothing and never trips a cap. `render::filled_region` draws a region's
 masking (paper), its background and its foreground pattern, then its boundary's sketch lines, each in its own line style
 (`SketchLine::style`, a library reference as the region's is) else the region's, or not at all (`invisible`, or a region
 of invisible lines with none of its own); in sketch mode the Options Bar's Line Style is what the lines drawn take, and the
@@ -241,17 +247,39 @@ types as the Options Bar.
 
 The instance parameter grid has no second Region Type field: the Type Selector is the type control. Non-masking regions
 replace model backgrounds while retaining visible cut outlines, cut foreground patterns (including solid foregrounds),
-and projected model lines. `render/regions.rs` clips restored model ink to the region's filled area, honors holes and
-masking regions, and preserves model occlusion so a low wall hidden by a cut wall does not reappear. Sections retain the
-visible hidden-line projection as well as vector cut graphics. Masking still hides the model; detail annotation remains
-above the region. The same display list feeds the desktop, PNG, SVG and sheet viewports.
+and projected model lines. `render/regions.rs` finds the drawing's ink once (the model layer's lines and patterns, less what a
+later fill covers, so a low wall hidden by a cut wall does not reappear; and a section's or elevation's hidden-line picture as
+runs of its pixels, which is all the ink an elevation has) and gives each region the part of it in its area: the outline less
+its holes, inside an odd number of rings, less the masking regions drawn before it. A line is kept where it lies in the area or
+within half its stroke of it (its pen's width as it will draw, from the owner's object style while the pen is not set yet), so a
+region edge sketched on a wall face keeps the whole face; Visibility/Graphics weights wider than the object style's are not
+allowed for. Lines are cut by the rings and the masks as they are, never by boolean operations on polygons (which are cubic in
+the corners an outline can have): only the model's filled patterns are, by the pieces of the area they reach. The pieces of a
+polyline that meet stay one line, so its corners keep their joins, and a dashed line's dashes stay where they were (the dashes of
+the cycle a piece begins in are solid lines of their own). A section's ink belongs to the region that keeps it (`Part::Pattern`),
+so a sheet's viewport, which keeps what an element owns, has it. A caller that has the section's picture (the desktop's, a sheet's,
+`section_png`'s) hands it in (`render::section_over`, `section_at_over`), at the view's size or a multiple of it (a screen with more
+pixels to the point), and the ink is the picture's own pixels; `render::section` draws a picture of its own when a non-masking
+region wants one, which costs what the picture does, every call. Masking still hides the model; detail annotation remains above the
+region. The same display list feeds the desktop, PNG, SVG and sheet viewports.
+
+Limits, kept as Revit has them or not yet built: a non-masking region with a solid background hides a room's tag text while its outlines
+stay (Revit keeps room tags above filled regions: not verified); grids, levels and room fills are drawn before the regions, so a masking
+region hides them; there is no Bring to Front or Send to Back, a region is over the model and under the annotation, in the order of its
+id; Move and Rotate carry a region's or a floor's model pattern with it (`pattern_origin`), where Revit may leave a model pattern fixed in
+the building, and Align moves it; a filled region drawn on a sheet itself is plain annotation over the viewports, so a solid one hides
+what lies under it (Revit has no regions on sheets).
 
 Sketch snapping (`snap::in_sketch`) combines the visible model's wall faces and slab edges, detail lines and existing
-region boundaries in the active view, and the draft's own lines. It supports endpoints, midpoints, intersections,
-perpendiculars, nearest points and angle guides, honoring Manage > Snaps and one-point overrides. An element being edited
-is omitted as a model snap target; its draft supplies the boundary instead. Rectangle and arc previews use the same
-origin points and Shift constraint as a click. Annotation in another independent view, or hidden by Visibility/Graphics,
-is excluded.
+region boundaries in the active view, and the draft's own lines. It supports endpoints, midpoints (of each segment of a
+polyline), intersections (where two walls meet is one too), perpendiculars, nearest points and angle guides, honoring Manage > Snaps
+and one-point overrides. An element being edited is omitted as a model snap target; its draft supplies the boundary instead.
+Rectangle and arc previews use the same origin points and Shift constraint as a click. Annotation in another independent view,
+or hidden by Visibility/Graphics, is excluded. A plan view cuts where its own view range says (`plan_range` of the view, not of its
+level); a section or an elevation has no plan to snap to, only its own detail lines and regions. Of what the plan builds, the
+nearest `MAX_OUTLINES` elements within reach have their outlines snapped to (one `walls::Index` for them all), and the nearest
+`MAX_NEAR` chords are tried against each other. Ceilings snap in a floor plan as well as a ceiling plan, because a snap does not know
+which of the two the cursor is in, and the members of a detail group are not snap targets.
 
 The reference workflows are Autodesk's [fill layers](https://help.autodesk.com/cloudhelp/2024/ENU/Revit-GetStarted/files/GUID-8A38ADC8-98A6-4A30-BD21-1886F044F6ED.htm),
 [region editing](https://help.autodesk.com/cloudhelp/2026/ENU/Revit-DocumentPresent/files/GUID-183D9B1E-6554-4C19-9EA9-B32C8D2A5C9D.htm),
@@ -276,7 +304,7 @@ sets it with `modify`. `pattern_origin` and `pattern_angle` are in the `modify`,
 A `Link` element (`link.rs`; commands `link` and `reload`) is another project shown in this one as a reference. The file holds its name, its
 path, where its origin stands (`at`) and a turn (`angle`); what it read is `Model::loaded`, by path, outside the file (`serde(skip)`), filled by
 `link`, `reload` and `open` (`relink`, which doesn't follow the links of a linked file). The views draw `link::seen(model)`: the project with
-each loaded link's built elements (`built`: not its views, sheets, annotation, rooms, grids or links) moved and turned by `commands::transformed`
+each loaded link's built elements (`built`: not its views, sheets, annotation, detail lines, filled regions, detail groups, rooms, grids or links) moved and turned by `commands::transformed`
 and brought in with `insert::insert_as(.., linked: true)` under ids from `LINKED` up (`ids.rs`), so `link::is_linked(id)` tells them; a level of the
 link at the height of one of the project's (1 mm) is that level, another comes in named `link: level`. Everything that takes a `&Model` draws and snaps to
 them without knowing: `Look::with` makes a linked id halftone, and picking never answers one (`Drawing::pick_all`, `in_box`, `Image::pick`,
