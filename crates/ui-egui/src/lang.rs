@@ -2111,7 +2111,6 @@ const WORDS: &[[&str; 3]] = &[
     ["Restore Defaults", "Restaurar padrões", "Restaurar valores predeterminados"],
     ["Shortcut Keys:", "Teclas de atalho:", "Teclas de método abreviado:"],
     ["Command / Tool:", "Comando / Ferramenta:", "Comando / Herramienta:"],
-    ["Edit", "Editar", "Editar"],
     ["The shortcut '{}' already exists for '{}'.", "O atalho '{}' já existe para '{}'.", "El atajo '{}' ya existe para '{}'."],
     ["Shortcut '{}' added for '{}'.", "Atalho '{}' adicionado para '{}'.", "Atajo '{}' añadido para '{}'."],
     ["Shortcut '{}' updated.", "Atalho '{}' atualizado.", "Atajo '{}' actualizado."],
@@ -3304,7 +3303,6 @@ const WORDS: &[[&str; 3]] = &[
     ["{} patterns imported.", "{} padrões importados.", "{} patrones importados."],
     ["{} patterns imported; left out: {}", "{} padrões importados; deixados de fora: {}", "{} patrones importados; omitidos: {}"],
     ["Fill patterns exported to {}", "Padrões de preenchimento exportados para {}", "Patrones de relleno exportados a {}"],
-    ["`{}` is not an angle", "`{}` não é um ângulo", "`{}` no es un ángulo"],
     [
         "That can't be drawn: an arc's radius is at least half the distance between its ends, and a centre-ends arc turns less than 180°.",
         "Isso não pode ser desenhado: o raio de um arco é pelo menos metade da distância entre suas extremidades, e um arco centro-extremidades gira menos de 180°.",

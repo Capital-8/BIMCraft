@@ -1805,7 +1805,6 @@ pub(super) const WORDS: &[[&str; 2]] = &[
     ["Line Weight", "线宽"],
     ["Colour", "颜色"],
     ["Sample", "示例"],
-    ["Edit", "编辑"],
     ["Dash", "划线"],
     ["Dot", "点"],
     ["Space", "间隔"],
@@ -2010,7 +2009,6 @@ pub(super) const WORDS: &[[&str; 2]] = &[
     ["{} patterns imported.", "已导入 {} 个图案。"],
     ["{} patterns imported; left out: {}", "已导入 {} 个图案；未导入：{}"],
     ["Fill patterns exported to {}", "填充图案已导出到 {}"],
-    ["`{}` is not an angle", "`{}` 不是角度"],
     [
         "That can't be drawn: an arc's radius is at least half the distance between its ends, and a centre-ends arc turns less than 180°.",
         "无法绘制：圆弧的半径至少为其两端距离的一半，圆心-端点弧的转角小于 180°。",
@@ -2134,7 +2132,6 @@ pub(super) const CORE: &[[&str; 2]] = &[
     ["Number", "编号"],
     ["Name", "名称"],
     ["Mark", "标记"],
-    ["Type", "类型"],
     ["Width", "宽度"],
     ["Height", "高度"],
     ["Sill", "窗台"],
