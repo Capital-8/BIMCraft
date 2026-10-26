@@ -1115,6 +1115,17 @@ const WORDS: &[[&str; 3]] = &[
     ],
     ["The lines are shown in red.", "As linhas aparecem em vermelho.", "Las líneas se muestran en rojo."],
     [
+        "Finish or cancel the sketch before leaving its plan.",
+        "Conclua ou cancele o esboço antes de sair da sua planta.",
+        "Termine o cancele el boceto antes de salir de su plano.",
+    ],
+    [
+        "A loop needs three lines: click a point that isn't the start.",
+        "Um contorno precisa de três linhas: clique em um ponto que não seja o início.",
+        "Un contorno necesita tres líneas: haga clic en un punto que no sea el inicio.",
+    ],
+    ["`{}` is not a number of sides", "`{}` não é um número de lados", "`{}` no es un número de lados"],
+    [
         "The loop is open: {} line ends don't meet another line.",
         "O contorno está aberto: {} pontas de linha não encontram outra linha.",
         "El bucle está abierto: {} extremos de línea no se encuentran con otra línea.",

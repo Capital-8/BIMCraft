@@ -18,7 +18,7 @@ use crate::icons::Icon;
 use crate::lang::{t, tf};
 use crate::properties::number;
 use crate::style::{canvas_pal, pal};
-use crate::{BimApp, Status, Tool, big_button, draw, panel, ribbon};
+use crate::{BimApp, Sheet, Status, Tool, big_button, draw, panel, ribbon};
 
 /// What Finish Edit Mode makes of the lines.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -57,7 +57,16 @@ pub struct Sketch {
     pub region: (String, Option<String>),
     /// A region's sketch: each line drawn takes the Options Bar's line style.
     pub styled: bool,
+    /// The plan it began in: the sketch belongs to it, and Finish Edit Mode makes its element there.
+    pub plan: Sheet,
+    /// The lines as they were before each change, oldest first, and as the last frame saw them: Ctrl+Z takes back one change
+    /// (a line drawn, a trim, a fillet, a grip moved), not one line.
+    history: Vec<Vec<SketchLine>>,
+    seen: Vec<SketchLine>,
 }
+
+/// How many changes of a sketch Ctrl+Z can take back.
+const UNDO: usize = 100;
 
 /// Sketch lines in the plan: Revit's magenta.
 const SKETCH: Color32 = Color32::from_rgb(0xC0, 0x26, 0xD3);
@@ -148,6 +157,29 @@ impl Sketch {
     pub(crate) fn changed(&mut self) {
         self.picked.clear();
         self.wrong.clear();
+    }
+
+    /// Notes the lines if they are not as the last frame saw them: the change is a step Ctrl+Z takes back. True for a change.
+    pub(crate) fn track(&mut self) -> bool {
+        if self.lines == self.seen {
+            return false;
+        }
+        let before = std::mem::replace(&mut self.seen, self.lines.clone());
+        self.history.push(before);
+        if self.history.len() > UNDO {
+            self.history.remove(0);
+        }
+        true
+    }
+
+    /// The lines as they were before the last change, which is taken back; false when there's none to take back.
+    pub(crate) fn undo(&mut self) -> bool {
+        self.track();
+        let Some(before) = self.history.pop() else { return false };
+        self.lines.clone_from(&before);
+        self.seen = before;
+        self.changed();
+        true
     }
 
     /// The lines, each in its colour: picked (or `lit`, a tool's picks) or under the cursor as a selection is, wrong in the error colour; a picked
@@ -277,7 +309,21 @@ impl BimApp {
             Of::Edit(id) => matches!(m.elements.get(id), Some(Element::FilledRegion(_))),
             _ => false,
         };
-        self.sketch = Some(Sketch { of, lines, picked: BTreeSet::new(), wrong: Vec::new(), drag: None, region, styled });
+        let seen = lines.clone();
+        let plan = self.sheet;
+        self.sketch = Some(Sketch {
+            of,
+            lines,
+            picked: BTreeSet::new(),
+            wrong: Vec::new(),
+            drag: None,
+            region,
+            styled,
+            plan,
+            history: Vec::new(),
+            seen,
+        });
+        self.forget_picks();
         self.selection.clear();
         self.status = Status::default();
         self.tool = Tool::SketchLine(Vec::new());
@@ -351,6 +397,8 @@ impl BimApp {
         if let Some(made) = self.run(id, p) {
             self.sketch = None;
             self.tool = Tool::Modify;
+            // The lines picked for a fillet were the sketch's: their places mean nothing in the next one.
+            self.forget_picks();
             self.selection = made["id"].as_u64().into_iter().collect();
         }
     }
@@ -363,14 +411,33 @@ impl BimApp {
         };
         self.tool = Tool::Modify;
         self.status = Status::default();
+        self.forget_picks();
         self.selection = edited.into_iter().collect();
     }
 
-    /// Ctrl+Z while sketching: the last line drawn taken back.
+    /// Once a frame while sketching: the changes made to the lines are steps for Ctrl+Z, and the places of lines picked for
+    /// a fillet or a trim (by their number in the sketch) mean nothing once the lines have changed; and the sketch stays in
+    /// the plan it began in, which it takes the window back to.
+    pub(crate) fn track_sketch(&mut self) {
+        let Some(sk) = &mut self.sketch else { return };
+        if sk.track() {
+            self.drawing.fillet.retain(|(l, _)| matches!(l, draw::Picked::Element(_)));
+            self.drawing.trim = None;
+        }
+        let plan = sk.plan;
+        if self.sheet != plan && matches!(plan, Sheet::Plan(_) | Sheet::Ceiling(_)) {
+            self.open_sheet(plan);
+            self.status = Status { text: t("Finish or cancel the sketch before leaving its plan.").into(), error: true };
+        }
+    }
+
+    /// Ctrl+Z while sketching: the last change to the lines taken back (a line drawn, a trim, a fillet, a grip moved).
     pub(crate) fn unsketch(&mut self) {
-        if let Some(sk) = &mut self.sketch {
-            sk.lines.pop();
-            sk.changed();
+        if let Some(sk) = &mut self.sketch
+            && sk.undo()
+        {
+            self.drawing.fillet.retain(|(l, _)| matches!(l, draw::Picked::Element(_)));
+            self.drawing.trim = None;
         }
         if let Tool::SketchLine(chain) = &mut self.tool {
             chain.clear();
@@ -433,8 +500,15 @@ impl BimApp {
             }
             Tool::SketchLine(chain) => match chain.last().copied() {
                 Some(last) if last.dist(p) > TOL => {
+                    let closes = chain.first().is_some_and(|f| f.dist(p) <= TOL);
+                    // Back on the start after one line only, the second would lie along the first: no loop is two lines.
+                    if closes && chain.len() < 3 {
+                        self.status =
+                            Status { text: t("A loop needs three lines: click a point that isn't the start.").into(), error: true };
+                        return;
+                    }
                     sk.add(SketchLine::new(last, p));
-                    if chain.len() >= 2 && chain.first().is_some_and(|f| f.dist(p) <= TOL) {
+                    if closes {
                         chain.clear();
                     } else {
                         chain.push(p);
@@ -584,21 +658,12 @@ impl BimApp {
         });
     }
 
-    /// The Options Bar while sketching a region: a new one's type, and the line style the lines drawn take (or invisible
-    /// lines), which the lines picked take at once.
+    /// The Options Bar while sketching a region: the line style the lines drawn take (or invisible lines), which the lines
+    /// picked take at once.
     pub(crate) fn sketch_options(&mut self, ui: &mut Ui) {
         let m = &self.session.model;
         let Some(sk) = self.sketch.as_mut().filter(|sk| sk.styled) else { return };
-        if matches!(sk.of, Of::Region { .. }) {
-            let l = ui.label(t("Type:"));
-            let c = egui::ComboBox::from_id_salt("region-type").selected_text(&sk.region.0).width(160.0).show_ui(ui, |ui| {
-                for n in m.region_types.keys() {
-                    ui.selectable_value(&mut sk.region.0, n.clone(), n);
-                }
-            });
-            c.response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::ComboBox, true, t("Region Type")));
-            c.response.labelled_by(l.id);
-        }
+        // The region's type is the Type Selector's, in the Properties palette: one place to set it.
         let l = ui.label(t("Line Style:"));
         let invisible = t("<Invisible lines>").to_string();
         let shown = sk.region.1.clone().unwrap_or_else(|| invisible.clone());

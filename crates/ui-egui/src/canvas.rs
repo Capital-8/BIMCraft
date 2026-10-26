@@ -1923,6 +1923,9 @@ impl BimApp {
             }
             return;
         }
+        if self.options_refused() {
+            return;
+        }
         // Beside the points clicked, by the Options Bar's Offset.
         let line = draw::offset_line(last, p, self.draw_options().offset);
         let mut params = json!({"start": point(line[0]), "end": point(line[1]), "view": level});
@@ -2090,6 +2093,9 @@ impl BimApp {
             // A line: each click after the first builds the wall from the one before it.
             Tool::Wall(chain) => match (chain.first().copied(), chain.last().copied()) {
                 (Some(first), Some(last)) if last.dist(p) > TOL => {
+                    if self.options_refused() {
+                        return;
+                    }
                     if self.build_walls(level, &draw::offset_line(last, p, self.draw_options().offset), false, 0.0) {
                         let Tool::Wall(chain) = &mut self.tool else { return };
                         // Back on its start, the chain closes; without Chain, every wall stands alone.
@@ -2480,28 +2486,31 @@ impl BimApp {
     /// their sides, a radius, an angle or a reach by the cursor, each as typed once something is; else the length
     /// from the last point, as a line's. The number Tab is on says Enter.
     fn shape_dimensions(&self, sc: &Scene, chain: &[P2], next: P2) {
-        let m = sc.m;
+        for (at, text) in self.shape_texts(sc.m, chain, next) {
+            tag(sc.p, sc.screen(at) + vec2(12.0, -12.0), Align2::LEFT_BOTTOM, text);
+        }
+    }
+
+    /// What [`BimApp::shape_dimensions`] says, and where (a model point each).
+    pub(crate) fn shape_texts(&self, m: &Model, chain: &[P2], next: P2) -> Vec<(P2, String)> {
         let shape = self.shape();
         let names = bimcraft_core::draw::numbers(shape, chain.len());
-        let label = |at: P2, text: String| tag(sc.p, sc.screen(at) + vec2(12.0, -12.0), Align2::LEFT_BOTTOM, text);
         // The radius by the cursor, or as typed.
         if shape == draw::Shape::Fillet {
-            if !self.typed_length.is_empty() && self.filleting() {
-                label(next, format!("R {} (Enter)", self.typed_length.trim()));
-            } else if let Some(r) = self.fillet_radius_at(next).filter(|_| self.filleting()) {
-                label(next, format!("R {}", m.units.with_unit(r)));
-            }
-            return;
+            return match self.fillet_radius_at(next).filter(|_| self.filleting()) {
+                _ if !self.typed_length.is_empty() && self.filleting() => vec![(next, format!("R {} (Enter)", self.typed_length.trim()))],
+                Some(r) => vec![(next, format!("R {}", m.units.with_unit(r)))],
+                None => Vec::new(),
+            };
         }
-        let Some(&last) = chain.last() else { return };
+        let Some(&last) = chain.last() else { return Vec::new() };
         if names.is_empty() {
             let text = if self.typed_length.is_empty() {
                 m.units.with_unit(last.dist(next))
             } else {
                 format!("{} (Enter)", self.typed_length.trim())
             };
-            label(next, text);
-            return;
+            return vec![(next, text)];
         }
         let now = bimcraft_core::draw::reading(shape, chain, next);
         let field = self.drawing.field.min(names.len() - 1);
@@ -2509,6 +2518,7 @@ impl BimApp {
             (draw::Shape::Rectangle, &[a]) => vec![(a + P2(next.0, a.1)) * 0.5, (P2(next.0, a.1) + next) * 0.5],
             _ => vec![next],
         };
+        let mut out = Vec::new();
         for (i, name) in names.iter().enumerate() {
             let typed = if i == field { &self.typed_length } else { &self.drawing.other };
             let shown = match now.get(i) {
@@ -2519,8 +2529,9 @@ impl BimApp {
                 None => continue,
             };
             let text = if i == field && (!typed.is_empty() || names.len() > 1) { format!("{shown} (Enter)") } else { shown };
-            label(places.get(i).copied().unwrap_or(next), text);
+            out.push((places.get(i).copied().unwrap_or(next), text));
         }
+        out
     }
 
     /// A selected door's or window's two temporary dimensions: how far its middle stands from its wall's start, and from
@@ -3019,8 +3030,7 @@ impl BimApp {
             }
         }
         // The listening dimension: the length so far and the angle (at the corner it turns, else from
-        // east), or the length being typed; an arc's radius.
-        let arc: Option<f64> = None;
+        // east), or the length being typed. (An arc's radius is its shape's: `shape_texts`.)
         let reading = |last: P2| {
             let angle = match chain {
                 [.., prev, l] => snap::corner(*prev, *l, next),
@@ -3028,11 +3038,10 @@ impl BimApp {
             };
             format!("{}  {}", m.units.with_unit(last.dist(next)), degrees(angle.unwrap_or_else(|| snap::ruler(last, next).angle)))
         };
-        match (chain.last(), self.typed_length.is_empty(), arc) {
-            (Some(_), false, _) => label(sc.screen(next), format!("{} (Enter)", self.typed_length.trim())),
-            (Some(_), true, Some(r)) => label(sc.screen(next), format!("R {}", m.units.with_unit(r))),
-            (Some(last), true, None) => label(sc.screen(next), reading(*last)),
-            (None, ..) => {}
+        match (chain.last(), self.typed_length.is_empty()) {
+            (Some(_), false) => label(sc.screen(next), format!("{} (Enter)", self.typed_length.trim())),
+            (Some(last), true) => label(sc.screen(next), reading(*last)),
+            (None, _) => {}
         }
     }
 }

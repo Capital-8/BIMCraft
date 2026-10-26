@@ -12,7 +12,7 @@ use egui::{Painter, PointerButton, Pos2, Rect, Response, Shape as Paint, Stroke,
 use serde_json::{Value, json};
 
 use crate::icons::Icon;
-use crate::lang::t;
+use crate::lang::{t, tf};
 use crate::style::{canvas_pal, pal};
 use crate::{BimApp, Status, Tool, panel, small_button};
 
@@ -32,6 +32,22 @@ pub enum Target {
 pub enum Picked {
     Element(Id),
     Sketch(usize),
+}
+
+/// A number typed in the Options Bar for a shape.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Field {
+    Sides,
+    Radius,
+    Offset,
+    Width,
+    ArcLength,
+}
+
+/// A single-line field `width` wide, its text in the error colour while `bad`.
+fn field(text: &mut String, width: f32, bad: bool) -> TextEdit<'_> {
+    let edit = TextEdit::singleline(text).desired_width(width);
+    if bad { edit.text_color(pal().error) } else { edit }
 }
 
 /// The shapes' state: which each target draws, the Options Bar's settings as typed, the line before (for a tangent arc),
@@ -167,15 +183,14 @@ impl BimApp {
         };
         let was = std::mem::replace(slot, shape);
         self.drawing.fillet.clear();
+        // What was typed was for the shape that's gone: its fields and its length.
+        self.clear_typed();
         let keep = if was.chains() && shape.chains() { self.points().and_then(|p| p.last().copied()) } else { None };
         if let Some(points) = self.points_mut() {
             *points = keep.into_iter().collect();
         }
-        if target == Target::Sketch {
-            self.tool = match shape {
-                _ if !matches!(self.tool, Tool::SketchLine(_)) => Tool::SketchLine(keep.into_iter().collect()),
-                _ => self.tool.clone(),
-            };
+        if target == Target::Sketch && !matches!(self.tool, Tool::SketchLine(_)) {
+            self.tool = Tool::SketchLine(keep.into_iter().collect());
         }
     }
 
@@ -201,6 +216,58 @@ impl BimApp {
         let radius = self.drawing.radius_on.then(|| units.parse(&self.drawing.radius)).flatten().filter(|r| *r > TOL);
         let offset = units.parse(&self.drawing.offset).filter(|o| o.is_finite()).unwrap_or(0.0);
         Options { sides, radius, offset }
+    }
+
+    /// The first field of the Options Bar that the shape in hand takes and that holds something it can't read: [`draw_options`]
+    /// reads such a field as its default for the preview, but a click that would make something from it is refused.
+    fn unreadable(&self) -> Option<(Field, &str)> {
+        let (shape, d, units) = (self.shape(), &self.drawing, self.session.model.units);
+        let length = |text: &str| units.parse(text).is_none_or(|v| !v.is_finite() || v <= 0.0);
+        let polygon = matches!(shape, Shape::Inscribed | Shape::Circumscribed);
+        if polygon && d.sides.trim().parse::<usize>().is_err() {
+            return Some((Field::Sides, &d.sides));
+        }
+        if d.radius_on && (polygon || matches!(shape, Shape::Circle | Shape::Fillet)) && length(&d.radius) {
+            return Some((Field::Radius, &d.radius));
+        }
+        // A blank Offset is none; one that isn't a length (it may be negative, to the other side) is a mistake.
+        let offsets = !matches!(shape, Shape::Spline | Shape::FitSpline | Shape::Ellipse | Shape::PartialEllipse | Shape::Fillet);
+        if offsets && !d.offset.trim().is_empty() && units.parse(&d.offset).is_none_or(|o| !o.is_finite()) {
+            return Some((Field::Offset, &d.offset));
+        }
+        if self.target() == Some(Target::Detail) {
+            match (&d.insulation, &d.cloud) {
+                (Some(w), _) if length(w) => return Some((Field::Width, w)),
+                (_, Some((arc, _))) if length(arc) => return Some((Field::ArcLength, arc)),
+                _ => {}
+            }
+        }
+        None
+    }
+
+    /// What's wrong with the Options Bar for the shape in hand: which field, and what's in it.
+    pub(crate) fn options_error(&self) -> Option<String> {
+        let (field, text) = self.unreadable()?;
+        let (label, said) = match field {
+            Field::Sides => ("Sides:", tf("`{}` is not a number of sides", &[text.trim()])),
+            Field::Radius => ("Radius:", tf("`{}` is not a length", &[text.trim()])),
+            Field::Offset => ("Offset:", tf("`{}` is not a length", &[text.trim()])),
+            Field::Width => ("Width:", tf("`{}` is not a length", &[text.trim()])),
+            Field::ArcLength => ("Arc Length:", tf("`{}` is not a length", &[text.trim()])),
+        };
+        Some(format!("{} {said}", t(label)))
+    }
+
+    /// Whether the Options Bar holds something unreadable for the shape in hand, said in the status bar: a click that would
+    /// make something from it makes nothing.
+    pub(crate) fn options_refused(&mut self) -> bool {
+        match self.options_error() {
+            Some(text) => {
+                self.status = Status { text, error: true };
+                true
+            }
+            None => false,
+        }
     }
 
     /// The Draw panel for `target`: a button for each shape it draws, two rows of them as Revit's are.
@@ -246,13 +313,15 @@ impl BimApp {
     /// The Options Bar's Sides, Radius and Offset, for the shapes that take them.
     pub(crate) fn shape_options(&mut self, ui: &mut Ui) {
         let shape = self.shape();
+        // What the shape can't read is in the error colour.
+        let bad = self.unreadable().map(|(f, _)| f);
         if matches!(shape, Shape::Inscribed | Shape::Circumscribed) {
             let l = ui.label(t("Sides:"));
-            ui.add(TextEdit::singleline(&mut self.drawing.sides).desired_width(40.0)).labelled_by(l.id);
+            ui.add(field(&mut self.drawing.sides, 40.0, bad == Some(Field::Sides))).labelled_by(l.id);
         }
         if matches!(shape, Shape::Inscribed | Shape::Circumscribed | Shape::Circle | Shape::Fillet) {
             ui.checkbox(&mut self.drawing.radius_on, t("Radius:"));
-            let r = ui.add_enabled(self.drawing.radius_on, TextEdit::singleline(&mut self.drawing.radius).desired_width(70.0));
+            let r = ui.add_enabled(self.drawing.radius_on, field(&mut self.drawing.radius, 70.0, bad == Some(Field::Radius)));
             r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, true, t("Radius")));
         }
         // A detail arc or circle can mark its centre, as Revit's Center Mark Visible.
@@ -262,7 +331,7 @@ impl BimApp {
         }
         if !matches!(shape, Shape::Spline | Shape::FitSpline | Shape::Ellipse | Shape::PartialEllipse | Shape::Fillet) {
             let l = ui.label(t("Offset:"));
-            ui.add(TextEdit::singleline(&mut self.drawing.offset).desired_width(70.0)).labelled_by(l.id);
+            ui.add(field(&mut self.drawing.offset, 70.0, bad == Some(Field::Offset))).labelled_by(l.id);
         }
     }
 
@@ -300,6 +369,9 @@ impl BimApp {
     /// has its points, which then start over, a chain going on from its end. Spline and Polyline gather points until
     /// [`BimApp::finish_shape`].
     pub(crate) fn shape_click(&mut self, p: P2) -> Option<Vec<Curve>> {
+        if self.options_refused() {
+            return None;
+        }
         let (shape, o) = (self.shape(), self.draw_options());
         let tangent = self.points().and_then(|pts| pts.first().copied()).or(Some(p)).and_then(|start| self.tangent_at(start));
         if shape == Shape::TangentArc && self.points().is_some_and(Vec::is_empty) && self.tangent_at(p).is_none() {
@@ -352,7 +424,7 @@ impl BimApp {
     /// Enter with Spline, Spline Through Points or Polyline: what the points clicked make, and the points dropped.
     pub(crate) fn finish_shape(&mut self) -> Option<Vec<Curve>> {
         let (shape, o) = (self.shape(), self.draw_options());
-        if !shape.open_ended() {
+        if !shape.open_ended() || self.options_refused() {
             return None;
         }
         let points = std::mem::take(self.points_mut()?);
@@ -393,6 +465,13 @@ impl BimApp {
         draw::numbers(self.shape(), self.points().map_or(0, Vec::len)).len()
     }
 
+    /// The lines picked for Fillet Arc and the first of Trim/Extend's picks dropped: they were picked for the tool, or the
+    /// sketch, that is over.
+    pub(crate) fn forget_picks(&mut self) {
+        self.drawing.fillet.clear();
+        self.drawing.trim = None;
+    }
+
     /// What's typed dropped: a length, or a shape's numbers.
     pub(crate) fn clear_typed(&mut self) {
         self.typed_length.clear();
@@ -408,7 +487,9 @@ impl BimApp {
         if self.target().is_none() || names.is_empty() {
             return false;
         }
-        let (typed, other, field) = (std::mem::take(&mut self.typed_length), std::mem::take(&mut self.drawing.other), self.drawing.field);
+        // The field Tab is on is one of this shape's, as the dimension's label (`shape_texts`) reads it.
+        let field = self.drawing.field.min(names.len().saturating_sub(1));
+        let (typed, other) = (std::mem::take(&mut self.typed_length), std::mem::take(&mut self.drawing.other));
         self.drawing.field = 0;
         let units = self.session.model.units;
         let mut values = vec![None; names.len()];
@@ -422,7 +503,7 @@ impl BimApp {
                 Some(v) => values[i] = Some(v),
                 None => {
                     let what = if *name == "Angle" { "`{}` is not an angle" } else { "`{}` is not a length" };
-                    self.status = Status { text: crate::lang::tf(what, &[text.trim()]), error: true };
+                    self.status = Status { text: tf(what, &[text.trim()]), error: true };
                     return true;
                 }
             }
@@ -456,7 +537,9 @@ impl BimApp {
         let Some(points) = self.points() else { return Vec::new() };
         // Fillet Arc, its two lines picked: the arc that passes nearest the cursor, and the lines cut back to it.
         if shape == Shape::Fillet {
-            let made = self.fillet_curves().zip(self.fillet_radius_at(cursor)).and_then(|((a, b), r)| draw::fillet_lines(&a, &b, r));
+            // The radius typed, when there is one, else the one the cursor makes.
+            let radius = self.typed_radius().or_else(|| self.fillet_radius_at(cursor));
+            let made = self.fillet_curves().zip(radius).and_then(|((a, b), r)| draw::fillet_lines(&a, &b, r));
             return made.map(|(a, arc, b)| vec![a, arc, b]).unwrap_or_default();
         }
         if matches!(shape, Shape::Line | Shape::PickLines) || (points.is_empty() && shape.clicks(&o) > 1) {
@@ -522,6 +605,7 @@ impl BimApp {
         if self.drawing.centre_mark && round {
             p["centre_mark"] = json!(true);
         }
+        // An arc length that isn't one is refused before this (`options_error`), so the default here is never taken.
         if let Some((arc, revision)) = &self.drawing.cloud {
             p["cloud"] = json!(self.session.model.units.parse(arc).unwrap_or(500.0));
             if !revision.trim().is_empty() {
@@ -531,9 +615,11 @@ impl BimApp {
     }
 
     /// Whether the Detail Line tool's clicks make one line through every point: with Polyline, or a cloud's Line (a cloud
-    /// is one line round, as Revit's is one sketch).
+    /// is one line round, as Revit's is one sketch). Insulation and Revision Cloud are the Detail Line tool's, so no other
+    /// tool's Line is one.
     pub(crate) fn one_line(&self) -> bool {
-        self.shape() == Shape::Polyline || (self.drawing.cloud.is_some() && self.shape() == Shape::Line)
+        self.target() == Some(Target::Detail)
+            && (self.shape() == Shape::Polyline || (self.drawing.cloud.is_some() && self.shape() == Shape::Line))
     }
 
     /// Annotate's Detail panel: Detail Line, Insulation (detail lines drawn as batt insulation), Revision Cloud, and detail
@@ -579,13 +665,14 @@ impl BimApp {
 
     /// The Options Bar's Width while drawing insulation.
     pub(crate) fn insulation_options(&mut self, ui: &mut Ui) {
+        let bad = self.unreadable().map(|(f, _)| f);
         if let Some(w) = &mut self.drawing.insulation {
             let l = ui.label(t("Width:"));
-            ui.add(TextEdit::singleline(w).desired_width(70.0)).labelled_by(l.id);
+            ui.add(field(w, 70.0, bad == Some(Field::Width))).labelled_by(l.id);
         }
         if let Some((arc, revision)) = &mut self.drawing.cloud {
             let l = ui.label(t("Arc Length:"));
-            ui.add(TextEdit::singleline(arc).desired_width(70.0)).labelled_by(l.id);
+            ui.add(field(arc, 70.0, bad == Some(Field::ArcLength))).labelled_by(l.id);
             let l = ui.label(t("Revision:"));
             ui.add(TextEdit::singleline(revision).desired_width(90.0)).labelled_by(l.id);
         }
@@ -593,6 +680,9 @@ impl BimApp {
 
     /// Detail lines along `curves`, in view `view` and the Options Bar's line style, as one step.
     pub(crate) fn make_detail_lines(&mut self, view: Id, curves: &[Curve]) -> Vec<Id> {
+        if self.options_refused() {
+            return Vec::new();
+        }
         // A cloud's rectangle or polygon is one cloud round, its sides joined.
         let joined = match curves {
             [_, _, ..] if self.drawing.cloud.is_some() => curves::join(curves).map(|c| vec![c]),
@@ -667,23 +757,31 @@ impl BimApp {
         }
     }
 
-    /// Fillet Arc's pick of `line` at `at`: the first line, the second (made at once with Radius), or with both picked
-    /// the click that sizes the arc.
     /// Whether Fillet Arc has its two lines and waits for its radius: a click, or a number typed.
     pub(crate) fn filleting(&self) -> bool {
         self.shape() == Shape::Fillet && self.drawing.fillet.len() == 2
     }
 
-    /// Enter with a radius typed for Fillet Arc: the fillet of that radius.
+    /// The radius typed for Fillet Arc, when what's typed is one.
+    pub(crate) fn typed_radius(&self) -> Option<f64> {
+        let radius = self.session.model.units.parse(&self.typed_length);
+        radius.filter(|r| r.is_finite() && *r > 0.0 && *r <= bimcraft_core::model::MAX_COORD)
+    }
+
+    /// Enter with a radius typed for Fillet Arc: the fillet of that radius, or what's wrong with it (the lines stay picked).
     pub(crate) fn fillet_typed(&mut self) {
+        let radius = self.typed_radius();
+        // The digits are spent either way: what's typed next is a new radius.
         let typed = std::mem::take(&mut self.typed_length);
         self.drawing.other.clear();
-        match self.session.model.units.parse(&typed).filter(|r| r.is_finite() && *r > 0.0 && *r <= bimcraft_core::model::MAX_COORD) {
+        match radius {
             Some(r) => self.fillet_now(r),
-            None => self.status = Status { text: crate::lang::tf("`{}` is not a length", &[typed.trim()]), error: true },
+            None => self.status = Status { text: tf("`{}` is not a length", &[typed.trim()]), error: true },
         }
     }
 
+    /// Fillet Arc's pick of `line` at `at`: the first line, the second (made at once with Radius), or with both picked
+    /// the click that sizes the arc.
     pub(crate) fn fillet_pick(&mut self, line: Option<Picked>, at: P2) {
         let radius = self.draw_options().radius;
         match (self.drawing.fillet.as_slice(), line) {
@@ -726,13 +824,11 @@ impl BimApp {
     }
 
     /// The fillet of the two lines picked, with an arc of radius `r`: the detail lines cut back and the arc added, or the
-    /// sketch lines.
+    /// sketch lines. Made, the picks and any number typed are done with; refused (the arc doesn't fit), the lines stay
+    /// picked to be sized again, and the status says why.
     fn fillet_now(&mut self, r: f64) {
-        let picks = std::mem::take(&mut self.drawing.fillet);
-        match *picks.as_slice() {
-            [(Picked::Element(a), _), (Picked::Element(b), _)] => {
-                self.run("fillet", json!({"ids": [a, b], "radius": r}));
-            }
+        let made = match *self.drawing.fillet.as_slice() {
+            [(Picked::Element(a), _), (Picked::Element(b), _)] => self.run("fillet", json!({"ids": [a, b], "radius": r})).is_some(),
             [(Picked::Sketch(a), _), (Picked::Sketch(b), _)] => {
                 let Some(sk) = &mut self.sketch else { return };
                 let (Some(la), Some(lb)) = (sk.lines.get(a).cloned(), sk.lines.get(b).cloned()) else { return };
@@ -745,21 +841,30 @@ impl BimApp {
                             l.curve = cb;
                         }
                         sk.add(SketchLine::from(arc));
+                        true
                     }
                     None => {
                         self.status = Status {
                             text: t("The arc doesn't fit: pick two straight lines that meet at an angle, long enough for it.").into(),
                             error: true,
-                        }
+                        };
+                        false
                     }
                 }
             }
-            _ => {}
+            _ => return,
+        };
+        if made {
+            self.drawing.fillet.clear();
+            self.clear_typed();
         }
     }
 
     /// Pick Lines' click on element `id` near `at`: its line, beside it by the Options Bar's offset on the side clicked.
-    pub(crate) fn picked_curve(&self, id: Id, at: P2) -> Option<Curve> {
+    pub(crate) fn picked_curve(&mut self, id: Id, at: P2) -> Option<Curve> {
+        if self.options_refused() {
+            return None;
+        }
         let c = draw::element_curve(&self.session.model, id)?;
         draw::pick(&c, at, self.draw_options().offset)
     }

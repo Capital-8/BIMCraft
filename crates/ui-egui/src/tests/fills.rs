@@ -16,7 +16,10 @@ fn a_filled_region_is_sketched_in_the_options_bars_type_and_line_style_any_numbe
     press(&mut h, "Annotate");
     press(&mut h, "Filled Region");
     assert!(h.query_by_label("Modify | Create Filled Region Boundary").is_some());
-    choose(&mut h, "Region Type", "Crosshatch");
+    // The type is the Type Selector's alone; the Options Bar has the line style.
+    assert!(h.query_by_role_and_label(Role::ComboBox, "Region Type").is_none());
+    press(&mut h, "Type Selector");
+    press(&mut h, "Crosshatch");
     choose(&mut h, "Line Style", "<Invisible lines>");
     rectangle(&mut h, P2(1000.0, 1000.0), P2(3000.0, 3000.0));
     rectangle(&mut h, P2(5000.0, 1000.0), P2(7000.0, 2000.0));

@@ -936,7 +936,8 @@ impl BimApp {
             Subject::View3D => ("3d view", None),
             Subject::Schedule => ("schedule", None),
         };
-        if category == "region"
+        // A region being sketched has the type its sketch will make; one selected has its own.
+        if matches!(subject, Subject::New("region"))
             && let Some(sk) = &self.sketch
         {
             current = Some(sk.region.0.clone());

@@ -5100,6 +5100,7 @@ mod sketch;
 mod smallest;
 mod start;
 mod titlebar;
+mod tools;
 mod window;
 
 #[test]

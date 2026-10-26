@@ -1296,6 +1296,7 @@ impl BimApp {
         self.warning(&ctx);
         self.dialogs(&ctx);
         self.keep_settings(&ctx);
+        self.track_sketch();
         if self.own_bar() {
             titlebar::frame(ui);
         }
@@ -1994,6 +1995,12 @@ impl BimApp {
         }
         self.typed.clear();
         self.clear_typed();
+        // Insulation and Revision Cloud are the Detail Line tool's; the lines Fillet Arc and Trim/Extend have picked were
+        // picked for them, and are not for the tool that comes next.
+        if !matches!(tool, Tool::DetailLine(_)) {
+            (self.drawing.insulation, self.drawing.cloud) = (None, None);
+        }
+        self.forget_picks();
         // The Floor tool makes structural floors only when the Structure tab asks (`structural_floor`).
         self.floor_structural = false;
         if let Tool::Run(category, _) = &tool {
