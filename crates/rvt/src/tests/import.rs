@@ -71,7 +71,8 @@ fn a_file_that_is_not_a_project_is_refused_with_the_reason() {
     p.recs = vec![Rec::new(100, -2_000_011)];
     p.levels = vec![Lev::new(10, "Level 1", 0.0)];
     let i = import(&p);
-    assert!(i.model.elements.values().all(|e| matches!(e, Element::Level(_))), "a wall record with no data is not made into a wall");
+    // A wall record with no data comes in along its own box: it is a wall of the file, and the report says what was not read of it.
+    assert!(i.model.elements.values().any(|e| matches!(e, Element::Wall(_))), "a wall record with no data is still a wall");
 }
 
 #[test]

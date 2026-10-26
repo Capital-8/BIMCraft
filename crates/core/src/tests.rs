@@ -493,6 +493,31 @@ fn modify_edits_many_elements_in_one_undo_step() {
 }
 
 #[test]
+fn match_properties_gives_the_walls_one_wall_type_and_leaves_other_categories_alone() {
+    let mut s = Session::new();
+    let ids = house(&mut s);
+    let door = run(&mut s, "door", json!({"at": [2000, 30]}))["id"].as_u64().unwrap();
+    run(&mut s, "modify", json!({"id": ids[0], "type": "Exterior - 300mm"}));
+    let thick = |s: &mut Session| [ids[0], ids[1], ids[2]].map(|id| element(s, id)["thickness"].as_f64().unwrap());
+    assert_eq!(thick(&mut s), [300.0, 200.0, 200.0]);
+    // MA is its alias; the door is a different category, so it's skipped and named.
+    let r = run(&mut s, "MA", json!({"from": ids[0], "ids": [ids[1], ids[2], door, ids[0]]}));
+    assert_eq!((&r["modified"], &r["skipped"]), (&json!([ids[1], ids[2]]), &json!([door])));
+    assert_eq!(thick(&mut s), [300.0, 300.0, 300.0]);
+    assert_eq!(s.history().last(), Some(&"Match Properties"));
+    run(&mut s, "undo", json!({}));
+    assert_eq!(thick(&mut s), [300.0, 200.0, 200.0], "one undo step");
+    // Nothing to match: the model stays as it was.
+    let before = s.model.clone();
+    for p in
+        [json!({"ids": [ids[1]]}), json!({"from": 9_999_999, "ids": [ids[1]]}), json!({"from": ids[0]}), json!({"from": ids[0], "ids": []})]
+    {
+        assert!(s.execute("match_properties", &p).is_err(), "{p}");
+    }
+    assert_eq!(*s.model, *before);
+}
+
+#[test]
 fn move_and_copy_refuse_levels_and_what_breaks_the_model() {
     let mut s = Session::new();
     let ids = house(&mut s);
@@ -1452,6 +1477,9 @@ fn hostile_params_never_panic_or_break_the_model() {
         json!({"boundary": [[0, 0], [1, 0], [0, 0]]}),
         json!({"start": [0, 0], "end": [0, 0]}),
         json!({"level": "nowhere"}),
+        json!({"path": 5}),
+        json!({"path": "/nonexistent/scan.las", "units": "furlong", "spacing": -1}),
+        json!({"cloud": "nope", "origin": "file", "at": [1e300, 0]}),
         json!({"id": 100002, "level": [], "start": "x"}),
         json!({"id": 100002, "top_level": 100002}),
         json!({"limit": -1, "offset": 1e30}),
@@ -1466,6 +1494,8 @@ fn hostile_params_never_panic_or_break_the_model() {
         json!({"ids": [100002, 100003], "keep": [[0, 0]]}),
         json!({"id": 100002, "at": [1e300, 0]}),
         json!({"id": 100002, "at": [0, 0]}),
+        json!({"from": 100002, "ids": [100003, 100004, 100002]}),
+        json!({"from": u64::MAX, "ids": [100002]}),
         json!({"refs": "x", "at": [0, 0]}),
         json!({"refs": [[0, 0], [8000, 0]], "at": [1e300, 0]}),
         json!({"refs": [{"id": 100002}, {"id": 100002}], "at": [0, 0]}),
@@ -1702,17 +1732,39 @@ fn hostile_params_never_panic_or_break_the_model() {
         json!({"id": 100006, "level": 1e300, "base_offset": f64::MAX}),
         json!({"id": 100006, "params": {"Phase Created": "Existing"}}),
     ];
-    for cmd in commands().iter().filter(|c| !matches!(c.id, "open" | "save")) {
-        for p in &hostile {
-            let mut s = Session::new();
-            house(&mut s);
-            let _ = s.execute("mass", &json!({"boundary": block(), "height": 9000}));
-            // Another, lofted, which is 8.
-            let _ = s.execute("mass", &json!({"boundary": block(), "height": 9000, "lean": [1500, 500]}));
-            let _ = s.execute(cmd.id, p);
-            assert_eq!(s.model.check(), Ok(()), "{} {p} left a broken model", cmd.id);
+    let mut base = Session::new();
+    house(&mut base);
+    let _ = base.execute("mass", &json!({"boundary": block(), "height": 9000}));
+    // Another, lofted, which is 8.
+    let _ = base.execute("mass", &json!({"boundary": block(), "height": 9000, "lean": [1500, 500]}));
+    // Each command against each value, on a copy of the same session; the commands shared out between the cores.
+    let cmds: Vec<_> = commands().iter().filter(|c| !matches!(c.id, "open" | "save")).collect();
+    let threads = std::thread::available_parallelism().map_or(4, |n| n.get());
+    std::thread::scope(|scope| {
+        for share in 0..threads {
+            let (cmds, hostile, base) = (&cmds, &hostile, &base);
+            scope.spawn(move || {
+                for cmd in cmds.iter().skip(share).step_by(threads) {
+                    for p in hostile {
+                        // A picture as small as it comes, unless the value is about its size: drawing 1600 x 1000 px each time
+                        // took most of the sweep.
+                        let small = match p {
+                            Value::Object(o) if cmd.id == "render" && !o.contains_key("width") && !o.contains_key("height") => {
+                                let mut o = o.clone();
+                                o.extend([("width".into(), json!(16)), ("height".into(), json!(16))]);
+                                Some(Value::Object(o))
+                            }
+                            _ => None,
+                        };
+                        let p = small.as_ref().unwrap_or(p);
+                        let mut s = base.clone();
+                        let _ = s.execute(cmd.id, p);
+                        assert_eq!(s.model.check(), Ok(()), "{} {p} left a broken model", cmd.id);
+                    }
+                }
+            });
         }
-    }
+    });
 }
 
 fn temp(name: &str) -> std::path::PathBuf {
@@ -4806,6 +4858,37 @@ fn a_file_from_before_guids_opens_with_guids_and_six_digit_ids() {
     let e = t.execute("open", &json!({"path": path.to_str().unwrap()})).unwrap_err();
     let _ = std::fs::remove_file(&path);
     assert!(e.contains("newer BIMCraft"), "{e}");
+}
+
+#[test]
+fn a_project_is_saved_as_format_5_and_one_of_format_4_opens_as_it_is_and_one_of_format_6_is_refused() {
+    use crate::model::Model;
+    // 5 added the scans a project holds and the point clouds that place them; nothing in a file of 4 changes.
+    let mut s = Session::new();
+    let empty = serde_json::to_value(&*s.model).unwrap();
+    house(&mut s);
+    let full = serde_json::to_value(&*s.model).unwrap();
+    for v in [&empty, &full] {
+        assert_eq!(v["format"], 5, "a project is saved as format 5");
+        let mut four = v.clone();
+        four["format"] = json!(4);
+        let (m, left_out) = Model::read(&four.to_string()).unwrap();
+        assert_eq!((m.format, left_out.len(), m.elements.len()), (5, 0, v["elements"].as_object().unwrap().len()));
+    }
+    assert!(full["elements"].as_object().unwrap().len() > 5);
+    // A newer file says what it is and what to do, even when nothing else in it is wrong.
+    let mut six = empty.clone();
+    six["format"] = json!(6);
+    let e = Model::read(&six.to_string()).unwrap_err();
+    assert!(
+        e.contains("newer BIMCraft") && e.contains("file format 6") && e.contains("reads up to 5") && e.contains("update BIMCraft"),
+        "{e}"
+    );
+    // A file of this format with a field it doesn't know is read without it, and says which.
+    let mut odd = full.clone();
+    odd["something_new"] = json!(true);
+    let (m, left_out) = Model::read(&odd.to_string()).unwrap();
+    assert_eq!((m.format, left_out), (5, vec!["/something_new".to_string()]));
 }
 
 #[test]

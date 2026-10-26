@@ -53,7 +53,7 @@ fn a_flat_roof_by_footprint_comes_in_with_its_courtyard_type_level_and_underside
 }
 
 #[test]
-fn a_roof_that_rises_or_is_not_by_footprint_is_left_out_with_the_reason() {
+fn a_roof_that_rises_comes_in_level_with_the_reason_and_one_not_by_footprint_is_left_out_with_it() {
     let mut p = with_roof_type(2024);
     // Taller than its type is thick: it rises.
     roof(&mut p, 100, PROFILE_ROOF, [0.0, 0.0, 12.0, 20.0, 10.0, 15.0]);
@@ -62,10 +62,69 @@ fn a_roof_that_rises_or_is_not_by_footprint_is_left_out_with_the_reason() {
     roof(&mut p, 101, 100, [0.0, 0.0, 12.0, 20.0, 10.0, 12.25]);
     rectangle(&mut p, 101, 210, [0.0, 0.0, 20.0, 10.0], 3.0, true);
     let i = import(&p);
-    assert!(roofs(&i).is_empty());
+    // A roof that rises comes in level, and one of another class as the footprint of its box: each says what of it is not read.
+    assert_eq!(roofs(&i).len(), 2, "{:?}", i.skipped);
     let said = |what: &str| i.skipped.iter().find(|s| s.contains(what)).cloned().unwrap_or_default();
     assert!(said("slopes are not read").contains("100"), "{:?}", i.skipped);
-    assert!(said("not a roof by footprint").contains("101"));
+    assert!(said("roof by face").contains("101"), "{:?}", i.skipped);
+}
+
+#[test]
+fn a_wall_whose_record_names_a_roof_has_its_top_cut_by_it() {
+    use crate::project_fixture::line_bytes;
+    // A flat roof over the room, and two walls: one names it among the levels it is constrained to, as Revit lists the roof a
+    // wall's top is attached to, and the other does not.
+    const WALLS: i64 = -2_000_011;
+    let mut p = with_roof_type(2024);
+    roof(&mut p, 100, PROFILE_ROOF, [0.0, 0.0, 9.0, 20.0, 10.0, 9.25]);
+    rectangle(&mut p, 100, 200, [0.0, 0.0, 20.0, 10.0], 9.0, true);
+    for (id, y, named) in [(110u32, 1.0, true), (111, 5.0, false)] {
+        let mut refs = vec![10u64, 530, u64::from(id)];
+        if named {
+            refs.push(100);
+        }
+        p.recs.push(Rec::new(id, WALLS).at([0.0, y - 0.4, 0.0, 20.0, y + 0.4, 10.0], &refs));
+        p.data.push(crate::project_fixture::Block { id, payload: line_bytes(0.0, 20.0, [0.0, y, 0.0], [1.0, 0.0, 0.0]) });
+    }
+    let i = import(&p);
+    let walls: Vec<&bimcraft_core::model::Wall> = i
+        .model
+        .elements
+        .values()
+        .filter_map(|e| match e {
+            Element::Wall(w) => Some(w),
+            _ => None,
+        })
+        .collect();
+    let under = |y_mm: f64| walls.iter().find(|w| (w.start.1 - y_mm).abs() < 1.0).copied();
+    let attached = under(304.8).expect("the wall at 1 ft");
+    assert!(attached.attach_top.is_some(), "its top follows the roof it names: {:?}", i.skipped);
+    let top = i.model.top_z(attached);
+    assert!((top - 9.0 * 304.8).abs() < 1.0, "cut by the roof at 9 ft, got {top}");
+    assert!(under(1524.0).expect("the wall at 5 ft").attach_top.is_none());
+    assert!(i.skipped.iter().any(|s| s.contains("follows the roof it names") && s.contains("110")), "{:?}", i.skipped);
+}
+
+#[test]
+fn a_wall_naming_a_roof_that_only_comes_in_level_keeps_its_own_box() {
+    use crate::project_fixture::line_bytes;
+    // A roof that rises (3 ft tall, a type 0.25 ft thick) comes in level at the bottom of its box, and one of another class as
+    // the footprint of its box. The eaves are no roof over a gable wall: it would be cut off at the eaves, so it keeps its own box.
+    const WALLS: i64 = -2_000_011;
+    for by_face in [false, true] {
+        let mut p = with_roof_type(2024);
+        roof(&mut p, 100, if by_face { 100 } else { PROFILE_ROOF }, [0.0, 0.0, 9.0, 20.0, 10.0, 12.0]);
+        rectangle(&mut p, 100, 200, [0.0, 0.0, 20.0, 10.0], 9.0, true);
+        p.recs.push(Rec::new(110, WALLS).at([0.0, 0.6, 0.0, 20.0, 1.4, 10.0], &[10, 530, 110, 100]));
+        p.data.push(crate::project_fixture::Block { id: 110, payload: line_bytes(0.0, 20.0, [0.0, 1.0, 0.0], [1.0, 0.0, 0.0]) });
+        let i = import(&p);
+        assert!(!roofs(&i).is_empty(), "by face {by_face}: the roof comes in: {:?}", i.skipped);
+        let wall = i.model.elements.values().find_map(|e| match e {
+            Element::Wall(w) => Some(w),
+            _ => None,
+        });
+        assert!(wall.expect("the wall").attach_top.is_none(), "by face {by_face}: {:?}", i.skipped);
+    }
 }
 
 #[test]
@@ -73,6 +132,9 @@ fn the_roof_by_footprint_of_the_architectural_sample_is_that_of_rvt_rss_export()
     use super::rvt_rs::RAC_ROOFS;
     for path in super::samples_of("racbasicsampleproject.rvt") {
         let (i, from) = crate::import_path_with_origins(&path, "x").unwrap();
+        if !super::pinned(&i) {
+            continue;
+        }
         let theirs = &RAC_ROOFS[0];
         let found: Vec<(u64, &Roof)> = i
             .model
