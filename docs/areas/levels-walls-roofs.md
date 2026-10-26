@@ -84,3 +84,20 @@ spline's points, a circle's centre) are grips that take every one joined there w
 sketch's own ends, middles, crossings and curves as well as visible view-specific detail (`snap::in_sketch`). Floor, Ceiling, Roof and Shaft each start a new one (Boundary
 Line, Sketch Ceiling); Edit Boundary redraws one selected. The Mode panel (Finish, Cancel; Edit Boundary) stands at the
 ribbon's right end.
+
+What the line tools hold to, and don't (`curves.rs`, `draw.rs`, `sketch.rs`). A curve is drawn as chords none further than `FLAT`
+(0.25 mm) from it: a polyline's arcs, a circle, a spline and a fitted spline (a span of a spline is cut by the greatest
+second derivative on it, so a ten metre arch is hundreds of chords), up to `MAX_DRAWN` extra points in all; a polyline whose
+arcs would take more is refused, and a circle past about 27 km of radius is drawn coarser than `FLAT` rather than in more.
+An arc, a circle or an ellipse reaches no further than `MAX_COORD` from the origin, as a wall's arc must; a spline lies inside
+its control points, and a fitted spline is held to its points only, a cubic through them straying a little past. A curve's
+start and end are the points it was given. Offset moves a polyline's lines along themselves and its arcs about their own
+centres and makes each corner where the moved sides cross; it gives nothing where a side would vanish or turn round, or a
+corner is so sharp its mitre would be 50 offsets long, and it does not trim a fold it makes in a concave shape (Revit's
+does); an ellipse or a spline offsets to a fitted spline within 0.05 mm. Fillet on walls keeps their doors and windows
+where they stand and refuses to cut one off, but does not stretch a third wall that ended on the corner. A detail line with
+no style gets Thin Lines by the project's name, else the English one, else the thin black solid style. Of the line tools,
+Revit has default shortcuts for Trim/Extend to Corner (TR), Offset (OF), Fillet (FL), Split (SL) and Detail Line (DL), which
+`corner`, `offset`, `fillet`, `split` and `detail_line` have; it has none for Trim/Extend to a boundary, vertices, Convert
+Spline, Edit Boundary, line patterns and styles or fill patterns, which have none here. Explode Polyline is EX, ours (PX is
+the desktop's Plumbing Fixture).
