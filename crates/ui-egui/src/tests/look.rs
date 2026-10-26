@@ -82,3 +82,22 @@ fn a_click_on_the_floating_options_bar_is_no_click_on_the_view_under_it() {
     click(&mut h, P2(5000.0, 3000.0));
     assert_eq!(ids(&h, "wall").len(), 5);
 }
+
+/// What shows in the gaps between the cards is the view's own ground, so in a dark interface with a light canvas it is paper, not
+/// the interface's dark.
+#[test]
+fn the_ground_under_the_cards_is_the_canvas_in_all_three_looks() {
+    use egui::{Color32, ThemePreference};
+    for (theme, light_canvas, paper) in
+        [(ThemePreference::Light, false, true), (ThemePreference::Dark, false, false), (ThemePreference::Dark, true, true)]
+    {
+        let mut h = app(BOX);
+        h.state_mut().light_canvas = light_canvas;
+        h.ctx.set_theme(theme);
+        h.run();
+        h.run();
+        let ground = h.state().backdrop();
+        assert_eq!(ground == Color32::WHITE, paper, "{theme:?}, light canvas {light_canvas}: {ground:?}");
+        assert_eq!(ground, crate::canvas::color(bimcraft_core::render::PAPER));
+    }
+}

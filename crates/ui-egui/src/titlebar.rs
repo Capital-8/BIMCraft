@@ -53,7 +53,7 @@ impl BimApp {
 /// what is on the bar, so its buttons keep their presses.
 pub(crate) fn drag_area(ui: &Ui, rect: Rect) {
     let ctx = ui.ctx();
-    let r = ui.interact(rect, Id::new("title-bar"), Sense::click_and_drag());
+    let r = ui.interact(rect, Id::new("title-bar"), Sense::CLICK | Sense::DRAG);
     // egui hands a drag that starts on a button to the ground under it: remember whether the press landed on bare ground.
     if ctx.input(|i| i.pointer.any_pressed()) {
         let bare = ctx.viewport(|v| v.hits.click.is_some_and(|w| w.id == r.id));
@@ -170,7 +170,7 @@ pub(crate) fn frame(ui: &mut Ui) {
     top.painter().rect_stroke(w, 0.0, Stroke::new(1.0, pal().border), StrokeKind::Inside);
     let captions = ctx.data(|d| d.get_temp::<Rect>(Id::new(CAPTIONS_AT)));
     for (i, (r, dir, cursor)) in zones(w, EDGE, captions).into_iter().enumerate() {
-        let resp = top.interact(r, Id::new(("window-edge", i)), Sense::drag()).on_hover_cursor(cursor);
+        let resp = top.interact(r, Id::new(("window-edge", i)), Sense::DRAG).on_hover_cursor(cursor);
         if resp.drag_started_by(PointerButton::Primary) {
             ctx.send_viewport_cmd(ViewportCommand::BeginResize(dir));
         }

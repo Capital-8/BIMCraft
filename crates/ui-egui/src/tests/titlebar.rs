@@ -227,3 +227,19 @@ fn settings_can_ask_for_the_systems_title_bar_and_keep_it() {
     std::fs::write(&file, r#"{"system_title_bar": "yes"}"#).unwrap();
     assert!(!crate::settings::system_title_bar_in(&file));
 }
+
+/// A keyboard user tabs through what has a name: the bar's ground and the window's edges are for the pointer (the caption buttons are
+/// the keyboard's), so they're no stops. The panels' resize handles are egui's, thin strips with no name.
+#[test]
+fn the_bars_ground_and_the_windows_edges_are_no_unnamed_tab_stops() {
+    use egui::accesskit::Action;
+    use egui_kittest::kittest::NodeT;
+    let h = own(BOX);
+    for n in h.root().children_recursive() {
+        let ak = n.accesskit_node();
+        if ak.data().supports_action(Action::Focus) && ak.label().is_none() && ak.value().is_none() {
+            let r = n.rect();
+            assert!(r.width().min(r.height()) <= 6.0, "an unnamed stop that is no thin handle: {:?} {r:?}", ak.role());
+        }
+    }
+}

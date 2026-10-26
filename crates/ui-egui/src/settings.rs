@@ -60,7 +60,8 @@ impl Window {
     }
 }
 
-/// Whether the settings file at `path` asks for the system's title bar: the desktop's `main` reads it before the window opens.
+/// Whether the settings file at `path` asks for the system's title bar, as `use_settings` reads it: `main` calls that before the
+/// window opens, and builds the window from `BimApp::system_title_bar`. This reads the file alone, for the tests.
 pub fn system_title_bar_in(path: &Path) -> bool {
     read(path).and_then(|v| v["system_title_bar"].as_bool()).unwrap_or(false)
 }
