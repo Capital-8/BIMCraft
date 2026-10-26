@@ -2443,6 +2443,11 @@ mass {"boundary": [[1000, 1000], [3000, 1000], [3000, 2000], [1000, 2000]], "nam
     // Wide enough for every tab's tools in the longest language: a narrower window hands some over to their panel's list.
     h.set_size(vec2(1800.0, 900.0));
     h.run();
+    // A detail group to place and repeat, so the detail tools' Options Bars have one to name.
+    let s = &mut h.state_mut().session;
+    let line = s.execute("detail_line", &json!({"start": [1000, 1000], "end": [2000, 1000]})).unwrap();
+    s.execute("create_group", &json!({"ids": [line["id"]]})).unwrap();
+    h.run();
     // The probe finds what it looks for: in English, the same labels are all English.
     assert!(english(&h, Lang::Spanish).contains(&"Architecture".to_string()));
     for l in [Lang::Portuguese, Lang::Spanish, Lang::Chinese] {
@@ -2580,9 +2585,45 @@ mass {"boundary": [[1000, 1000], [3000, 1000], [3000, 2000], [1000, 2000]], "nam
         shortcut(&mut h, "VT");
         missed.extend(english(&h, l));
         press(&mut h, tr("Close"));
+        // The detail tools' Options Bars, with a group to place; Linework with its choices.
+        for tool in ["Detail Group", "Repeating Detail", "Revision Cloud", "Insulation"] {
+            key(&mut h, Key::Escape);
+            press(&mut h, tr("Annotate"));
+            press(&mut h, tr(tool));
+            missed.extend(english(&h, l));
+        }
+        key(&mut h, Key::Escape);
+        topmost(&mut h, tr("Modify"));
+        press(&mut h, tr("Linework"));
+        missed.extend(english(&h, l));
+        key(&mut h, Key::Escape);
+        // Manage > Fill Patterns on both tabs, with a pattern's families; Line Styles on both; Edit Type of a region being sketched.
+        press(&mut h, tr("Manage"));
+        press(&mut h, tr("Fill Patterns"));
+        missed.extend(english(&h, l));
+        topmost(&mut h, tr("Patterns"));
+        press(&mut h, &tr("{}: Edit Lines").replace("{}", "Sand"));
+        missed.extend(english(&h, l));
+        press(&mut h, tr("Cancel"));
+        press(&mut h, tr("Line Styles"));
+        missed.extend(english(&h, l));
+        topmost(&mut h, tr("Patterns"));
+        missed.extend(english(&h, l));
+        press(&mut h, tr("Cancel"));
+        shortcut(&mut h, "FR");
+        press(&mut h, tr("Edit Type"));
+        missed.extend(english(&h, l));
+        press(&mut h, tr("Cancel"));
+        press(&mut h, tr("Cancel Edit Mode"));
         click(&mut h, P2(5000.0, 0.0));
         missed.extend(english(&h, l));
         key(&mut h, Key::Escape);
+        // The names of the project's own patterns, types and styles are in the project's language, English here, whatever the
+        // interface speaks (`language.rs` knows them, for a project that starts in another).
+        let m = &h.state().session.model;
+        let own: Vec<&String> =
+            m.fill_patterns.keys().chain(m.line_patterns.keys()).chain(m.region_types.keys()).chain(m.line_styles.keys()).collect();
+        missed.retain(|s| !own.contains(&s));
         missed.sort();
         missed.dedup();
         assert!(missed.is_empty(), "{l:?}: left in English: {missed:?}");
@@ -5085,6 +5126,7 @@ mod draw;
 mod fills;
 mod fonts;
 mod gpu;
+mod groups;
 mod light_canvas;
 mod lines;
 mod lineweights;

@@ -374,3 +374,78 @@ fn the_line_styles_draft_refuses_blank_and_repeated_names_and_a_project_that_cha
     assert!(h.state().line_styles_dialog.is_some() && said(&h, "changed"));
     assert!(h.state().session.model.line_styles.contains_key("Agent Style") && !h.state().session.model.line_styles.contains_key("Fresh"));
 }
+
+#[test]
+fn a_duplicate_made_in_edit_type_goes_to_the_regions_selected_and_not_to_the_others_of_the_type() {
+    let square = |x: i32| {
+        format!(
+            "[[[{x},1000],[{},1000]],[[{},1000],[{},2000]],[[{},2000],[{x},2000]],[[{x},2000],[{x},1000]]]",
+            x + 900,
+            x + 900,
+            x + 900,
+            x + 900
+        )
+    };
+    let mut h = app(&format!(
+        "{BOX}\nfilled_region {{\"sketch\": {}, \"type\": \"Sand\"}}\nfilled_region {{\"sketch\": {}, \"type\": \"Sand\"}}\nfilled_region {{\"sketch\": {}, \"type\": \"Sand\"}}\nfilled_region {{\"sketch\": {}, \"type\": \"Crosshatch\"}}",
+        square(1000),
+        square(2500),
+        square(4000),
+        square(5500)
+    ));
+    let regions = ids(&h, "region");
+    let type_of = |h: &Harness<BimApp>, id: Id| field(h, id, "type");
+    // Two of the three of one type selected: both go to the copy, the third and the other type stay.
+    h.state_mut().selection = vec![regions[0], regions[1]];
+    h.run();
+    press(&mut h, "Edit Type");
+    press(&mut h, "Duplicate");
+    type_into(&mut h, "Type Name", "Sand Two");
+    press(&mut h, "OK");
+    assert!(h.state().fill_patterns_dialog.is_none(), "{}", h.state().status.text);
+    let kinds: Vec<_> = regions.iter().map(|r| type_of(&h, *r)).collect();
+    assert_eq!(kinds, [json!("Sand Two"), json!("Sand Two"), json!("Sand"), json!("Crosshatch")]);
+    // One selected: it alone.
+    h.state_mut().selection = vec![regions[2]];
+    h.run();
+    press(&mut h, "Edit Type");
+    press(&mut h, "Duplicate");
+    type_into(&mut h, "Type Name", "Sand Three");
+    press(&mut h, "OK");
+    let kinds: Vec<_> = regions.iter().map(|r| type_of(&h, *r)).collect();
+    assert_eq!(kinds, [json!("Sand Two"), json!("Sand Two"), json!("Sand Three"), json!("Crosshatch")]);
+}
+
+#[test]
+fn an_apply_that_fails_part_way_does_nothing_and_says_why_inside_the_dialog() {
+    let mut h = app(&format!(
+        "{BOX}\nfilled_region {{\"sketch\": [[[1000,1000],[2000,1000]],[[2000,1000],[2000,2000]],[[2000,2000],[1000,1000]]], \"type\": \"Sand\"}}"
+    ));
+    let before = h.state().session.model.to_json().unwrap();
+    fill_patterns(&mut h);
+    // The first command of the draft would do; the last (deleting the type a region is of) is refused.
+    patterns_tab(&mut h);
+    type_into(&mut h, "Crosshatch: Name", "Grid");
+    press(&mut h, "Region Types");
+    press(&mut h, "Sand: Delete");
+    let steps = h.state().session.history().len();
+    press(&mut h, "OK");
+    assert!(h.state().fill_patterns_dialog.is_some(), "it stays open to fix it");
+    assert!(said(&h, "filled region"), "and says why");
+    assert_eq!(h.state().session.model.to_json().unwrap(), before, "the rename that came first is undone");
+    assert_eq!(h.state().session.history().len(), steps, "and no step is left");
+}
+
+#[test]
+fn the_detail_panels_create_group_button_groups_what_is_selected() {
+    let mut h = app(&format!("{BOX}\ndetail_line {{\"start\": [1000, 1000], \"end\": [3000, 1000]}}"));
+    press(&mut h, "Annotate");
+    // Nothing selected: it says what to select, and makes nothing.
+    press(&mut h, "Create Group");
+    assert!(h.state().status.error && ids(&h, "detailgroup").is_empty());
+    click(&mut h, P2(2000.0, 1000.0));
+    press(&mut h, "Annotate");
+    press(&mut h, "Create Group");
+    assert_eq!((ids(&h, "detailgroup").len(), ids(&h, "line").len()), (1, 0));
+    assert_eq!(h.state().selection, ids(&h, "detailgroup"));
+}

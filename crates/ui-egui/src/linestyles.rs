@@ -9,8 +9,8 @@ use bimcraft_core::lines::{LinePattern, LineStyle, MAX_SEGMENT, MAX_SEGMENTS, MI
 use bimcraft_core::model::Model;
 use bimcraft_core::pen::{MAX_PEN, Pen};
 use egui::{
-    Align, Button, Color32, ComboBox, Context, DragValue, Grid, Id as UiId, Layout, Modal, RichText, ScrollArea, Sense, Stroke, TextEdit,
-    Ui, WidgetInfo, WidgetType, vec2,
+    Align, Button, ComboBox, Context, DragValue, Grid, Id as UiId, Layout, Modal, RichText, ScrollArea, Sense, Stroke, TextEdit, Ui,
+    WidgetInfo, WidgetType, vec2,
 };
 use serde_json::{Value, json};
 
@@ -172,10 +172,9 @@ fn styles_tab(ui: &mut Ui, d: &mut LineStylesDialog) {
                 let who = s.name.clone();
                 name_field(ui, &mut s.name, tf("{}: Name", &[&who]));
                 pen_field(ui, &mut s.pen, tf("{}: Line Weight", &[&who]));
-                let mut c = Color32::from_rgb(s.color[0], s.color[1], s.color[2]);
-                let r = ui.color_edit_button_srgba(&mut c);
+                // Red, green and blue only: the alpha slider of an RGBA button premultiplies them and darkens the colour.
+                let r = ui.color_edit_button_srgb(&mut s.color);
                 r.widget_info(|| WidgetInfo::labeled(WidgetType::ColorButton, true, tf("{}: Colour", &[&who])));
-                s.color = [c.r(), c.g(), c.b()];
                 let shown =
                     s.pattern.and_then(|p| names.iter().find(|(i, _)| *i == p)).map_or_else(|| t(SOLID).to_string(), |(_, n)| n.clone());
                 let label = tf("{}: Pattern", &[&who]);

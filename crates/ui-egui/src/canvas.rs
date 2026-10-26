@@ -1054,7 +1054,9 @@ impl BimApp {
                 _ => &[],
             };
             let shift = ui.input(|i| i.modifiers.shift);
-            let cursor = local.map(|q| self.snap(&model, level, &view, q, from, shift).at);
+            // The snapped cursor is for a grip being dragged and for what a sketch tool shows; Modify's idle frames need none.
+            let wanted = sk.drag.is_some() || matches!(self.tool, Tool::SketchLine(_));
+            let cursor = local.filter(|_| wanted).map(|q| self.snap(&model, level, &view, q, from, shift).at);
             // Trim/Extend's and Fillet Arc's picks so far, lit as the lines picked are.
             let lit: Vec<usize> = self
                 .drawing
@@ -1113,10 +1115,13 @@ impl BimApp {
             }
         }
         self.grip_overlay(ui, &model, &view, rect, level, &d);
-        let cursor = ui
-            .input(|i| i.pointer.latest_pos())
+        // Where the cursor snaps is worked out only while a grip is held to it.
+        let cursor = self
+            .drawing
+            .grip
+            .and_then(|_| ui.input(|i| i.pointer.latest_pos()))
             .map(|q| self.snap(&model, level, &view, (q.x - rect.min.x, q.y - rect.min.y), &[], false).at);
-        self.line_grip_overlay(&ui.painter_at(rect), rect, &view, cursor.filter(|_| self.drawing.grip.is_some()));
+        self.line_grip_overlay(&ui.painter_at(rect), rect, &view, cursor);
         self.temporary_dimension(ui, &model, &view, rect);
         self.context_menu(&response);
         self.nav_bar(ui, rect, key);
@@ -2038,6 +2043,7 @@ impl BimApp {
     }
 
     /// Align on a pattern: element `id`'s pattern moved across so its `line` lies on `reference`.
+    // Integrator: this geometry belongs in the core as `Model::align_pattern` (G3 makes it); call that through `modify` here.
     fn align_pattern(&mut self, m: &Model, reference: (P2, P2), id: Id, line: (P2, P2)) {
         if !geom::parallel(reference.0, reference.1, line.0, line.1) {
             self.status = Status { text: t("align: the lines aren't parallel").into(), error: true };
