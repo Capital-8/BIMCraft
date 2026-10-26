@@ -262,8 +262,7 @@ impl Curve {
                 let u = knot_vector(control.len(), knots.as_deref());
                 let mut spans: Vec<f64> = u.iter().copied().filter(|k| *k >= t0 && *k <= t1).collect();
                 spans.dedup();
-                let per = (MAX_DRAWN / spans.len().max(1)).clamp(2, 32);
-                for w in spans.windows(2) {
+                for (w, per) in spans.windows(2).zip(spline_chords(control, &u, &spans)) {
                     let skip = usize::from(!out.is_empty());
                     out.extend(
                         (0..=per).skip(skip).map(|k| w[0] + (w[1] - w[0]) * k as f64 / per as f64).map(|t| (t, de_boor(control, &u, t))),
@@ -272,8 +271,7 @@ impl Curve {
             }
             Curve::Fit { points, tangents } => {
                 let Some(c) = Cubic::through(points, *tangents) else { return points.iter().map(|p| (0.0, *p)).collect() };
-                let per = (MAX_DRAWN / c.t.len().max(1)).clamp(2, 32);
-                for w in c.t.windows(2) {
+                for (w, per) in c.t.windows(2).zip(c.chords()) {
                     let skip = usize::from(!out.is_empty());
                     out.extend((0..=per).skip(skip).map(|k| w[0] + (w[1] - w[0]) * k as f64 / per as f64).map(|t| (t, c.at(t))));
                 }
@@ -302,12 +300,15 @@ impl Curve {
             }
             Curve::Spline { control, knots } => {
                 let (t0, t1) = self.domain();
-                let mut spans: Vec<f64> =
-                    knot_vector(control.len(), knots.as_deref()).into_iter().filter(|k| *k >= t0 && *k <= t1).collect();
+                let u = knot_vector(control.len(), knots.as_deref());
+                let mut spans: Vec<f64> = u.iter().copied().filter(|k| *k >= t0 && *k <= t1).collect();
                 spans.dedup();
-                spans.len().saturating_sub(1) * (MAX_DRAWN / spans.len().max(1)).clamp(2, 32) + 1
+                1 + spline_chords(control, &u, &spans).iter().sum::<usize>()
             }
-            Curve::Fit { points, .. } => points.len().saturating_sub(1) * (MAX_DRAWN / points.len().max(1)).clamp(2, 32) + 1,
+            Curve::Fit { points, tangents } => match Cubic::through(points, *tangents) {
+                Some(c) => 1 + c.chords().iter().sum::<usize>(),
+                None => points.len(),
+            },
         }
     }
 
@@ -1140,6 +1141,51 @@ fn split_spline(control: &[P2], u: &[f64], t: f64) -> Option<(Curve, Curve)> {
     Some((Curve::Spline { control: left, knots: Some(left_knots) }, Curve::Spline { control: right, knots: Some(right_knots) }))
 }
 
+/// How many chords a span of length `h` of a curve whose second derivative is nowhere more than `m` is cut into, so that
+/// none strays more than [`FLAT`] from it: a chord of length d strays at most d²·m/8.
+fn span_chords(h: f64, m: f64) -> usize {
+    ((h * (m / (8.0 * FLAT)).sqrt()).ceil().max(1.0) as usize).min(MAX_DRAWN)
+}
+
+/// Chords of each span held to [`MAX_DRAWN`] in all, each still at least one: past it the curve is drawn coarser than FLAT.
+fn within_budget(mut counts: Vec<usize>) -> Vec<usize> {
+    let total: usize = counts.iter().sum();
+    if total > MAX_DRAWN {
+        counts.iter_mut().for_each(|n| *n = (*n * MAX_DRAWN / total).max(1));
+    }
+    counts
+}
+
+/// How many chords each span (between `spans`, knots in turn) of the B-spline of `control` over `u` is cut into: see
+/// [`span_chords`], with the greatest second derivative the control points of the span allow, which are those of the second
+/// derivative's B-spline (Piegl and Tiller, *The NURBS Book*, 3.3), where it is the same as a convex hull.
+fn spline_chords(control: &[P2], u: &[f64], spans: &[f64]) -> Vec<usize> {
+    let (n, p) = (control.len(), degree_of(control.len(), u));
+    let count = spans.len().saturating_sub(1);
+    if p < 2 || u.len() < n + p + 1 {
+        // A polyline through its control points, or a spline that can't be worked: straight.
+        return vec![1; count];
+    }
+    // The first derivative's control points, then the second's (a repeated knot makes its term nothing).
+    let first = |i: usize| {
+        let den = u[i + p + 1] - u[i + 1];
+        if den > 1e-300 { (control[i + 1] - control[i]) * (p as f64 / den) } else { P2(0.0, 0.0) }
+    };
+    let second = |i: usize| {
+        let den = u[i + p + 1] - u[i + 2];
+        if den > 1e-300 { ((first(i + 1) - first(i)) * ((p - 1) as f64 / den)).length() } else { 0.0 }
+    };
+    let wanted = spans.windows(2).map(|w| {
+        // The span as de Boor's algorithm finds it, and the second derivative's control points that reach it.
+        let mut k = p;
+        while k + 1 < n && u[k + 1] <= w[0] {
+            k += 1;
+        }
+        span_chords(w[1] - w[0], (k - p..=k - 2).map(second).fold(0.0, f64::max))
+    });
+    within_budget(wanted.collect())
+}
+
 /// Each point's distance along the points from the first: a fitted spline's parameters.
 fn chords(points: &[P2]) -> Vec<f64> {
     let mut t = 0.0;
@@ -1212,6 +1258,13 @@ impl Cubic {
         m.iter().all(|q| q.is_finite()).then(|| Cubic { t, p: points.to_vec(), m })
     }
 
+    /// How many chords each of its spans is cut into: its second derivative is linear along a span, so none is further than
+    /// d²·m/8 from it, d the chord's length and m the greater second derivative at the span's ends.
+    fn chords(&self) -> Vec<usize> {
+        let wanted = self.t.windows(2).enumerate().map(|(i, w)| span_chords(w[1] - w[0], self.m[i].length().max(self.m[i + 1].length())));
+        within_budget(wanted.collect())
+    }
+
     fn piece(&self, s: f64) -> usize {
         let n = self.t.len();
         self.t.iter().skip(1).position(|&k| s <= k).unwrap_or(n.saturating_sub(2)).min(n.saturating_sub(2))
@@ -1259,10 +1312,19 @@ fn refit_with(truth: &dyn Fn(f64) -> P2, range: (f64, f64), mut points: Vec<P2>,
         let drawn = fit.points();
         // A sample is off the fit by how far it is from the chords drawn near it: those of its own span of the fit and the
         // two either side (all of them, for each sample, was the cost of this: 64 passes of 257 samples over every chord).
-        let per = (drawn.len().saturating_sub(1) / points.len().saturating_sub(1).max(1)).max(1);
+        // `first[i]` is where the i-th point of the fit falls among the points drawn, a span having the chords it needs.
+        let chords = Cubic::through(&points, tangents).map_or_else(|| vec![1; points.len().saturating_sub(1)], |c| c.chords());
+        let first: Vec<usize> = std::iter::once(0)
+            .chain(chords.iter().scan(0, |at, n| {
+                *at += n;
+                Some(*at)
+            }))
+            .collect();
+        let last = drawn.len().saturating_sub(1);
         let off = |s: f64, q: P2| {
             let span = along.partition_point(|a| *a <= s).clamp(1, points.len().max(2) - 1) - 1;
-            let (from, to) = (span.saturating_sub(2) * per, ((span + 3) * per).min(drawn.len().saturating_sub(1)));
+            let (from, to) =
+                (first.get(span.saturating_sub(2)).copied().unwrap_or(0), first.get(span + 3).copied().unwrap_or(last).min(last));
             drawn.get(from..=to).unwrap_or_default().windows(2).map(|w| geom::dist_to_segment(q, w[0], w[1])).fold(f64::INFINITY, f64::min)
         };
         let Some((s, q, d)) = samples.iter().map(|(s, q)| (*s, *q, off(*s, *q))).max_by(|a, b| a.2.total_cmp(&b.2)) else { break };
@@ -2122,6 +2184,30 @@ mod tests {
         for c in shapes {
             assert_eq!(c.drawn_len(), c.points().len(), "{:?}", c.kind());
         }
+    }
+
+    #[test]
+    fn a_spline_is_drawn_within_flat_of_itself_however_big_a_span_is() {
+        // A ten metre arch in one span: 32 chords of it sagged about 7 mm.
+        let arch = Curve::Spline { control: vec![P2(0.0, 0.0), P2(0.0, 5000.0), P2(10_000.0, 5000.0), P2(10_000.0, 0.0)], knots: None };
+        let through = Curve::Fit {
+            points: vec![P2(0.0, 0.0), P2(5000.0, 4000.0), P2(10_000.0, 0.0)],
+            tangents: [Some(P2(0.0, 1.0)), Some(P2(0.0, -1.0))],
+        };
+        let wiggly =
+            Curve::Spline { control: (0..40).map(|i| P2(i as f64 * 700.0, if i % 3 == 0 { 0.0 } else { 900.0 })).collect(), knots: None };
+        for c in [arch, through, wiggly] {
+            let samples = c.samples();
+            let worst = samples.windows(2).map(|w| c.at((w[0].0 + w[1].0) / 2.0).dist((w[0].1 + w[1].1) * 0.5)).fold(0.0, f64::max);
+            assert!(worst <= FLAT + 1e-9, "{}: a chord's middle is {worst} mm from the curve", c.kind());
+            assert!(samples.len() <= MAX_DRAWN + MAX_POINTS && c.drawn_len() == samples.len());
+        }
+        // A straight run of control points, or a polyline over its own knots, is not cut up for nothing.
+        let flat = Curve::Spline { control: vec![P2(0.0, 0.0), P2(1000.0, 0.0), P2(2000.0, 0.0), P2(3000.0, 0.0)], knots: None };
+        assert_eq!(flat.points().len(), 2, "{:?}", flat.points());
+        let polyline =
+            Curve::Spline { control: vec![P2(0.0, 0.0), P2(1000.0, 1000.0), P2(2000.0, 0.0)], knots: Some(vec![0.0, 0.0, 0.5, 1.0, 1.0]) };
+        assert_eq!(polyline.points().len(), 3);
     }
 
     #[test]
