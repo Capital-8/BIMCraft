@@ -2150,6 +2150,28 @@ mod tests {
     }
 
     #[test]
+    fn a_spline_of_four_hundred_points_splits_converts_and_offsets_at_once() {
+        // A wavy line through 400 points: each refit used to look at every chord for each of 257 samples, 64 times over.
+        let pts: Vec<P2> =
+            (0..400).map(|i| P2(i as f64 * 400.0, 900.0 * ((i as f64) * 0.7).sin() + 300.0 * ((i as f64) * 2.9).cos())).collect();
+        let fit = Curve::Fit { points: pts.clone(), tangents: [None, None] };
+        let control = Curve::Spline { control: pts, knots: None };
+        let t = std::time::Instant::now();
+        let (t0, t1) = fit.domain();
+        let Some((a, Some(b))) = fit.split(t0 + (t1 - t0) * 0.37) else { panic!("split") };
+        let split = t.elapsed().as_secs_f64();
+        let t = std::time::Instant::now();
+        let converted = control.converted();
+        let convert = t.elapsed().as_secs_f64();
+        let t = std::time::Instant::now();
+        let off = offset_fit(&fit, 150.0);
+        let offset = t.elapsed().as_secs_f64();
+        eprintln!("split {split:.3} s, convert {convert:.3} s, offset {offset:.3} s");
+        assert!(a.check("a").is_ok() && b.check("b").is_ok() && converted.is_some() && off.is_some());
+        assert!(split < 1.0 && convert < 1.0 && offset < 1.0, "{split} {convert} {offset}");
+    }
+
+    #[test]
     fn a_spline_over_knots_given_runs_over_the_degree_they_give_it() {
         // Three control points over five knots are a degree-one spline: the polyline through them, its knot at the middle one.
         let s =
