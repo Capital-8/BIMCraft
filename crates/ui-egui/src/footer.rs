@@ -325,82 +325,93 @@ impl BimApp {
             return;
         }
         let temp = self.temporary().cloned().unwrap_or_default();
-        let bar = Frame::new().fill(pal().bar).inner_margin(Margin::symmetric(8, 2)).stroke(Stroke::new(1.0, pal().border));
-        egui::Panel::bottom(egui::Id::new(("view-control", self.sheet))).frame(bar).show(ui, |ui| {
-            ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = 2.0;
-                match (self.graphic_view(), self.sheet == Sheet::View3D) {
-                    (Some(view), false) => self.scale_and_detail(ui, &view),
-                    (_, true) => {
-                        let now = self.graphics_shown().style;
-                        let tip = "Visual Style: how the 3D view draws surfaces: Shaded, Hidden Line (WF, HL and SD set them) or Wireframe";
-                        let r = menu_button(ui, "Visual Style", now.name(), tip, self.controlled_by(Group::Style).as_deref());
-                        Popup::menu(&r).show(|ui| {
-                            for v in VisualStyle::ALL {
-                                if ui.selectable_label(now == v, t(v.name())).clicked() {
-                                    self.set_visual_style(v);
+        // A small card in the view's corner, floating; a bar along its foot in the Compact layout.
+        let card = crate::style::card([true, false, false, true]).inner_margin(Margin::symmetric(6, 2));
+        let compact = crate::style::compact();
+        let (panel, card) = match compact {
+            true => (card.outer_margin(0), Frame::NONE),
+            false => (Frame::NONE, card),
+        };
+        egui::Panel::bottom(egui::Id::new(("view-control", self.sheet))).frame(panel).show_separator_line(false).show(ui, |ui| {
+            card.show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 2.0;
+                    match (self.graphic_view(), self.sheet == Sheet::View3D) {
+                        (Some(view), false) => self.scale_and_detail(ui, &view),
+                        (_, true) => {
+                            let now = self.graphics_shown().style;
+                            let tip =
+                                "Visual Style: how the 3D view draws surfaces: Shaded, Hidden Line (WF, HL and SD set them) or Wireframe";
+                            let r = menu_button(ui, "Visual Style", now.name(), tip, self.controlled_by(Group::Style).as_deref());
+                            Popup::menu(&r).show(|ui| {
+                                for v in VisualStyle::ALL {
+                                    if ui.selectable_label(now == v, t(v.name())).clicked() {
+                                        self.set_visual_style(v);
+                                    }
+                                }
+                            });
+                            ui.separator();
+                        }
+                        _ => {}
+                    }
+                    let tip =
+                        "Temporary Hide/Isolate: hide or isolate what is selected, or its categories, in this view until you reset it";
+                    let r = small_button(ui, Icon::TempHide, "Temporary Hide/Isolate", temp.hides(), tip);
+                    // Revit greys out what needs a selection until there is one.
+                    let picked = !self.drawn_selection(&self.session.model).is_empty();
+                    Popup::menu(&r).show(|ui| {
+                        for (label, hide, category) in [
+                            ("Hide Element (HH)", true, false),
+                            ("Hide Category (HC)", true, true),
+                            ("Isolate Element (HI)", false, false),
+                            ("Isolate Category (IC)", false, true),
+                        ] {
+                            if ui.add_enabled(picked, egui::Button::new(t(label))).clicked() {
+                                match hide {
+                                    true => self.temp_hide(category),
+                                    false => self.temp_isolate(category),
                                 }
                             }
-                        });
+                        }
                         ui.separator();
+                        if ui.add_enabled(temp.hides(), egui::Button::new(t("Apply Hide/Isolate to View"))).clicked() {
+                            self.temp_apply();
+                        }
+                        if ui.add_enabled(temp.hides() || temp.reveal, egui::Button::new(t("Reset Temporary Hide/Isolate (HR)"))).clicked()
+                        {
+                            self.temp_reset();
+                        }
+                    });
+                    let tip = "Reveal Hidden Elements (RH): draw what this view hides in magenta; again to hide it";
+                    if small_button(ui, Icon::Reveal, "Reveal Hidden Elements", temp.reveal, tip).clicked() {
+                        self.temp_reveal();
                     }
-                    _ => {}
-                }
-                let tip = "Temporary Hide/Isolate: hide or isolate what is selected, or its categories, in this view until you reset it";
-                let r = small_button(ui, Icon::TempHide, "Temporary Hide/Isolate", temp.hides(), tip);
-                // Revit greys out what needs a selection until there is one.
-                let picked = !self.drawn_selection(&self.session.model).is_empty();
-                Popup::menu(&r).show(|ui| {
-                    for (label, hide, category) in [
-                        ("Hide Element (HH)", true, false),
-                        ("Hide Category (HC)", true, true),
-                        ("Isolate Element (HI)", false, false),
-                        ("Isolate Category (IC)", false, true),
-                    ] {
-                        if ui.add_enabled(picked, egui::Button::new(t(label))).clicked() {
-                            match hide {
-                                true => self.temp_hide(category),
-                                false => self.temp_isolate(category),
-                            }
+                    // Only where there is a scan to show: the project's or a link's. A command drops a scan nothing places, so one held
+                    // is one placed.
+                    if !self.linked_model().clouds.is_empty() {
+                        let filled = self.scans_filled();
+                        let set_by = self.controlled_by(Group::Categories);
+                        let tip = "High Contrast Point Clouds: draw this view's scans in one strong colour, so what they show reads; \
+                                   again for their own colours. A scan given a colour of its own in Visibility/Graphics keeps it.";
+                        let r = ui
+                            .add_enabled_ui(set_by.is_none(), |ui| {
+                                small_button(ui, Icon::PointCloud, "High Contrast Point Clouds", filled, tip)
+                            })
+                            .inner;
+                        let r = match set_by {
+                            Some(template) => r.on_disabled_hover_text(controlled_note(&template)),
+                            None => r,
+                        };
+                        if r.clicked() {
+                            self.toggle_scan_contrast();
                         }
                     }
-                    ui.separator();
-                    if ui.add_enabled(temp.hides(), egui::Button::new(t("Apply Hide/Isolate to View"))).clicked() {
-                        self.temp_apply();
+                    if temp.hides() || temp.reveal {
+                        ui.add_space(8.0);
+                        let note = if temp.reveal && !temp.hides() { "Revealing hidden elements" } else { "Temporary Hide/Isolate" };
+                        ui.label(RichText::new(tf("{} (HR resets)", &[t(note)])).color(FRAME));
                     }
-                    if ui.add_enabled(temp.hides() || temp.reveal, egui::Button::new(t("Reset Temporary Hide/Isolate (HR)"))).clicked() {
-                        self.temp_reset();
-                    }
-                });
-                let tip = "Reveal Hidden Elements (RH): draw what this view hides in magenta; again to hide it";
-                if small_button(ui, Icon::Reveal, "Reveal Hidden Elements", temp.reveal, tip).clicked() {
-                    self.temp_reveal();
-                }
-                // Only where there is a scan to show: the project's or a link's. A command drops a scan nothing places, so one held
-                // is one placed.
-                if !self.linked_model().clouds.is_empty() {
-                    let filled = self.scans_filled();
-                    let set_by = self.controlled_by(Group::Categories);
-                    let tip = "High Contrast Point Clouds: draw this view's scans in one strong colour, so what they show reads; \
-                               again for their own colours. A scan given a colour of its own in Visibility/Graphics keeps it.";
-                    let r = ui
-                        .add_enabled_ui(set_by.is_none(), |ui| {
-                            small_button(ui, Icon::PointCloud, "High Contrast Point Clouds", filled, tip)
-                        })
-                        .inner;
-                    let r = match set_by {
-                        Some(template) => r.on_disabled_hover_text(controlled_note(&template)),
-                        None => r,
-                    };
-                    if r.clicked() {
-                        self.toggle_scan_contrast();
-                    }
-                }
-                if temp.hides() || temp.reveal {
-                    ui.add_space(8.0);
-                    let note = if temp.reveal && !temp.hides() { "Revealing hidden elements" } else { "Temporary Hide/Isolate" };
-                    ui.label(RichText::new(tf("{} (HR resets)", &[t(note)])).color(FRAME));
-                }
+                })
             });
         });
     }
