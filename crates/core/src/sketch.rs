@@ -328,13 +328,18 @@ pub fn solve(lines: &[SketchLine]) -> Result<Profile, Vec<Problem>> {
     let mut pieces: Vec<(Line, usize)> = Vec::with_capacity(count);
     let mut ends: Vec<[usize; 2]> = Vec::with_capacity(count);
     for (i, l) in lines.iter().enumerate() {
-        let pts = l.points();
-        // A bend a line was drawn with that is shorter than the pieces can tell apart: say where, to be drawn as one corner.
-        if let (true, Some(w)) = (l.curve.is_poly(), pts.windows(2).find(|w| w[0].dist(w[1]) <= TOL)) {
-            let why = format!("it has two points less than {TOL} mm apart, at [{}, {}]: draw them as one", w[0].0.round(), w[0].1.round());
+        // Two corners of a polyline a millimetre apart or less: said where they are, to be drawn as one. (The chords of a small
+        // arc or curve that fall that close are only left out.)
+        if let Curve::Poly { points: corners, closed, .. } = &l.curve
+            && let Some((a, _)) = geom::ring_edges(corners)
+                .take(if *closed { corners.len() } else { corners.len().saturating_sub(1) })
+                .find(|(a, b)| a.dist(*b) <= TOL)
+        {
+            let why = format!("it has two points less than {TOL} mm apart, at [{}, {}]: draw them as one", a.0.round(), a.1.round());
             problems.push(Problem::Malformed { line: i, why });
             continue;
         }
+        let pts = l.points();
         let nodes: Vec<usize> = pts.iter().map(|p| welder.weld(*p)).collect();
         for (w, n) in pts.windows(2).zip(nodes.windows(2)) {
             // A chord of a small curve that welds to a point is no piece.
@@ -399,19 +404,19 @@ pub fn solve(lines: &[SketchLine]) -> Result<Profile, Vec<Problem>> {
     }
     let at_point = |n: usize| &at[first[n]..first[n + 1]];
     let (mut opens, mut branches) = (0, 0);
-    for n in 0..points.len() {
+    for (n, &point) in points.iter().enumerate() {
         match at_point(n) {
             [] | [_, _] => {}
             &[piece] if opens <= MAX_PROBLEMS => {
                 opens += 1;
-                problems.push(Problem::Open { line: pieces[piece].1, at: points[n] });
+                problems.push(Problem::Open { line: pieces[piece].1, at: point });
             }
             &[_] => {}
             ps if branches <= MAX_PROBLEMS => {
                 branches += 1;
                 let mut ls: Vec<usize> = ps.iter().map(|&p| pieces[p].1).collect();
                 ls.sort_unstable();
-                problems.push(Problem::Branch { lines: ls, at: points[n] });
+                problems.push(Problem::Branch { lines: ls, at: point });
             }
             _ => {}
         }
@@ -544,19 +549,16 @@ pub fn check(who: &str, lines: &[SketchLine]) -> Result<(), String> {
     Ok(())
 }
 
-/// The rings an element draws its outline with, each with what to call it: a floor's, a ceiling's or a roof's boundary and its
-/// openings or courtyards, a shaft's boundary.
-fn rings_of(e: &Element) -> Vec<(String, &[P2])> {
-    let (boundary, holes, what): (&[P2], &[Vec<P2>], &str) = match e {
-        Element::Floor(f) => (&f.boundary, &f.openings, "opening"),
-        Element::Ceiling(c) => (&c.boundary, &c.openings, "opening"),
-        Element::Roof(r) if r.extrusion.is_none() => (&r.boundary, &r.courtyards, "courtyard"),
-        Element::Shaft(s) => (&s.boundary, &[], ""),
-        _ => return Vec::new(),
-    };
-    std::iter::once(("boundary".to_string(), boundary))
-        .chain(holes.iter().enumerate().map(|(i, h)| (format!("{what} {i}"), h.as_slice())))
-        .collect()
+/// The rings an element draws its outline with: a floor's, a ceiling's or a roof's boundary and its openings or courtyards
+/// (what to call them), a shaft's boundary.
+fn rings_of(e: &Element) -> Option<(&[P2], &[Vec<P2>], &'static str)> {
+    match e {
+        Element::Floor(f) => Some((&f.boundary, &f.openings, "opening")),
+        Element::Ceiling(c) => Some((&c.boundary, &c.openings, "opening")),
+        Element::Roof(r) if r.extrusion.is_none() => Some((&r.boundary, &r.courtyards, "courtyard")),
+        Element::Shaft(s) => Some((&s.boundary, &[], "")),
+        _ => None,
+    }
 }
 
 impl Model {
@@ -568,11 +570,13 @@ impl Model {
     /// that is an undo step, but Insert from File.
     pub fn check_edits(&self, before: &Model) -> Result<(), String> {
         for (&id, e) in &self.elements {
-            let rings = rings_of(e);
-            if rings.is_empty() || before.elements.get(id).is_some_and(|b| rings_of(b) == rings) {
+            let Some((boundary, holes, what)) = rings_of(e) else { continue };
+            if before.elements.get(id).and_then(rings_of).is_some_and(|b| b == (boundary, holes, what)) {
                 continue;
             }
-            for (what, ring) in rings {
+            let rings = std::iter::once(("boundary".to_string(), boundary))
+                .chain(holes.iter().enumerate().map(|(i, h)| (format!("{what} {i}"), h.as_slice())));
+            for (name, ring) in rings {
                 // A ring of fewer than three points, or too many, or one of points that aren't numbers in range, is
                 // `Model::check`'s to refuse.
                 let numbers = ring.iter().all(|p| p.is_finite() && p.0.abs() <= MAX_COORD && p.1.abs() <= MAX_COORD);
@@ -583,7 +587,7 @@ impl Model {
                     && !problems.iter().all(|p| matches!(p, Problem::NoArea { .. }))
                 {
                     return Err(format!(
-                        "{} {id}: its {what} isn't a simple outline: {}; redraw it with `edit_boundary`",
+                        "{} {id}: its {name} isn't a simple outline: {}; redraw it with `edit_boundary`",
                         e.category(),
                         say(&problems, &|i| format!("edge {i}"))
                     ));
@@ -1031,6 +1035,14 @@ mod tests {
                 assert_eq!(hit, want, "{n} boxes at {p:?}");
             }
         }
+    }
+
+    #[test]
+    fn the_chords_of_a_circle_smaller_than_the_tolerance_are_left_out_not_called_a_bend() {
+        // Radius 1.2 mm: eight chords of 0.9 mm, some welded into one point with the next, a loop of what is left.
+        let tiny = SketchLine::from(Curve::Circle { centre: P2(0.0, 0.0), radius: 1.2 });
+        let p = solve(&[tiny]).unwrap_or_else(|e| panic!("{e:?}"));
+        assert!(p.regions.len() == 1 && p.area() > 1.0 && p.area() < 4.6, "{}", p.area());
     }
 
     #[test]
