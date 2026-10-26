@@ -77,3 +77,34 @@ fn the_language_list_offers_chinese_and_picking_it_puts_the_window_in_it() {
     // The list shows its name in itself once the window can draw it.
     assert!(h.get_all_by_role(Role::ComboBox).any(|n| n.value().as_deref() == Some("简体中文")));
 }
+
+/// Any font will do for the first test below: it only looks for where the Chinese font was put.
+fn some_font() -> Option<(Vec<u8>, u32)> {
+    Some((include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/fonts/ibm-plex-mono/IBMPlexMono-Regular.ttf")).to_vec(), 0))
+}
+
+#[test]
+fn the_chinese_font_joins_every_family_the_window_sets_text_in() {
+    let mut h = app(BOX);
+    assert!(lang::use_chinese_font(&h.ctx, some_font));
+    h.run();
+    for family in crate::style::families() {
+        let has = h.ctx.fonts(|f| f.definitions().families.get(&family).is_some_and(|l| l.iter().any(|n| n == "chinese")));
+        assert!(has, "{family:?} must hold the Chinese font: egui does not fall back across families");
+    }
+}
+
+#[test]
+fn hanzi_in_the_semibold_lettering_are_glyphs_and_not_boxes() {
+    // ponytail: needs a CJK font on the machine, as the window does; a machine without one has nothing to draw with.
+    if lang::chinese_font().is_none() {
+        return;
+    }
+    let mut h = app(BOX);
+    assert!(lang::use_chinese_font(&h.ctx, lang::chinese_font));
+    h.run();
+    for family in crate::style::families() {
+        let drawn = h.ctx.fonts_mut(|f| f.has_glyphs(&egui::FontId::new(13.0, family.clone()), "文件建筑注释视图管理修改"));
+        assert!(drawn, "{family:?} draws hanzi");
+    }
+}

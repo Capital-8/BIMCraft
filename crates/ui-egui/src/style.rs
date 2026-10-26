@@ -199,6 +199,12 @@ pub fn semibold(size: f32) -> FontId {
 }
 
 const SEMIBOLD: &str = "plex-semibold";
+
+/// Every family the window's text is set in. A font meant for all the text (the Chinese one) joins each: egui does not fall back
+/// from one family to another.
+pub fn families() -> [FontFamily; 3] {
+    [FontFamily::Proportional, FontFamily::Monospace, FontFamily::Name(SEMIBOLD.into())]
+}
 const PLEX_SANS: &[u8] = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/fonts/ibm-plex-sans/IBMPlexSans-Variable.ttf"));
 const PLEX_MONO: &[u8] = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/fonts/ibm-plex-mono/IBMPlexMono-Regular.ttf"));
 

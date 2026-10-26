@@ -15,7 +15,7 @@ use std::cell::Cell;
 
 use bimcraft_core::language::Language;
 use egui::epaint::text::{FontInsert, FontPriority, InsertFontFamily};
-use egui::{Context, FontData, FontFamily, Id};
+use egui::{Context, FontData, Id};
 
 /// The interface's language: one of a project's languages, or Simplified Chinese.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -124,8 +124,8 @@ pub fn use_chinese_font(ctx: &Context, find: FontFinder) -> bool {
     let Some((bytes, index)) = find() else { return false };
     let mut data = FontData::from_owned(bytes);
     data.index = index;
-    let family = |family| InsertFontFamily { family, priority: FontPriority::Lowest };
-    ctx.add_font(FontInsert::new("chinese", data, vec![family(FontFamily::Proportional), family(FontFamily::Monospace)]));
+    let families = crate::style::families().map(|family| InsertFontFamily { family, priority: FontPriority::Lowest });
+    ctx.add_font(FontInsert::new("chinese", data, families.into()));
     ctx.data_mut(|d| d.insert_temp(Id::new("chinese-font"), true));
     true
 }
