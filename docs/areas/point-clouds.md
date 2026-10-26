@@ -19,7 +19,9 @@ whose `read` is the sum of their `recordCount`s. Each scan's points are a Compre
 whose bytestreams, one for each field of the `prototype`, are bit-packed and run on from packet to packet; `Pack` decodes
 Float (single or double), Integer and ScaledInteger, and only bit-packing, the one codec E57 writes, is read. Cartesian or
 spherical coordinates both come in, a point marked invalid doesn't, and colour is scaled from `colorLimits` (or its field's
-range) to eight bits. `images2D` is passed over. The tests write E57 files of their own (`e57` in the module's tests), with
+range) to eight bits. `images2D` is passed over. A file is held to `Caps` before anything is unpacked: up to 4096 scans, 100 million
+points in all of them, 32 fields to a point, no two scans on one section, a section with room for the bits its count asks for (a
+field of no bits is legal, so eight points can share a byte), and no stream more than 4 MiB ahead of the others. The tests write E57 files of their own (`e57` in the module's tests), with
 values that cross packets and pages; the reference survey's 177 MB file reads its 6.6 million points in under two seconds.
 
 A project holds each scan once, by name, as a `Cloud` in `Model::clouds` (a library entry of kind `Cloud`, so it has an id and a
