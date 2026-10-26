@@ -3077,9 +3077,9 @@ const WORDS: &[[&str; 3]] = &[
         "Elipse: haga clic en el centro, en el extremo de un eje y luego hasta donde llega el otro",
     ],
     [
-        "Explode Polyline (PX): a polyline taken apart into a line or an arc for each segment",
-        "Explodir polilinha (PX): uma polilinha separada numa linha ou arco por segmento",
-        "Descomponer polilínea (PX): una polilínea separada en una línea o un arco por segmento",
+        "Explode Polyline (EX): a polyline taken apart into a line or an arc for each segment",
+        "Explodir polilinha (EX): uma polilinha separada numa linha ou arco por segmento",
+        "Descomponer polilínea (EX): una polilínea separada en una línea o un arco por segmento",
     ],
     ["Fillet Arc", "Arco de concordância", "Arco de empalme"],
     [

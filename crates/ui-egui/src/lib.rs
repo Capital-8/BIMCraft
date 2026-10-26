@@ -3456,7 +3456,7 @@ impl BimApp {
                 if ui.add_enabled_ui(two, |ui| big_button(ui, Icon::JoinPolyline, "Join into Polyline", false, tip)).inner.clicked() {
                     self.join_polyline();
                 }
-                let tip = "Explode Polyline (PX): a polyline taken apart into a line or an arc for each segment";
+                let tip = "Explode Polyline (EX): a polyline taken apart into a line or an arc for each segment";
                 if big_button(ui, Icon::ExplodePolyline, "Explode Polyline", false, tip).clicked() {
                     self.explode_polyline();
                 }

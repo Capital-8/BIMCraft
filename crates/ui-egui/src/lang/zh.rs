@@ -1862,8 +1862,8 @@ pub(super) const WORDS: &[[&str; 2]] = &[
         "椭圆：单击中心、一条轴的端点，然后单击另一条轴到达的位置",
     ],
     [
-        "Explode Polyline (PX): a polyline taken apart into a line or an arc for each segment",
-        "分解多段线 (PX)：将多段线的每一段拆分为一条线或一段圆弧",
+        "Explode Polyline (EX): a polyline taken apart into a line or an arc for each segment",
+        "分解多段线 (EX)：将多段线的每一段拆分为一条线或一段圆弧",
     ],
     ["Fillet Arc", "圆角弧"],
     [

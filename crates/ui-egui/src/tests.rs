@@ -822,6 +822,14 @@ fn ks_lists_every_shortcut_and_every_one_it_lists_works() {
     assert_eq!(h.state().session.model.units.name(), "ft-in");
     // Any two letters do something exactly when the dialog lists them, and it names each in every language.
     let listed: Vec<&str> = crate::shortcuts().iter().map(|(letters, _)| *letters).collect();
+    // One key, one thing: a fixture's (the Plumbing Fixture's PX, once Explode's too) or an alias that a desktop key
+    // takes first would be listed twice and reach only the first.
+    let mut seen = std::collections::BTreeMap::new();
+    for (letters, name) in crate::shortcuts() {
+        if let Some(other) = seen.insert(letters, name) {
+            assert_eq!(letters, "CL", "{letters} is both {other} and {name}");
+        }
+    }
     for a in 'A'..='Z' {
         for b in 'A'..='Z' {
             let mut app = BimApp::new(Session::new());

@@ -70,7 +70,7 @@ span does, and a control-point spline gets the knot inserted to the degree's mul
 control points are the original's; a spline through points becomes two through the original's points on each side and the
 cut, leaving it along the original's tangent, with points of the original added where it strays most until it is within
 `FIT_TOL` (QCAD turns the halves into control-point splines instead; Revit won't split a spline at all). A closed curve opens
-where it's cut. Commands: `split` (detail lines as walls), `join_polyline` (PJ), `explode` (PX), `fillet` (FL), `corner`
+where it's cut. Commands: `split` (detail lines as walls), `join_polyline` (PJ), `explode` (EX), `fillet` (FL), `corner`
 (TR, two detail lines as two walls), `trim_extend` (detail lines to a boundary: Revit's Trim/Extend Single and Multiple
 Elements) and `offset` (OF; `draw::offset` keeps arcs concentric and mitres a polyline's corners). `draw::meet` finds where two
 lines or arcs cross, run on along their lines or circles, and `draw::trim_to` brings one to it, keeping the part picked.

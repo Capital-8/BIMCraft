@@ -523,7 +523,7 @@ the window. The window answers between its frames, so a long command holds the w
 | `filled_region` | FR | `sketch` (lines, any number of loops), `view?`, `type?` (Solid Black), `line_style?` (Thin Lines; null, invisible): a filled or masking region in one view, over model backgrounds (over the model when masking) and under detail annotation |
 | `detail_line` | DL | a curve: `points` ([[x, y], …], with `arcs` and `closed`), `start` and `end` (with `arc` or `through`), `centre` and `radius`, `centre` and `radii` (with `angle` and `span`), `control` (with `knots`) or `fit` (with `start_tangent` and `end_tangent`); `view?` (a level's plan, a section, an elevation or a sheet: in its own terms), `style?` (Thin Lines), `insulation?` (a width: batt insulation along it): a line, arc, polyline, circle, ellipse or spline drawn in one view only, in a line style |
 | `join_polyline` | PJ | `ids`: detail lines meeting end to end joined into one polyline |
-| `explode` | PX | `id`: a polyline taken apart into lines and arcs |
+| `explode` | EX | `id`: a polyline taken apart into lines and arcs |
 | `vertex` | | `id`, `at`, `delete?`: a vertex more (or fewer) in a polyline or a spline; a control point added keeps the curve |
 | `convert_spline` | | `id`: a spline through points to the same curve by control points, or back within 0.05 mm |
 | `fillet` | FL | `ids` (two straight detail lines), `radius`: the corner rounded by an arc, the lines cut back to it |

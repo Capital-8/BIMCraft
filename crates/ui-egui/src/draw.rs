@@ -895,7 +895,7 @@ impl BimApp {
         }
     }
 
-    /// Explode Polyline (PX): the polyline selected, or while sketching those picked, taken apart into lines and arcs.
+    /// Explode Polyline (EX): the polyline selected, or while sketching those picked, taken apart into lines and arcs.
     pub(crate) fn explode_polyline(&mut self) {
         if let Some(sk) = &mut self.sketch {
             let picked: Vec<usize> = sk.picked.iter().copied().collect();
