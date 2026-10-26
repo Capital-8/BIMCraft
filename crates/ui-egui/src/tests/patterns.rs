@@ -302,3 +302,75 @@ fn a_long_list_of_patterns_left_out_is_counted_and_a_file_is_not_written_over_un
     answer(&mut h, &fresh);
     assert!(std::fs::read_to_string(dir.path().join("fresh.pat")).unwrap().contains("*Sand"));
 }
+
+fn line_styles(h: &mut Harness<BimApp>) {
+    press(h, "Manage");
+    press(h, "Line Styles");
+}
+
+#[test]
+fn a_line_pattern_or_style_deleted_and_made_again_under_its_name_is_the_new_one() {
+    use bimcraft_core::lines::{LinePattern, Segment};
+    let mut h = app(BOX);
+    line_styles(&mut h);
+    press(&mut h, "Medium Lines: Delete");
+    press(&mut h, "New Style");
+    type_into(&mut h, "Style 1: Name", "Medium Lines");
+    press(&mut h, "Patterns");
+    press(&mut h, "Long Dash: Delete");
+    press(&mut h, "New Pattern");
+    type_into(&mut h, "Pattern 1: Name", "Long Dash");
+    press(&mut h, "OK");
+    assert!(h.state().line_styles_dialog.is_none(), "{}", h.state().status.text);
+    let m = &h.state().session.model;
+    assert_eq!(
+        m.line_patterns["Long Dash"],
+        LinePattern(vec![Segment::Dash(3.0), Segment::Space(1.5)]),
+        "the new one, not gone with the old"
+    );
+    assert_eq!(m.line_styles["Medium Lines"].pen, Pen::FINE, "the new style, not the old one");
+}
+
+#[test]
+fn line_style_and_pattern_renames_that_chain_or_swap_are_done_in_an_order_the_core_accepts() {
+    use bimcraft_core::lines::{LinePattern, Segment};
+    let mut h = app(BOX);
+    line_styles(&mut h);
+    // A chain of styles: Wide Lines becomes Heavy, Medium Lines takes the name Wide Lines had.
+    type_into(&mut h, "Wide Lines: Name", "Heavy");
+    type_into(&mut h, "Medium Lines: Name", "Wide Lines");
+    // A swap of patterns, which the style that has one keeps hold of by the pattern, not the name.
+    press(&mut h, "Patterns");
+    type_into(&mut h, "Dash: Name", "Dot");
+    type_into_nth(&mut h, "Dot: Name", 1, "Dash");
+    press(&mut h, "OK");
+    assert!(h.state().line_styles_dialog.is_none(), "{}", h.state().status.text);
+    let m = &h.state().session.model;
+    assert_eq!((m.line_styles["Heavy"].pen, m.line_styles["Wide Lines"].pen), (Pen::CUT, Pen::PROJECTION));
+    assert_eq!(m.line_patterns["Dot"], LinePattern(vec![Segment::Dash(3.0), Segment::Space(1.5)]));
+    assert_eq!(m.line_patterns["Dash"], LinePattern(vec![Segment::Dot, Segment::Space(1.0)]));
+    assert_eq!(m.line_styles["Overhead Lines"].pattern.as_deref(), Some("Dot"), "it follows its pattern");
+    assert!(m.line_patterns.keys().all(|n| !n.contains("renaming")), "{:?}", m.line_patterns.keys().collect::<Vec<_>>());
+}
+
+#[test]
+fn the_line_styles_draft_refuses_blank_and_repeated_names_and_a_project_that_changed() {
+    let mut h = app(BOX);
+    line_styles(&mut h);
+    let before = h.state().session.model.to_json().unwrap();
+    press(&mut h, "New Style");
+    type_into(&mut h, "Style 1: Name", "Wide Lines");
+    press(&mut h, "OK");
+    assert!(h.state().line_styles_dialog.is_some() && said(&h, "already in use"), "two styles of one name are not merged");
+    type_into_nth(&mut h, "Wide Lines: Name", 1, "  ");
+    press(&mut h, "OK");
+    assert!(h.state().line_styles_dialog.is_some() && said(&h, "Enter a name"), "a blank name does not list instead of making");
+    assert_eq!(h.state().session.model.to_json().unwrap(), before);
+    // An agent changes a style meanwhile: the draft is the project as it was.
+    type_into_nth(&mut h, ": Name", 0, "Fresh");
+    h.state_mut().session.execute("line_style", &json!({"name": "Agent Style", "pen": 3})).unwrap();
+    h.run();
+    press(&mut h, "OK");
+    assert!(h.state().line_styles_dialog.is_some() && said(&h, "changed"));
+    assert!(h.state().session.model.line_styles.contains_key("Agent Style") && !h.state().session.model.line_styles.contains_key("Fresh"));
+}

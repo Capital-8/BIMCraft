@@ -1152,6 +1152,11 @@ const WORDS: &[[&str; 3]] = &[
     ["Style", "Estilo", "Estilo"],
     ["Pattern", "Padrão", "Patrón"],
     ["New Style", "Novo estilo", "Nuevo estilo"],
+    [
+        "Enter a name for every style and pattern.",
+        "Insira um nome para cada estilo e padrão.",
+        "Introduzca un nombre para cada estilo y patrón.",
+    ],
     ["New Pattern", "Novo padrão", "Nuevo patrón"],
     ["Line Weight", "Espessura de linha", "Grosor de línea"],
     ["Colour", "Cor", "Color"],

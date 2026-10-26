@@ -1794,6 +1794,7 @@ pub(super) const WORDS: &[[&str; 2]] = &[
     ["Style", "样式"],
     ["Pattern", "图案"],
     ["New Style", "新建样式"],
+    ["Enter a name for every style and pattern.", "请为每个样式和图案输入名称。"],
     ["New Pattern", "新建图案"],
     ["Line Weight", "线宽"],
     ["Colour", "颜色"],
