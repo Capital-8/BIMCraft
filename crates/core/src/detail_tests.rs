@@ -93,6 +93,56 @@ fn what_a_view_places_is_counted_over_all_its_groups_and_repeats_and_not_over_ot
     assert!(s.model.check().is_err_and(|e| e.contains("members")));
 }
 
+/// Level 1's plan with a box of walls, and the box's first wall's GUID.
+fn walled() -> (Session, Id, Guid) {
+    let mut s = Session::new();
+    let w = run(&mut s, "wall", json!({"points": [[0, 0], [8000, 0], [8000, 6000], [0, 6000]], "closed": true}))["ids"][0]
+        .as_u64()
+        .unwrap_or_default();
+    let g = s.model.guid(w);
+    (s, w, g)
+}
+
+#[test]
+fn a_views_linework_is_counted_in_range_and_in_a_line_style_there_is() {
+    let (mut s, _, wall) = walled();
+    let edge = |i: usize| json!({"element": wall, "from": [i as f64, 0.0], "to": [i as f64 + 1.0, 0.0], "style": "Wide Lines"});
+    run(&mut s, "modify", json!({"id": 100000, "graphics": {"linework": [edge(0)]}}));
+    let bad = [
+        json!({"element": wall, "from": [1e300, 0.0], "to": [0.0, 0.0], "style": "Wide Lines"}),
+        json!({"element": wall, "from": [0.0, 0.0], "to": [0.0, -2e9], "style": "Wide Lines"}),
+        json!({"element": wall, "from": [0.0, 0.0], "to": [1.0, 0.0], "style": "No Such Style"}),
+    ];
+    for b in bad {
+        let e = err(&mut s, "modify", json!({"id": 100000, "graphics": {"linework": [b]}}));
+        assert!(e.contains("linework") || e.contains("Linework"), "{e}");
+    }
+    // The most, and one over it.
+    let most = crate::graphics::MAX_LINEWORK;
+    run(&mut s, "modify", json!({"id": 100000, "graphics": {"linework": (0..most).map(edge).collect::<Vec<_>>()}}));
+    let e = err(&mut s, "modify", json!({"id": 100000, "graphics": {"linework": (0..=most).map(edge).collect::<Vec<_>>()}}));
+    assert!(e.contains(&most.to_string()), "{e}");
+}
+
+#[test]
+fn linework_remove_takes_off_the_nearest_edge_and_not_every_edge_within_reach() {
+    let mut s = Session::new();
+    run(&mut s, "type", json!({"category": "wall", "name": "Partition", "thickness": 100}));
+    let w = run(&mut s, "wall", json!({"points": [[0, 0], [4000, 0]], "type": "Partition"}))["ids"][0].as_u64().unwrap_or_default();
+    let held = |s: &Session| crate::graphics::graphics_of(&s.model, 100000).map_or(0, |g| g.linework.len());
+    // Each face of the 100 mm wall, restyled.
+    run(&mut s, "linework", json!({"view": 100000, "id": w, "at": [1000, 45], "style": "Wide Lines"}));
+    run(&mut s, "linework", json!({"view": 100000, "id": w, "at": [1000, -45], "invisible": true}));
+    assert_eq!(held(&s), 2);
+    let r = run(&mut s, "linework", json!({"view": 100000, "id": w, "at": [1000, 45], "remove": true}));
+    assert_eq!((r["removed"].clone(), held(&s)), (json!(1), 1), "{r}");
+    let r = run(&mut s, "linework", json!({"view": 100000, "id": w, "at": [1000, -45], "remove": true}));
+    assert_eq!((r["removed"].clone(), held(&s)), (json!(1), 0), "{r}");
+    // Nothing near: nothing removed.
+    let r = run(&mut s, "linework", json!({"view": 100000, "id": w, "at": [1000, 45], "remove": true}));
+    assert_eq!(r["removed"], 0);
+}
+
 #[test]
 fn an_unknown_field_in_a_group_members_element_is_left_out_as_it_is_in_any_elements() {
     let mut s = Session::new();

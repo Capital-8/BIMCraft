@@ -886,8 +886,9 @@ pub static ALL: &[Command] = &[
         &["LW"],
         "{view?, id, at: [x, y], style? | invisible?: true, remove?: true} Revit's Linework: the edge of element `id` that a \
          plan (`view`, a level's or a plan view; the lowest level's by default) draws nearest `at` (within 200 mm), drawn in \
-         that view only in line style `style`, or not at all with `invisible`; `remove` takes it off that edge again. It \
-         returns the edge, `from` and `to`",
+         that view only in line style `style`, or not at all with `invisible`; `remove` takes the Linework nearest `at` off \
+         that edge again (one edge, even where another lies within reach). A view holds at most 2000 edges. It returns the \
+         edge, `from` and `to`, or with `remove` how many were `removed`",
         linework,
     ),
     edit(
@@ -7215,8 +7216,13 @@ fn linework(s: &mut Session, p: &Value) -> R {
     if remove {
         let g =
             s.model_mut().elements.get_mut(source).and_then(graphics::graphics_mut).ok_or_else(|| bad(c, "that view has no graphics"))?;
+        // The edge nearest `at`, and no other: both faces of a thin wall lie within reach of one pick.
+        let dist = |l: &graphics::Linework| geom::dist_to_segment(at, l.from, l.to);
+        let nearest = g.linework.iter().filter(|l| l.element == guid).map(dist).fold(f64::INFINITY, f64::min);
         let before = g.linework.len();
-        g.linework.retain(|l| l.element != guid || geom::dist_to_segment(at, l.from, l.to) > LINEWORK_REACH);
+        if nearest <= LINEWORK_REACH {
+            g.linework.retain(|l| l.element != guid || dist(l) > nearest + 1e-3);
+        }
         return Ok(json!({"removed": before - g.linework.len()}));
     }
     let (from, to) = render::edge_at(m, key, id, at, LINEWORK_REACH).ok_or_else(|| {

@@ -108,8 +108,11 @@ plan's `Graphics::linework` holds each as the element's GUID, the edge's two end
 `render::edge_at` finds the edge picked: the plan drawn again around the point without its linework, the nearest
 segment of the element's lines within `LINEWORK_REACH`. `render::linework` restyles, after `Look::dress`, the parts of the
 element's lines that lie along that edge (collinear within a pixel, over its length), so one face of a wall changes and the
-rest of its outline doesn't. Picked again, an edge's entry is replaced; `remove` takes it out (the desktop's `<By Category>`).
-A line style a view's linework uses can't be deleted, and an element's entries go with it.
+rest of its outline doesn't. Picked again, an edge's entry is replaced; `remove` takes out the one nearest the point (the desktop's
+`<By Category>`), not every edge within reach: both faces of a thin wall are. A view's linework is checked (`Graphics::check`):
+at most `MAX_LINEWORK` (2,000) edges, ends within `MAX_COORD`, and a line style the project has. The drawing splits an element's
+lines along all its edges in one pass (`render::linework`: the cost is the prims plus the edges, not a pass over every prim for
+each edge). A line style a view's linework uses can't be deleted, and an element's entries go with it.
 
 Detail groups (`groups.rs`) are Revit's: `create_group` (GP) makes the detail lines, filled regions and text notes given,
 all of one view, into a group type (`Model::detail_groups`) holding them as `Member`s about the middle of them, in no
