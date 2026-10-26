@@ -3508,6 +3508,10 @@ impl Model {
                 if r.sketch.is_empty() {
                     return Err(format!("{who}: a region's sketch has no lines; it needs a loop of them (a circle is one)"));
                 }
+                if let Err(problems) = crate::sketch::solve(&r.sketch) {
+                    let said = crate::sketch::say(&problems, &crate::sketch::namer(&r.sketch));
+                    return Err(format!("{who}: its sketch doesn't close into loops: {said}"));
+                }
                 if !self.region_types.contains_key(&r.type_name) {
                     let there: Vec<&str> = self.region_types.keys().map(String::as_str).collect();
                     return Err(format!("{who}: there's no filled region type `{}` (there are: {})", r.type_name, there.join(", ")));
