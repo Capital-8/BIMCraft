@@ -5,6 +5,8 @@
 //! the difference as one `graphics` command; the other two run their commands as they go, as
 //! Project Parameters does.
 
+use bimcraft_i18n::msg;
+
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
@@ -28,7 +30,8 @@ use crate::style::pal;
 use crate::{BimApp, Sheet, Status};
 
 /// Visibility/Graphics' tabs.
-const TABS: [&str; 6] = ["Model Categories", "Annotation Categories", "Imported Categories", "Filters", "Elements", "Design Options"];
+const TABS: [&str; 6] =
+    [msg!("Model Categories"), msg!("Annotation Categories"), "Imported Categories", "Filters", "Elements", "Design Options"];
 
 /// The Elements tab's place in [`TABS`].
 pub(crate) const ELEMENTS_TAB: usize = 4;
@@ -112,8 +115,8 @@ fn group_name(g: Group) -> &'static str {
     match g {
         Group::Categories => "Categories",
         Group::Filters => "Filters",
-        Group::Range => "View Range",
-        Group::Phase => "Phase and Phase Filter",
+        Group::Range => msg!("View Range"),
+        Group::Phase => msg!("Phase and Phase Filter"),
         Group::Options => "Design Options",
         Group::Scale => "View Scale",
         Group::Detail => "Detail Level",
@@ -570,7 +573,7 @@ impl BimApp {
         let model = Arc::clone(&self.session.model);
         let own = self.graphics_now();
         let shown = self.graphics_shown();
-        let group = "Graphics";
+        let group = msg!("Graphics");
         let open = !self.collapsed.contains(group);
         if crate::properties::group_header(ui, t(group), open) && !self.collapsed.remove(group) {
             self.collapsed.insert(group);
@@ -727,8 +730,8 @@ impl Cell {
     /// The column's heading, under its group's.
     fn heading(self) -> &'static str {
         match self {
-            Cell::ProjectionLines | Cell::CutLines => "Lines",
-            Cell::ProjectionPatterns | Cell::CutPatterns => "Patterns",
+            Cell::ProjectionLines | Cell::CutLines => msg!("Lines"),
+            Cell::ProjectionPatterns | Cell::CutPatterns => msg!("Patterns"),
             Cell::Transparency => "Transparency",
         }
     }
@@ -736,20 +739,20 @@ impl Cell {
     /// The column's name after a row's, for screen readers: "Walls: Cut Lines".
     fn name(self) -> &'static str {
         match self {
-            Cell::ProjectionLines => "Projection Lines",
-            Cell::ProjectionPatterns => "Projection Patterns",
+            Cell::ProjectionLines => msg!("Projection Lines"),
+            Cell::ProjectionPatterns => msg!("Projection Patterns"),
             Cell::Transparency => "Transparency",
-            Cell::CutLines => "Cut Lines",
-            Cell::CutPatterns => "Cut Patterns",
+            Cell::CutLines => msg!("Cut Lines"),
+            Cell::CutPatterns => msg!("Cut Patterns"),
         }
     }
 
     /// The small dialog that edits it.
     fn title(self) -> &'static str {
         match self {
-            Cell::ProjectionLines | Cell::CutLines => "Line Graphics",
-            Cell::ProjectionPatterns | Cell::CutPatterns => "Pattern Graphics",
-            Cell::Transparency => "Surface Transparency",
+            Cell::ProjectionLines | Cell::CutLines => msg!("Line Graphics"),
+            Cell::ProjectionPatterns | Cell::CutPatterns => msg!("Pattern Graphics"),
+            Cell::Transparency => msg!("Surface Transparency"),
         }
     }
 }
@@ -811,7 +814,7 @@ fn table(ui: &mut Ui, d: &mut VgDialog, model: &Model, rows: &[Row], cols: &Colu
     let (top, mid) = (head.top(), head.top() + ROW_H);
     text(Rect::from_min_size(pos2(head.left(), top), vec2(NAME_W, ROW_H * 2.0)), t("Visibility"), &body);
     let mut x = head.left() + NAME_W;
-    for (group, cut) in [("Projection/Surface", false), ("Cut", true)] {
+    for (group, cut) in [(msg!("Projection/Surface"), false), ("Cut", true)] {
         let cells: Vec<Cell> = cols.cells.iter().copied().filter(|c| c.cut() == cut).collect();
         if cells.is_empty() {
             continue;
@@ -1003,7 +1006,7 @@ fn cell_window(ctx: &Context, d: &mut VgDialog, model: &Model) {
 
 /// All, None and Invert: every row of `rows` shown, hidden, or the other way about.
 fn visibility_buttons(ui: &mut Ui, d: &mut VgDialog, model: &Model, rows: &[Row], enabled: bool) {
-    for label in ["All", "None", "Invert"] {
+    for label in ["All", "None", msg!("Invert")] {
         if ui.add_enabled(enabled && !rows.is_empty(), Button::new(t(label)).min_size(vec2(64.0, 0.0))).clicked() {
             for row in rows {
                 let hidden = match label {
@@ -1318,7 +1321,7 @@ fn colour_row(ui: &mut Ui, section: &str, what: &str, value: &mut Option<[u8; 3]
 
 /// A style's lines, grid rows: their colour, weight and dash. A weight starts at `weight`.
 fn line_rows(ui: &mut Ui, section: &str, s: &mut Style, weight: Pen) {
-    colour_row(ui, section, "Line color", &mut s.color, [40, 40, 40]);
+    colour_row(ui, section, msg!("Line color"), &mut s.color, [40, 40, 40]);
     let mut on = s.weight.is_some();
     if override_box(ui, section, "Line weight", &mut on) {
         s.weight = on.then_some(weight);
@@ -1355,7 +1358,7 @@ fn line_rows(ui: &mut Ui, section: &str, s: &mut Style, weight: Pen) {
 
 /// A style's patterns, a grid row: the fill's colour.
 fn fill_row(ui: &mut Ui, section: &str, s: &mut Style) {
-    colour_row(ui, section, "Fill color", &mut s.fill, [200, 200, 200]);
+    colour_row(ui, section, msg!("Fill color"), &mut s.fill, [200, 200, 200]);
 }
 
 /// Independent pattern layers: an unchecked box inherits, <None> explicitly hides that layer.
@@ -1407,8 +1410,8 @@ fn pattern_preview(ui: &Ui, rect: Rect, s: &Style, model: &Model) {
 
 fn dash_name(d: Dash) -> &'static str {
     match d {
-        Dash::Solid => "Solid",
-        Dash::Dashed => "Dashed",
-        Dash::Dotted => "Dotted",
+        Dash::Solid => msg!("Solid"),
+        Dash::Dashed => msg!("Dashed"),
+        Dash::Dotted => msg!("Dotted"),
     }
 }

@@ -5,6 +5,8 @@
 //! window's size, the background autosave interval, and the colour High Contrast Point Clouds draws scans in.
 //! The pages for what is still to come (performance and graphics) show what they will hold, greyed out.
 
+use bimcraft_i18n::msg;
+
 use std::path::{Path, PathBuf};
 
 use egui::{Align, ComboBox, Context, Id as UiId, Layout, Modal, RichText, ScrollArea, ThemePreference, Ui, vec2};
@@ -188,10 +190,10 @@ impl Page {
     pub fn name(self) -> &'static str {
         match self {
             Page::Interface => "User Interface",
-            Page::Performance => "Performance",
+            Page::Performance => msg!("Performance"),
             Page::Graphics => "Graphics",
-            Page::Files => "Files",
-            Page::Updates => "Updates",
+            Page::Files => msg!("Files"),
+            Page::Updates => msg!("Updates"),
         }
     }
 }
@@ -317,9 +319,9 @@ impl BimApp {
     }
 
     fn interface_page(&mut self, ui: &mut Ui, ctx: &Context) {
-        heading(ui, "Theme");
+        heading(ui, msg!("Theme"));
         self.theme_choices(ui, false);
-        heading(ui, "Layout");
+        heading(ui, msg!("Layout"));
         ui.horizontal(|ui| {
             let tip = "The ribbon, the palettes and the bars as cards floating over the view";
             ui.radio_value(&mut self.compact, false, t("Floating")).on_hover_text(t(tip));
@@ -334,11 +336,11 @@ impl BimApp {
                 }
             }
         });
-        heading(ui, "Ribbon");
+        heading(ui, msg!("Ribbon"));
         ui.checkbox(&mut self.ribbon_min, t("Minimize the ribbon to its tabs"))
             .on_hover_text(t("Double-clicking a tab's name does the same; a click on a tab then shows its tools until one is picked"));
         if self.own_title_bar {
-            heading(ui, "Title bar");
+            heading(ui, msg!("Title bar"));
             let mut system = self.system_title_bar;
             if ui
                 .checkbox(&mut system, t("Use the system's title bar"))
@@ -348,7 +350,7 @@ impl BimApp {
                 self.use_system_title_bar(ctx, system);
             }
         }
-        heading(ui, "Palettes");
+        heading(ui, msg!("Palettes"));
         for p in Palette::ALL {
             let mut on = self.docking.shown(p);
             if ui.checkbox(&mut on, t(p.name())).changed() {
@@ -382,7 +384,7 @@ impl BimApp {
 
 impl BimApp {
     fn performance_page(&mut self, ui: &mut Ui) {
-        heading(ui, "Graphics card");
+        heading(ui, msg!("Graphics card"));
         let found = self.card.available();
         ui.add_enabled(found, egui::Checkbox::new(&mut self.card.wanted, t("Draw the 3D view on the graphics card"))).on_hover_text(t(
             "Faster for large models. Hidden line and wireframe are still drawn on the processor, and so is everything if the card fails",
