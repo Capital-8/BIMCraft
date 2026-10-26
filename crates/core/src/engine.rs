@@ -64,6 +64,7 @@ impl Step {
 /// The commands that copy what stands: a copy is made in the session's phase and isn't taken down with its original.
 const COPIES: [&str; 3] = ["copy", "mirror", "rotate"];
 
+#[cfg_attr(test, derive(Clone))]
 pub struct Session {
     pub model: Arc<Model>,
     /// Where the model was opened from or last saved to.
@@ -156,6 +157,14 @@ impl Session {
                 // undo, redo and the commands that replace the project make nothing.
                 if cmd.undoable && cmd.id != "split" {
                     self.stamp(first_new, COPIES.contains(&cmd.id));
+                }
+                // A scan goes with the last point cloud that placed it.
+                let unplaced = self.model.unplaced_clouds();
+                if !unplaced.is_empty() {
+                    let m = self.model_mut();
+                    for name in unplaced {
+                        m.clouds.remove(&name);
+                    }
                 }
                 // What a command was given by id points at the element's GUID; what it put in the library has an id and a GUID.
                 self.model_mut().resolve();

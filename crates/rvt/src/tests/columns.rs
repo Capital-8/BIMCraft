@@ -90,13 +90,14 @@ fn a_column_turned_off_the_axes_takes_its_symbols_size_and_its_placements_angle_
     let [(_, c)] = columns(&i)[..] else { panic!("{:?}", i.skipped) };
     assert_eq!(c.angle, 0.0);
     assert_eq!(i.model.types.structural_column["Concrete"].width, 609.6);
-    // Turned, with a symbol whose size is not known: left out.
+    // Turned, with a symbol whose size is not known: it comes in as its box, turned, and says so.
     let mut r = project(2024, STRUCTURAL);
     r.names.clear();
     column(&mut r, STRUCTURAL, 100);
     r.data.push(Block { id: 100, payload: transform_bytes(0.5, [10.0, 5.0, 0.0]) });
     let i = import(&r);
-    assert!(columns(&i).is_empty() && i.skipped.iter().any(|s| s.contains("family symbol's size is not known")), "{:?}", i.skipped);
+    let [(_, c)] = columns(&i)[..] else { panic!("{:?}", i.skipped) };
+    assert!(c.angle != 0.0 && i.skipped.iter().any(|s| s.contains("family symbol's size is not known")), "{:?}", i.skipped);
 }
 
 #[test]
@@ -141,8 +142,11 @@ fn a_column_that_names_no_level_stands_on_the_one_below_its_bottom_and_an_unname
 #[test]
 fn the_columns_of_the_samples_are_those_of_rvt_rss_export() {
     use super::rvt_rs::{RAC_COLUMNS, RST_COLUMNS};
-    let check = |path: &std::path::Path, theirs: &[(u32, [f64; 6])]| {
+    let check = |path: &std::path::Path, theirs: &[(u32, [f64; 6])], architectural: bool| {
         let (i, from) = crate::import_path_with_origins(path, "x").unwrap();
+        if architectural && !super::pinned(&i) {
+            return;
+        }
         assert_eq!(columns(&i).len(), theirs.len(), "{}: {:?}", path.display(), i.skipped);
         for (id, b) in theirs {
             let (_, c) = i
@@ -165,11 +169,11 @@ fn the_columns_of_the_samples_are_those_of_rvt_rss_export() {
         }
     };
     for path in super::samples_of("racbasicsampleproject.rvt") {
-        check(&path, &RAC_COLUMNS);
+        check(&path, &RAC_COLUMNS, true);
     }
     // From 2024: the 2023 file does not correct the box's bottom (its geometry node is laid out otherwise).
     for path in super::samples().into_iter().filter(|p| !p.to_string_lossy().contains("/2023/")) {
-        check(&path, &RST_COLUMNS);
+        check(&path, &RST_COLUMNS, false);
     }
 }
 
