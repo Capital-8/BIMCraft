@@ -24,7 +24,9 @@ pub(crate) struct Plan {
 /// The plan for `rows`, over the entries that `existing` names. The live rows' names are distinct (the dialog checks that).
 pub(crate) fn plan(existing: &BTreeSet<String>, rows: &[Row]) -> Plan {
     let live = |n: &str| rows.iter().find(|r| !r.gone && r.name == n);
+    // Every name that is, or will be, in use: a spare name is none of them.
     let mut taken = existing.clone();
+    taken.extend(rows.iter().map(|r| r.name.to_string()));
     let mut renames: Vec<(String, String)> = rows
         .iter()
         .filter(|r| !r.gone)
@@ -45,7 +47,7 @@ pub(crate) fn plan(existing: &BTreeSet<String>, rows: &[Row]) -> Plan {
             None => deletes.push(was.to_string()),
         }
     }
-    Plan { renames: order(existing, renames), deletes }
+    Plan { renames: order(existing, taken, renames), deletes }
 }
 
 /// `base`, or `base 2`, `base 3`… the first that `taken` doesn't hold.
@@ -55,7 +57,7 @@ fn spare(taken: &BTreeSet<String>, base: &str) -> String {
 
 /// `renames` in an order each can be done in: one whose new name is free goes first, and when each waits on another (a swap
 /// is the shortest such loop) one steps aside under a spare name and takes its own after.
-fn order(existing: &BTreeSet<String>, renames: Vec<(String, String)>) -> Vec<(String, String)> {
+fn order(existing: &BTreeSet<String>, mut taken: BTreeSet<String>, renames: Vec<(String, String)>) -> Vec<(String, String)> {
     let mut held = existing.clone();
     let mut pending = renames;
     let mut out = Vec::new();
@@ -67,7 +69,8 @@ fn order(existing: &BTreeSet<String>, renames: Vec<(String, String)>) -> Vec<(St
         let (from, to) = match free {
             Some(_) => (from, to),
             None => {
-                let aside = spare(&held, &format!("{from} (renaming)"));
+                let aside = spare(&taken, &format!("{from} (renaming)"));
+                taken.insert(aside.clone());
                 pending.push((aside.clone(), to));
                 (from, aside)
             }
@@ -126,6 +129,18 @@ mod tests {
         assert_eq!(onto.deletes, ["B (deleted)"]);
         let plain = plan(&existing, &[row(Some("A"), "A", false), row(Some("B"), "B", true)]);
         assert_eq!((plain.renames.len(), plain.deletes.as_slice()), (0, ["B".to_string()].as_slice()));
+    }
+
+    #[test]
+    fn a_spare_name_is_never_one_a_row_ends_with() {
+        let existing = set(&["A", "B"]);
+        // B is deleted and A takes its name; a new row is named as B's spare would be.
+        let p = plan(&existing, &[row(Some("A"), "B", false), row(Some("B"), "B", true), row(None, "B (deleted)", false)]);
+        assert_eq!((p.renames.len(), p.deletes.as_slice()), (2, ["B (deleted) 2".to_string()].as_slice()), "{p:?}");
+        // A swap, with a new row named as its spare would be.
+        let swap = plan(&existing, &[row(Some("A"), "B", false), row(Some("B"), "A", false), row(None, "A (renaming)", false)]);
+        assert!(swap.renames.iter().all(|(_, to)| to != "A (renaming)"), "{swap:?}");
+        assert_eq!(run(&existing, &swap.renames), existing);
     }
 
     #[test]

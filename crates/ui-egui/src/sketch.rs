@@ -425,7 +425,9 @@ impl BimApp {
             self.drawing.trim = None;
         }
         let plan = sk.plan;
-        if self.sheet != plan && matches!(plan, Sheet::Plan(_) | Sheet::Ceiling(_)) {
+        // (A plan that is gone, its level deleted, is nowhere to go back to.)
+        let there = matches!(plan, Sheet::Plan(key) | Sheet::Ceiling(key) if self.session.model.plan_level(key).is_some());
+        if self.sheet != plan && there {
             self.open_sheet(plan);
             self.status = Status { text: t("Finish or cancel the sketch before leaving its plan.").into(), error: true };
         }
