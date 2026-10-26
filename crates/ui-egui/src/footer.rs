@@ -374,8 +374,13 @@ impl BimApp {
                 if self.session.model.elements.values().any(|e| matches!(e, Element::PointCloud(_))) {
                     let filled = self.graphics_shown().categories.get(graphics::SCANS[0]).is_some_and(|o| o.projection.fill.is_some());
                     let set_by = self.controlled_by(Group::Categories);
-                    let tip = "High Contrast Point Clouds: draw this view's scans in one strong colour, so what they show reads; again for their own colours";
-                    let r = ui.add_enabled_ui(set_by.is_none(), |ui| small_button(ui, Icon::PointCloud, "High Contrast Point Clouds", filled, tip)).inner;
+                    let tip = "High Contrast Point Clouds: draw this view's scans in one strong colour, so what they show reads; \
+                               again for their own colours";
+                    let r = ui
+                        .add_enabled_ui(set_by.is_none(), |ui| {
+                            small_button(ui, Icon::PointCloud, "High Contrast Point Clouds", filled, tip)
+                        })
+                        .inner;
                     let r = match set_by {
                         Some(template) => r.on_disabled_hover_text(controlled_note(&template)),
                         None => r,
