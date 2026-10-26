@@ -137,11 +137,17 @@ fn the_options_bar_stays_clear_of_the_zoom_buttons_and_inside_the_window_at_the_
     h.run();
     tool(&mut h, "Wall");
     h.run();
-    let zoom = h.get_by_label("Zoom to Fit").rect();
+    // The bar itself, and each of its fields, are in the window; none of the view's zoom buttons is under any of them.
+    let bar = h.state().options_rect;
     let w = window(least());
+    assert!(w.contains_rect(bar), "the bar {bar:?} is off the window");
     for (label, role) in [("Height:", Role::Label), ("Location Line:", Role::Label), ("Chain", Role::CheckBox)] {
         let r = h.get_by_role_and_label(role, label).rect();
-        assert!(w.contains_rect(r), "`{label}` {r:?} is off the window");
-        assert!(!r.intersect(zoom).is_positive(), "`{label}` {r:?} is over the zoom buttons {zoom:?}");
+        assert!(bar.contains_rect(r), "`{label}` {r:?} is out of the bar {bar:?}");
+    }
+    for label in ["Zoom to Fit", "Zoom In", "Zoom Out"] {
+        let button = h.get_by_label(label).rect();
+        assert!(!button.intersect(bar).is_positive(), "`{label}` {button:?} is under the Options Bar {bar:?}");
+        assert!(w.contains_rect(button), "`{label}` {button:?} is off the window");
     }
 }

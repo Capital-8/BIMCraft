@@ -519,6 +519,8 @@ pub struct BimApp {
     pub custom_shortcuts: BTreeMap<String, String>,
     pub shortcuts_dialog: shortcuts::ShortcutsDialog,
     open_units: bool,
+    /// Where the Options Bar was drawn last frame, for a view's navigation bar to keep clear of it (nothing when it isn't there).
+    options_rect: Rect,
     canvas: canvas::Canvas,
     orbit: orbit::Orbit,
     /// The graphics card the 3D view may be drawn on (Settings > Performance).
@@ -899,6 +901,7 @@ impl BimApp {
             snap_once: None,
             measured: None,
             open_units: false,
+            options_rect: Rect::NOTHING,
             canvas: canvas::Canvas::default(),
             orbit: orbit::Orbit::default(),
             card: gpu::Card::default(),
@@ -3289,16 +3292,28 @@ impl BimApp {
     /// view's top left, so the view never moves when it comes and goes, and taking the clicks that land on it.
     fn options_bar(&mut self, ctx: &Context) {
         if self.context().is_none() && matches!(self.tool, Tool::Modify) {
+            self.options_rect = Rect::NOTHING;
             return;
         }
         let g = f32::from(style::gap());
         let view = self.view_rect;
         let frame = style::card([false; 4]).inner_margin(Margin::symmetric(10, 3));
-        Area::new(UiId::new("options-bar")).order(Order::Middle).fixed_pos(view.left_top() + vec2(g, g)).show(ctx, |ui| {
-            // Clear of the view's zoom buttons on the right.
+        let shown = Area::new(UiId::new("options-bar")).order(Order::Middle).fixed_pos(view.left_top() + vec2(g, g)).show(ctx, |ui| {
+            // Kept short of the view's zoom buttons on the right, as far as its fields wrap (a drop-down doesn't).
             ui.set_max_width((view.width() - 2.0 * g - 60.0).max(200.0));
             frame.show(ui, |ui| self.options(ui));
         });
+        self.options_rect = shown.response.rect;
+    }
+
+    /// Where a view's navigation bar starts: at its top right, or under the Options Bar when that reaches over it.
+    pub(crate) fn nav_corner(&self, view: Rect) -> Pos2 {
+        let at = view.right_top() + vec2(-46.0, 14.0);
+        let o = self.options_rect;
+        if view.contains(o.left_top()) && o.right() > at.x - 6.0 && o.bottom() + 6.0 > at.y {
+            return pos2(at.x, o.bottom() + 6.0);
+        }
+        at
     }
 
     fn options(&mut self, ui: &mut Ui) {

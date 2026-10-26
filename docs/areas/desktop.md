@@ -163,8 +163,8 @@ macOS keeps its own.
 The least a window can be is `window::MIN_SIZE`, 900 by 560 points (`main` gives it as the window's minimum), and nothing runs under, over or
 past anything else there (`tests/smallest.rs`, in the window's real geometry): the app bar's title sits between the quick access and the
 caption buttons, in the window's middle if it fits there and cut short with an ellipsis if not; the ribbon's tab row scrolls, and a tab just
-picked (a contextual tab comes last of all) is scrolled into view; the Options Bar wraps to a second line rather than cover the zoom
-buttons; and a stack of palettes standing over another leaves it `dock::LAST_MIN`, so its last card never runs under the status bar,
+picked (a contextual tab comes last of all) is scrolled into view; the Options Bar wraps to a second line, and a view's navigation bar
+steps under it where a drop-down (which doesn't wrap) still reaches over it (`BimApp::nav_corner`); and a stack of palettes standing over another leaves it `dock::LAST_MIN`, so its last card never runs under the status bar,
 even when the window was brought down from a taller one. Nothing is fitted to a size below that: the window is asked not to go there.
 
 The ribbon's panels (`ribbon.rs`). A panel's name, under its tools, is a button (named `Build ▾` for screen readers) whose list
