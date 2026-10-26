@@ -6,12 +6,20 @@ use egui::{Event, PointerButton, Pos2, ResizeDirection, ViewportCommand, Viewpor
 use super::*;
 
 const ROOT: ViewportId = ViewportId::ROOT;
-/// The margin egui_kittest keeps round the app; the system's window has none, so there the bar's corner is the window's.
-const INSET: f32 = 8.0;
+const WINDOW: egui::Rect = egui::Rect::from_min_max(pos2(0.0, 0.0), pos2(1280.0, 800.0));
 
-/// The app as it opens on Windows and Linux: drawing its own title bar. Its frames are short, so two clicks are a double-click.
+/// The app as it opens on Windows and Linux: drawing its own title bar. Its root `Ui` is the whole window, as eframe's is (not
+/// inset by the margin `app()` keeps, which would hide where the window's edges meet the bar's buttons). Its frames are short,
+/// so two clicks are a double-click.
 fn own(script: &str) -> Harness<'static, BimApp> {
-    let mut h = app_at(script, 0.05);
+    let mut session = Session::new();
+    session.script(script).unwrap();
+    let show = |ui: &mut egui::Ui, app: &mut BimApp| {
+        let screen = ui.ctx().content_rect();
+        app.show(&mut ui.new_child(egui::UiBuilder::new().max_rect(screen)));
+    };
+    let mut h =
+        Harness::builder().with_size(WINDOW.size()).with_max_steps(32).with_step_dt(0.05).build_ui_state(show, BimApp::new(session));
     h.state_mut().own_title_bar = true;
     h.run();
     h
@@ -64,7 +72,7 @@ fn without_its_own_title_bar_the_window_has_no_caption_buttons() {
 fn minimize_maximize_and_close_sit_in_the_windows_corner_and_ask_the_system() {
     let mut h = own(BOX);
     let (min, max, close) = (caption(&h, "Minimize"), caption(&h, "Maximize"), caption(&h, "Close"));
-    assert_eq!((close.right(), close.top()), (1280.0 - INSET, INSET), "Close is in the corner, so a maximized window's corner hits it");
+    assert_eq!((close.right(), close.top()), (1280.0, 0.0), "Close is in the corner, so a maximized window's corner hits it");
     assert_eq!((min.right(), max.right()), (max.left(), close.left()), "side by side");
     assert!([min, max, close].iter().all(|r| r.width() == crate::titlebar::BUTTON_WIDTH));
     h.get_by_label("Minimize").click();
@@ -108,9 +116,11 @@ fn the_windows_edges_and_corners_resize_it_unless_it_is_maximized() {
         (pos2(640.0, 1.0), North),
         (pos2(640.0, 798.0), South),
         (pos2(2.0, 2.0), NorthWest),
-        (pos2(1277.0, 3.0), NorthEast),
         (pos2(3.0, 797.0), SouthWest),
         (pos2(1278.0, 798.0), SouthEast),
+        // The top edge runs up to the caption buttons and the right edge starts under them.
+        (pos2(1140.0, 1.0), North),
+        (pos2(1278.0, 40.0), East),
     ] {
         let now = gesture(&mut h, &[p, p + vec2(6.0, 6.0)]);
         assert!(now.contains(&ViewportCommand::BeginResize(dir)), "{dir:?} at {p:?}: {now:?}");
@@ -123,6 +133,60 @@ fn the_windows_edges_and_corners_resize_it_unless_it_is_maximized() {
     assert!(!now.iter().any(|c| matches!(c, ViewportCommand::BeginResize(_))), "a maximized window has no edges: {now:?}");
 }
 
+/// What a press at `at` and its release did: the viewport commands, and whether the window would resize.
+fn press_at(h: &mut Harness<BimApp>, at: Pos2) -> (Vec<ViewportCommand>, bool) {
+    let all = gesture(h, &[at]);
+    let resized = all.iter().any(|c| matches!(c, ViewportCommand::BeginResize(_)));
+    (all, resized)
+}
+
+#[test]
+fn the_caption_buttons_keep_every_press_on_them_the_edge_and_the_corner_too() {
+    let mut h = own(BOX);
+    for (label, asks) in
+        [("Minimize", ViewportCommand::Minimized(true)), ("Maximize", ViewportCommand::Maximized(true)), ("Close", ViewportCommand::Close)]
+    {
+        let r = caption(&h, label);
+        // The top row (the window's edge), the corner nearest the window's, and the middle.
+        for at in [r.center_top() + vec2(0.0, 0.5), r.right_top() + vec2(-0.5, 0.5), r.center()] {
+            let (all, resized) = press_at(&mut h, at);
+            assert!(!resized && all.contains(&asks), "{label} at {at:?}: {all:?}");
+        }
+    }
+}
+
+#[test]
+fn the_app_bars_buttons_keep_a_press_on_their_top_row_in_both_layouts() {
+    // The app bar keeps 5 above its buttons, and the window's edge zone is thinner.
+    for compact in [false, true] {
+        let mut h = own(BOX);
+        h.state_mut().compact = compact;
+        h.run();
+        let settings = h.get_by_role_and_label(Role::Button, "Settings").rect();
+        let (all, resized) = press_at(&mut h, settings.center_top() + vec2(0.0, 0.5));
+        assert!(!resized && h.state().settings_page.is_some(), "compact={compact}: {all:?}");
+    }
+}
+
+#[test]
+fn no_scrollbar_reaches_the_zones_that_resize_the_window_even_docked_flush_to_its_right_edge() {
+    use egui_kittest::kittest::NodeT;
+    for compact in [false, true] {
+        let mut h = own(BOX);
+        h.state_mut().compact = compact;
+        h.state_mut().docking.put(crate::dock::Palette::Properties, crate::dock::Target::Side(crate::dock::Side::Right));
+        h.run();
+        let captions = Some(h.get_by_label("Close").rect().union(h.get_by_label("Minimize").rect()));
+        let zones = crate::titlebar::zones(WINDOW, crate::titlebar::EDGE, captions);
+        let bars: Vec<egui::Rect> =
+            h.root().children_recursive().filter(|n| n.accesskit_node().role() == Role::ScrollBar).map(|n| n.rect()).collect();
+        assert!(!bars.is_empty(), "a palette that overflows has a scrollbar (compact={compact})");
+        for bar in bars {
+            assert!(zones.iter().all(|(z, ..)| !z.intersect(bar).is_positive()), "{bar:?} lies in a resize zone (compact={compact})");
+        }
+    }
+}
+
 #[test]
 fn the_start_page_has_the_title_bar_too() {
     let mut h = own("");
@@ -130,7 +194,7 @@ fn the_start_page_has_the_title_bar_too() {
     h.run();
     assert!(h.state().home.shown);
     let close = caption(&h, "Close");
-    assert_eq!((close.right(), close.top()), (1280.0 - INSET, INSET));
+    assert_eq!((close.right(), close.top()), (1280.0, 0.0));
     h.get_by_label("Close").click();
     assert!(asked(&mut h).contains(&ViewportCommand::Close));
     let p = pos2(1279.0, 400.0);

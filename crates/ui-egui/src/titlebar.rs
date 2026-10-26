@@ -13,9 +13,10 @@ use crate::style::pal;
 
 /// One caption button, as wide as the system's on Windows.
 pub(crate) const BUTTON_WIDTH: f32 = 46.0;
-/// How far in from the window's edge a press resizes it: Windows' own resize border at 100 % (8 px), in points, so it scales as
-/// the system's does.
-const EDGE: f32 = 8.0;
+/// How far in from the window's edge a press resizes it, in points. The zones lie over the window, so they are as thin as the
+/// room every layout leaves round its controls: the app bar keeps 5 above its buttons, the Floating cards stand off by `GAP`,
+/// the Compact layout's ribbon 7, a Compact card's stroke and padding 3 (and a docked-right card pads its scrollbar in by this).
+pub(crate) const EDGE: f32 = 4.0;
 /// Close's fill under the pointer, as the system's.
 const CLOSE_HOVER: Color32 = Color32::from_rgb(196, 43, 28);
 
@@ -65,10 +66,15 @@ pub(crate) fn drag_area(ui: &Ui, rect: Rect) {
     }
 }
 
+/// Where the caption buttons are this frame, for the window's edges to leave them their presses.
+const CAPTIONS_AT: &str = "caption-buttons";
+
 /// Minimize, Maximize (Restore Down when maximized) and Close at the right end of `bar`, its full height.
 pub(crate) fn caption_buttons(ui: &mut Ui, bar: Rect) {
     let ctx = ui.ctx().clone();
     let max = maximized(&ctx);
+    let cluster = Rect::from_min_max(pos2(bar.right() - 3.0 * BUTTON_WIDTH, bar.top()), bar.right_bottom());
+    ctx.data_mut(|d| d.insert_temp(Id::new(CAPTIONS_AT), cluster));
     for (i, c) in CAPTIONS.into_iter().enumerate() {
         let rect = Rect::from_min_size(pos2(bar.right() - (3 - i) as f32 * BUTTON_WIDTH, bar.top()), vec2(BUTTON_WIDTH, bar.height()));
         let label = t(match c {
@@ -125,20 +131,26 @@ fn glyph(p: &egui::Painter, c: Caption, max: bool, at: egui::Pos2, s: Stroke) {
 }
 
 /// The zones along a window `w` that resize it, `edge` deep: each with the way it resizes and its cursor. The corners come last
-/// and are twice as long, so they win where they meet the edges and are easy to hit.
-fn zones(w: Rect, edge: f32) -> [(Rect, ResizeDirection, CursorIcon); 8] {
+/// and are twice as long, so they win where they meet the edges and are easy to hit. The `captions` (Minimize, Maximize and
+/// Close, in the top right corner) keep their whole area: the top edge stops short of them, the right edge starts under them
+/// and the corner they hold is not one.
+pub(crate) fn zones(w: Rect, edge: f32, captions: Option<Rect>) -> Vec<(Rect, ResizeDirection, CursorIcon)> {
     use ResizeDirection::*;
     let c = 2.0 * edge;
-    [
-        (Rect::from_min_max(w.left_top(), pos2(w.right(), w.top() + edge)), North, CursorIcon::ResizeVertical),
+    let (north_end, east_start) = captions.map_or((w.right(), w.top()), |r| (r.left(), r.bottom()));
+    let mut zones = vec![
+        (Rect::from_min_max(w.left_top(), pos2(north_end, w.top() + edge)), North, CursorIcon::ResizeVertical),
         (Rect::from_min_max(pos2(w.left(), w.bottom() - edge), w.right_bottom()), South, CursorIcon::ResizeVertical),
         (Rect::from_min_max(w.left_top(), pos2(w.left() + edge, w.bottom())), West, CursorIcon::ResizeHorizontal),
-        (Rect::from_min_max(pos2(w.right() - edge, w.top()), w.right_bottom()), East, CursorIcon::ResizeHorizontal),
+        (Rect::from_min_max(pos2(w.right() - edge, east_start), w.right_bottom()), East, CursorIcon::ResizeHorizontal),
         (Rect::from_min_size(w.left_top(), vec2(c, c)), NorthWest, CursorIcon::ResizeNwSe),
-        (Rect::from_min_size(w.right_top() - vec2(c, 0.0), vec2(c, c)), NorthEast, CursorIcon::ResizeNeSw),
         (Rect::from_min_size(w.left_bottom() - vec2(0.0, c), vec2(c, c)), SouthWest, CursorIcon::ResizeNeSw),
         (Rect::from_min_size(w.right_bottom() - vec2(c, c), vec2(c, c)), SouthEast, CursorIcon::ResizeNwSe),
-    ]
+    ];
+    if captions.is_none() {
+        zones.push((Rect::from_min_size(w.right_top() - vec2(c, 0.0), vec2(c, c)), NorthEast, CursorIcon::ResizeNeSw));
+    }
+    zones
 }
 
 /// The window's frame, over everything else: its edges and corners resize it, and a hairline marks its border, as the system's
@@ -152,7 +164,8 @@ pub(crate) fn frame(ui: &mut Ui) {
     let layer = LayerId::new(Order::Foreground, Id::new("window-frame"));
     let top = ui.new_child(egui::UiBuilder::new().layer_id(layer).max_rect(w));
     top.painter().rect_stroke(w, 0.0, Stroke::new(1.0, pal().border), StrokeKind::Inside);
-    for (i, (r, dir, cursor)) in zones(w, EDGE).into_iter().enumerate() {
+    let captions = ctx.data(|d| d.get_temp::<Rect>(Id::new(CAPTIONS_AT)));
+    for (i, (r, dir, cursor)) in zones(w, EDGE, captions).into_iter().enumerate() {
         let resp = top.interact(r, Id::new(("window-edge", i)), Sense::drag()).on_hover_cursor(cursor);
         if resp.drag_started_by(PointerButton::Primary) {
             ctx.send_viewport_cmd(ViewportCommand::BeginResize(dir));
@@ -167,11 +180,22 @@ mod tests {
     #[test]
     fn the_corners_win_where_they_meet_the_edges() {
         let w = Rect::from_min_size(pos2(0.0, 0.0), vec2(1000.0, 700.0));
-        let at = |x: f32, y: f32| zones(w, EDGE).into_iter().rev().find(|(r, ..)| r.contains(pos2(x, y))).map(|(_, d, _)| d);
+        let at = |x: f32, y: f32| zones(w, EDGE, None).into_iter().rev().find(|(r, ..)| r.contains(pos2(x, y))).map(|(_, d, _)| d);
         assert_eq!(at(1.0, 300.0), Some(ResizeDirection::West));
-        assert_eq!(at(15.0, 1.0), Some(ResizeDirection::NorthWest), "a corner reaches twice the edge along it");
-        assert_eq!(at(17.0, 1.0), Some(ResizeDirection::North));
+        assert_eq!(at(7.0, 1.0), Some(ResizeDirection::NorthWest), "a corner reaches twice the edge along it");
+        assert_eq!(at(9.0, 1.0), Some(ResizeDirection::North));
         assert_eq!(at(999.0, 699.0), Some(ResizeDirection::SouthEast));
         assert_eq!(at(500.0, 350.0), None);
+    }
+
+    #[test]
+    fn the_captions_keep_their_area_and_the_edges_start_where_they_end() {
+        let w = Rect::from_min_size(pos2(0.0, 0.0), vec2(1000.0, 700.0));
+        let captions = Rect::from_min_max(pos2(862.0, 0.0), pos2(1000.0, 34.0));
+        let all = zones(w, EDGE, Some(captions));
+        assert!(all.iter().all(|(r, ..)| !r.intersect(captions).is_positive()), "no zone over a caption: {all:?}");
+        let at = |x: f32, y: f32| all.iter().rev().find(|(r, ..)| r.contains(pos2(x, y))).map(|(_, d, _)| *d);
+        assert_eq!(at(861.0, 1.0), Some(ResizeDirection::North), "the top edge runs up to the captions");
+        assert_eq!(at(999.0, 35.0), Some(ResizeDirection::East), "the right edge starts under them");
     }
 }

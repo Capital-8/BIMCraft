@@ -143,8 +143,12 @@ The title bar (`titlebar.rs`). On Windows and Linux the window draws its own (`B
 the window without the system's decorations): the app bar is the title bar. Its bare ground moves the window and a double-click
 there maximizes or restores it (`titlebar::drag_area`, laid out before the bar's buttons so they keep their presses), Minimize,
 Maximize (Restore Down when maximized) and Close sit flush in its right end (`caption_buttons`, 46 points each, Close red under the
-pointer), and `titlebar::frame`, over everything, resizes the window from 8-point zones along its edges (corners twice as long,
-winning where they meet) and draws a hairline round it; a maximized or full-screen window has neither. Moving and resizing are the
+pointer), and `titlebar::frame`, over everything, resizes the window from 4-point zones along its edges (`titlebar::EDGE`; corners twice as long,
+winning where they meet) and draws a hairline round it; a maximized or full-screen window has neither. The zones sit over the window and win
+the hit test, so they are as thin as the room each layout leaves round its controls (the app bar keeps 5 above its buttons, the cards stand off by
+`GAP`, a Compact card 3), the top edge stops short of the caption buttons and the right edge starts under them (`titlebar::zones`, given
+where `caption_buttons` put them this frame), and a Compact card docked right pads its scrollbar in by the same 4. The titlebar tests run in
+the window's real geometry (`own` fills the window, with none of the margin `app()` keeps). Moving and resizing are the
 system's (`StartDrag`, `BeginResize`), so Windows' snapping works, and Close is the system's Close, so unsaved work is asked about.
 The start page has a slim bar of its own (`start_title_bar`). Settings > User Interface > Title bar asks for the system's instead
 (`system_title_bar`, kept in `settings.json`, read by `main` before the window opens and switched at once with `Decorations`);

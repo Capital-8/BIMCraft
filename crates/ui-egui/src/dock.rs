@@ -413,6 +413,11 @@ impl BimApp {
                 Side::Bottom => crate::style::card([true, last, true, true]),
                 _ => crate::style::card([true, true, true, last]),
             };
+            // Flush to the window's right edge (Compact), a card's scrollbar would lie in the zone that resizes the window.
+            let frame = match crate::style::compact() && side == Side::Right && self.own_bar() {
+                true => frame.inner_margin(egui::Margin { right: crate::titlebar::EDGE as i8, ..egui::Margin::ZERO }),
+                false => frame,
+            };
             if last {
                 frame.show(ui, |ui| {
                     ui.set_min_size(ui.available_size());
