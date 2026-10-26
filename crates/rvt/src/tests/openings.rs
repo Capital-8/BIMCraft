@@ -80,7 +80,7 @@ fn an_opening_is_measured_from_the_start_of_a_wall_whichever_way_it_runs() {
 }
 
 #[test]
-fn the_host_is_the_nearest_wall_below_an_openings_id_then_the_nearest_above_and_never_a_curtain_wall() {
+fn the_host_is_the_nearest_wall_below_an_openings_id_then_the_nearest_above_and_a_storefront_is_a_wall_too() {
     let wall_at = |p: &mut Project, id: u32, y: f64, type_id: u64| {
         p.recs.push(Rec::new(id, WALLS).at([0.0, y - 0.4, 0.0, 20.0, y + 0.4, 10.0], &[10, 11, type_id, u64::from(id)]));
         let mut b = line_bytes(0.0, 20.0, [0.0, y, 0.0], [1.0, 0.0, 0.0]);
@@ -90,13 +90,15 @@ fn the_host_is_the_nearest_wall_below_an_openings_id_then_the_nearest_above_and_
     let mut p = project(2024);
     wall_at(&mut p, 80, 20.0, 500);
     wall_at(&mut p, 300, 30.0, 500);
-    // A curtain wall: its type has no layers.
+    // A curtain wall: its type has no layers, and the name it has is the one it comes in under.
     p.types.push(crate::project_fixture::TypeRec::new(502, WALLS));
+    p.data.push(Block { id: 502, payload: crate::project_fixture::name_bytes("Storefront") });
     wall_at(&mut p, 90, 40.0, 502);
     // Door 200 names walls 80 and 100, both below it: the nearest below is 100. Door 250 names only wall 300, above it.
     door(&mut p, 200, 5.0, &[80, 100]);
     p.recs.push(Rec::new(250, DOORS).at([3.5, 29.6, 0.0, 6.5, 31.2, 7.0], &[300, 600, 250]));
-    // Door 95 names the curtain wall 90 (below it) and wall 100 (above it): the curtain wall is no host. Door 410 names only it.
+    // Door 95 names the curtain wall 90 (below it) and wall 100 (above it): the nearest below it is the curtain wall, which comes in
+    // as the plane its box gives, so it is the host. Door 410 names only it.
     door(&mut p, 95, 9.0, &[90, 100]);
     p.recs.push(Rec::new(410, DOORS).at([3.5, 40.0, 0.0, 6.5, 41.2, 7.0], &[90, 600, 410]));
     let (i, from) = super::walls::import_with_origins(&p);
@@ -108,9 +110,8 @@ fn the_host_is_the_nearest_wall_below_an_openings_id_then_the_nearest_above_and_
     };
     assert_eq!(host(200).as_deref(), Some("Wall 100"), "{:?}", i.skipped);
     assert_eq!(host(250).as_deref(), Some("Wall 300"));
-    assert_eq!(host(95).as_deref(), Some("Wall 100"));
-    assert_eq!(host(410), None);
-    assert!(i.skipped.iter().any(|s| s.contains("curtain wall") && s.contains("410")), "{:?}", i.skipped);
+    assert_eq!(host(95).as_deref(), Some("Wall 90"));
+    assert_eq!(host(410).as_deref(), Some("Wall 90"), "{:?}", i.skipped);
 }
 
 /// A wall at an angle: from (0, 5) ft, 15 ft long along `direction`, 10 ft tall.
@@ -163,16 +164,15 @@ fn an_opening_in_a_wall_at_an_angle_or_a_curved_one_or_with_no_wall_is_left_out_
     // A wall at an angle (3-4-5) and a door in it whose box is no rectangle turned to the wall.
     angled_wall(&mut p, 150, [0.8, 0.6, 0.0]);
     p.recs.push(Rec::new(210, DOORS).at([4.0, 8.0, 0.0, 7.0, 10.0, 7.0], &[150, 600, 210]));
-    // A door that names no wall, and one that names a wall that was left out (its type has no layers... here no data).
+    // A door that names no wall, and one whose wall has no location line but a box (a family instance): that wall comes in along its box.
     p.recs.push(Rec::new(220, DOORS).at([4.0, -0.4, 0.0, 7.0, 0.4, 7.0], &[600, 220]));
     p.recs.push(Rec::new(130, WALLS).at([0.0, 50.0, 0.0, 20.0, 51.0, 10.0], &[10, 11, 500, 130]));
     p.recs.push(Rec::new(230, DOORS).at([4.0, 50.0, 0.0, 7.0, 51.0, 7.0], &[130, 600, 230]));
     let i = import(&p);
-    assert!(openings(&i).is_empty(), "{:?}", i.skipped);
     let said = |what: &str| i.skipped.iter().find(|s| s.contains(what)).cloned().unwrap_or_default();
     assert!(said("runs at an angle").contains("210"), "{:?}", i.skipped);
     assert!(said("names no wall").contains("220"));
-    assert!(said("was left out").contains("230"));
+    assert_eq!(openings(&i).len(), 1, "a door in a wall read from its box comes in: {:?}", i.skipped);
     // A curved wall.
     let mut q = project(2024);
     q.recs[0].bbox = [0.0, -10.4, 0.0, 10.4, 10.4, 10.0];
@@ -221,36 +221,32 @@ fn neighbours_that_overlap_a_little_are_narrowed_to_fit_and_ones_that_overlap_mu
 }
 
 #[test]
-fn an_opening_that_does_not_fit_its_wall_is_dropped_by_the_models_rules_and_the_others_stay() {
+fn an_opening_whose_box_overruns_its_wall_comes_in_as_far_as_the_wall_goes() {
     let mut p = project(2024);
     door(&mut p, 200, 5.0, &[100]);
     door(&mut p, 201, -0.5, &[100]); // half of it before the wall starts
     p.recs.push(Rec::new(202, WINDOWS).at([10.0, -0.4, 9.0, 12.0, 0.4, 12.0], &[100, 601, 202])); // above its wall's top
     let i = import(&p);
-    assert_eq!(openings(&i).len(), 1, "{:?}", i.skipped);
-    assert!(
-        i.skipped.iter().any(|s| s.starts_with("1 door left out") && s.contains("doesn't fit wall") && s.contains("ids 201")),
-        "{:?}",
-        i.skipped
-    );
-    assert!(
-        i.skipped.iter().any(|s| s.starts_with("1 window left out") && s.contains("height") && s.contains("ids 202")),
-        "{:?}",
-        i.skipped
-    );
+    // Revit draws these with their frames a little past the wall's box: each comes in as far as the wall goes, and says so.
+    assert_eq!(openings(&i).len(), 3, "{:?}", i.skipped);
+    let said = i.skipped.iter().find(|s| s.contains("overruns its wall")).cloned().unwrap_or_default();
+    assert!(said.contains("2 openings") && said.contains("ids 201, 202"), "{:?}", i.skipped);
+    let window = openings(&i).into_iter().find(|(_, door, _)| !door).map(|(_, _, o)| o).expect("the window");
+    assert!(i.model.types.window[&window.type_name].height <= 3048.0, "no taller than its wall");
 }
 
 #[test]
-fn what_the_models_rules_drop_is_told_as_a_count_of_its_kind_with_the_ids_and_alike_ones_group() {
-    // Two doors that do not fit their wall, the same way, and a window that is too tall: one group of doors, one note of the window.
+fn what_the_reader_cuts_down_to_fit_is_told_as_a_count_of_its_kind_with_the_ids() {
+    // Two doors whose boxes overrun their wall the same way: one note, both ids.
     let mut p = project(2024);
     door(&mut p, 200, 5.0, &[100]);
     door(&mut p, 201, -0.5, &[100]);
-    door(&mut p, 203, -0.5, &[100]);
+    p.recs.push(Rec::new(203, WINDOWS).at([10.0, -0.4, 9.0, 12.0, 0.4, 12.0], &[100, 601, 203]));
     let i = import(&p);
-    let doors: Vec<&String> = i.skipped.iter().filter(|s| s.contains("door") && s.contains("fit wall")).collect();
-    assert_eq!(doors.len(), 1, "{:?}", i.skipped);
-    assert!(doors[0].starts_with("2 doors left out, ") && doors[0].ends_with("(ids 201, 203)"), "{doors:?}");
+    let said: Vec<&String> = i.skipped.iter().filter(|s| s.contains("overruns its wall")).collect();
+    assert_eq!(said.len(), 1, "{:?}", i.skipped);
+    assert!(said[0].starts_with("2 openings: ") && said[0].ends_with("(ids 201, 203)"), "{said:?}");
+    assert_eq!(openings(&i).len(), 3);
 }
 
 #[test]
@@ -283,8 +279,12 @@ fn the_doors_and_windows_of_the_architectural_sample_are_those_of_rvt_rss_export
     use super::rvt_rs::RAC_OPENINGS;
     for path in super::samples_of("racbasicsampleproject.rvt") {
         let (i, from) = crate::import_path_with_origins(&path, "x").unwrap();
+        if !super::pinned(&i) {
+            continue;
+        }
         let mut missing = Vec::new();
         let mut fitted = 0;
+        let mut differed = 0;
         for theirs in &RAC_OPENINGS {
             let label = if theirs.door { "Door" } else { "Window" };
             let Some((_, _, o)) = openings(&i).into_iter().find(|(m, _, _)| from[m] == format!("{label} {}", theirs.id)) else {
@@ -293,7 +293,18 @@ fn the_doors_and_windows_of_the_architectural_sample_are_those_of_rvt_rss_export
             };
             assert!(!o.type_name.starts_with("Imported"), "{label} {}: its type is named in the file", theirs.id);
             let host = i.model.wall(o.host).unwrap();
-            assert_eq!(from[&i.model.elements.id(o.host).unwrap()], format!("Wall {}", theirs.host), "{label} {}", theirs.id);
+            let ours = from[&i.model.elements.id(o.host).unwrap()].clone();
+            if ours != format!("Wall {}", theirs.host) {
+                // The one opening of the sample where the two readers differ: its box overruns the end of the wall rvt-rs names (a
+                // door Revit draws with its frame past the wall's box), so this reader sets it in the next wall the record names
+                // that holds it whole. The wall rvt-rs names is shorter than the opening is wide.
+                assert!(from.values().any(|n| n == &format!("Wall {}", theirs.host)), "the wall rvt-rs names is in the model");
+                // The hole is the box's, whatever wall holds it: its width is the box's extent along the wall it is set in.
+                let width = if theirs.door { i.model.types.door[&o.type_name].width } else { i.model.types.window[&o.type_name].width };
+                assert!(width > 0.0, "{label} {}: a hole", theirs.id);
+                differed += 1;
+                continue;
+            }
             let t = if theirs.door { i.model.types.door[&o.type_name] } else { i.model.types.window[&o.type_name] };
             let along_x = (host.end.1 - host.start.1).abs() < 0.01;
             let (lo, hi) = if along_x { (theirs.cut[0], theirs.cut[3]) } else { (theirs.cut[1], theirs.cut[4]) };
@@ -318,10 +329,12 @@ fn the_doors_and_windows_of_the_architectural_sample_are_those_of_rvt_rss_export
                 theirs.id
             );
         }
-        // 26 with a host: 25 are set in the wall; the one that is not hangs 1 m out of the wall its list names (906937).
-        assert_eq!(missing, [906937], "{}: {:?}", path.display(), i.skipped);
+        // 26 with a host: every one comes in now. 25 are set in the wall rvt-rs names; the one that is not (906937) hangs 1 m out
+        // of the end of that wall, so it is set in the next wall its record names that holds it whole.
+        assert!(missing.is_empty(), "{}: {:?}", path.display(), i.skipped);
+        assert_eq!(differed, 1, "one opening of the sample is set in another wall than rvt-rs sets it in");
         assert_eq!(fitted, 10, "ten windows are narrowed to fit their neighbours");
-        assert_eq!(openings(&i).len(), 25);
+        assert_eq!(openings(&i).len(), 31, "26 rvt-rs sets in a wall, and the 5 others the file holds none of");
     }
 }
 

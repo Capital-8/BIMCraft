@@ -17,9 +17,14 @@ use eframe::wgpu::Backends;
 use serde_json::{Value, json};
 
 /// What a start asks of the graphics, in the order starts that didn't finish try it: wgpu's own choice (every backend the system
-/// has, the fastest adapter first), then each backend alone.
+/// has, the fastest adapter first), then each backend alone. DirectX 12 comes before Vulkan: wgpu lists Vulkan's adapters first
+/// and keeps that order among adapters of the same kind, so on most Windows machines its own choice already was Vulkan, and
+/// a start that died on it (issue 14) learns nothing by trying Vulkan again.
 const LADDER: &[(&str, Option<Backends>)] =
-    &[("automatic", None), ("Vulkan", Some(Backends::VULKAN)), ("DirectX 12", Some(Backends::DX12)), ("OpenGL", Some(Backends::GL))];
+    &[("automatic", None), ("DirectX 12", Some(Backends::DX12)), ("Vulkan", Some(Backends::VULKAN)), ("OpenGL", Some(Backends::GL))];
+
+/// The order of [`LADDER`] in 0.7.0 and 0.8.0, whose `graphics.json` kept a start's place on it, not its name.
+const LEGACY: [&str; 4] = ["automatic", "Vulkan", "DirectX 12", "OpenGL"];
 
 /// The choices this system has. Only Windows has the ladder: that is where starts died (issue 14), macOS has Metal alone, and
 /// OpenGL didn't get a surface on a Wayland desktop it was tried on, so a fallback there would only make a start fail.
@@ -66,13 +71,19 @@ impl Mark {
     fn read_among(path: &Path, choices: usize) -> Mark {
         let text = fs::metadata(path).ok().filter(|m| m.is_file() && m.len() <= MAX_MARK).and_then(|_| fs::read_to_string(path).ok());
         let j: Value = text.and_then(|t| serde_json::from_str(&t).ok()).unwrap_or(Value::Null);
-        let choice = j.get("choice").and_then(Value::as_u64).and_then(|c| usize::try_from(c).ok()).filter(|c| *c < choices);
+        // The backend's name; a mark from 0.8.0 or before has only its old place, which that order's name turns into.
+        let name = j.get("backend").and_then(Value::as_str).or_else(|| {
+            let old = usize::try_from(j.get("choice")?.as_u64()?).ok()?;
+            LEGACY.get(old).copied()
+        });
+        let choice = name.and_then(|n| LADDER.iter().take(choices).position(|(l, _)| *l == n));
         Mark { choice: choice.unwrap_or(0), starting: choice.is_some() && j.get("starting").and_then(Value::as_bool) == Some(true) }
     }
 
     /// Written to `path`, whole or not at all, its folder made if need be.
     pub fn write(self, path: &Path) -> Result<(), String> {
-        let text = json!({ "choice": self.choice, "starting": self.starting }).to_string();
+        let backend = LADDER[self.choice.min(LADDER.len() - 1)].0;
+        let text = json!({ "backend": backend, "starting": self.starting }).to_string();
         if let Some(folder) = path.parent().filter(|f| !f.as_os_str().is_empty()) {
             fs::create_dir_all(folder).map_err(|e| format!("{}: {e}", folder.display()))?;
         }
@@ -222,6 +233,18 @@ mod tests {
     }
 
     #[test]
+    fn after_an_automatic_start_that_died_the_next_tries_directx_12_before_vulkan() {
+        // Issue 14: on a laptop whose Intel graphics take the process down under Vulkan, wgpu's own choice is Vulkan too,
+        // so trying Vulkan alone next only died again; DirectX 12 came up on the third start.
+        let died = Mark { choice: 0, starting: true };
+        let next = died.next_among(LADDER.len());
+        assert_eq!(LADDER[next.choice].0, "DirectX 12");
+        assert_eq!(LADDER[next.choice].1, Some(Backends::DX12));
+        let names: Vec<&str> = LADDER.iter().map(|(name, _)| *name).collect();
+        assert_eq!(names, ["automatic", "DirectX 12", "Vulkan", "OpenGL"]);
+    }
+
+    #[test]
     fn the_mark_is_kept_in_a_file_and_a_missing_damaged_or_odd_one_is_the_default() {
         let file = scratch("mark.json");
         let _ = fs::remove_file(&file);
@@ -241,6 +264,63 @@ mod tests {
         // A file too big to be ours is left alone.
         fs::write(&file, format!(r#"{{"choice": 1, "starting": true, "pad": "{}"}}"#, "x".repeat(MAX_MARK as usize))).unwrap();
         assert_eq!(Mark::read_among(&file, n), Mark::default());
+        let _ = fs::remove_file(file);
+    }
+
+    #[test]
+    fn a_mark_kept_by_0_8_0_means_the_backend_it_named_then_not_the_one_at_that_place_now() {
+        // 0.7.0 and 0.8.0 kept the place on the ladder (automatic, Vulkan, DirectX 12, OpenGL); the ladder has changed since.
+        let file = scratch("legacy.json");
+        let n = LADDER.len();
+        let read = |text: &str| {
+            fs::write(&file, text).unwrap();
+            let mark = Mark::read_among(&file, n);
+            (LADDER[mark.choice].0, mark.starting)
+        };
+        assert_eq!(read(r#"{"choice":0,"starting":false}"#), ("automatic", false));
+        assert_eq!(read(r#"{"choice":1,"starting":false}"#), ("Vulkan", false));
+        assert_eq!(read(r#"{"choice":2,"starting":false}"#), ("DirectX 12", false));
+        assert_eq!(read(r#"{"choice":3,"starting":false}"#), ("OpenGL", false));
+        assert_eq!(read(r#"{"choice":4,"starting":true}"#), ("automatic", false));
+        // A start that never finished on DirectX 12 moves on from DirectX 12, to Vulkan.
+        fs::write(&file, r#"{"choice":2,"starting":true}"#).unwrap();
+        let next = Mark::read_among(&file, n).next_among(n);
+        assert_eq!((LADDER[next.choice].0, next.starting), ("Vulkan", true));
+        let _ = fs::remove_file(file);
+    }
+
+    #[test]
+    fn a_mark_names_its_backend_and_a_name_this_system_doesnt_have_is_no_mark() {
+        let file = scratch("named.json");
+        let n = LADDER.len();
+        for (choice, (name, _)) in LADDER.iter().enumerate() {
+            let mark = Mark { choice, starting: true };
+            mark.write(&file).unwrap();
+            let text = fs::read_to_string(&file).unwrap();
+            assert!(text.contains(&format!("\"backend\":\"{name}\"")) && !text.contains("choice"), "{text}");
+            assert_eq!(Mark::read_among(&file, n), mark);
+        }
+        // The name wins over a stale place; an unknown name, or one beyond `choices`, is the default.
+        fs::write(&file, r#"{"backend":"Vulkan","choice":2,"starting":true}"#).unwrap();
+        assert_eq!(LADDER[Mark::read_among(&file, n).choice].0, "Vulkan");
+        for odd in [r#"{"backend":"Metal","starting":true}"#, r#"{"backend":7,"starting":true}"#, r#"{"backend":"","starting":true}"#] {
+            fs::write(&file, odd).unwrap();
+            assert_eq!(Mark::read_among(&file, n), Mark::default(), "{odd}");
+        }
+        fs::write(&file, r#"{"backend":"OpenGL","starting":true}"#).unwrap();
+        assert_eq!(Mark::read_among(&file, n - 1), Mark::default());
+        assert_eq!(Mark::read_among(&file, 1), Mark::default());
+        let _ = fs::remove_file(file);
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn off_windows_every_start_is_the_first_choice_whatever_the_mark_says() {
+        let file = scratch("elsewhere.json");
+        fs::write(&file, r#"{"backend":"DirectX 12","starting":true}"#).unwrap();
+        assert_eq!(choices().len(), 1);
+        assert_eq!(Mark::read(&file), Mark::default());
+        assert_eq!(Mark::read(&file).next(), Mark { choice: 0, starting: true });
         let _ = fs::remove_file(file);
     }
 

@@ -1,7 +1,7 @@
 //! A sketch's curves closed into regions: what makes a boundary, and what is refused.
 
 use crate::project_fixture::arc_bytes;
-use crate::sketch::{Edge, MAX_EDGES, edge_of, from_edges};
+use crate::sketch::{Edge, MAX_EDGES, edge_of, from_edges, from_edges_closed, from_edges_open, from_edges_snapped};
 
 fn edge(a: (f64, f64), b: (f64, f64)) -> Edge {
     Edge { a, b, mid: Vec::new() }
@@ -52,6 +52,86 @@ fn a_loop_may_hold_a_lens_of_two_curves_between_the_same_ends_but_not_a_curve_tw
 }
 
 #[test]
+fn an_arcs_record_is_read_as_its_arc_where_the_line_it_also_reads_as_falls_inside_its_box() {
+    // The Snowdon sample's curved floors: the record of a quarter arc about (0, 0) from (5, 0) to (0, 5) also reads as the line
+    // (1, 0) to (1, 1.5708), which is inside the box, so taking the line where its ends fit turns the curve into a stub that
+    // closes nothing. The box is the arc's own extent, and only the arc fills it.
+    let quarter = std::f64::consts::FRAC_PI_2;
+    let data = arc_bytes([0.0, quarter], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0], 5.0, [0.0, 0.0, 0.0]);
+    let edge = edge_of(&data, &[0.0, 0.0, 0.0, 5.0, 5.0, 0.0]).expect("the arc");
+    for (got, want) in [(edge.a, (5.0, 0.0)), (edge.b, (0.0, 5.0))] {
+        assert!((got.0 - want.0).abs() < 1e-12 && (got.1 - want.1).abs() < 1e-12, "{got:?} against {want:?}");
+    }
+    assert!(!edge.mid.is_empty(), "the arc is drawn as chords");
+    // A line record whose box is the line's own stays a line.
+    let straight = crate::project_fixture::line_bytes(0.0, 2.0, [1.0, 1.0, 0.0], [0.0, 1.0, 0.0]);
+    let edge = edge_of(&straight, &[1.0, 1.0, 0.0, 1.0, 3.0, 0.0]).expect("the line");
+    assert_eq!((edge.a, edge.b), ((1.0, 1.0), (1.0, 3.0)));
+}
+
+#[test]
+fn a_curve_that_closes_nothing_is_left_out_and_the_loops_it_stands_in_still_close() {
+    // The structural sample's floors have a line floating inside their rectangle (a sketch line that bounds nothing).
+    let mut edges = polygon(&[(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)]);
+    assert!(from_edges(&edges).is_some());
+    edges.push(edge((2.0, 2.0), (2.0, 8.0)));
+    assert!(from_edges(&edges).is_none(), "a curve that closes nothing is no boundary");
+    let (pieces, dropped) = from_edges_open(&edges).expect("the rectangle");
+    assert_eq!(dropped, vec![4]);
+    assert_eq!(pieces.len(), 1);
+    assert_eq!(pieces[0].outer.len(), 4);
+    // A ring and a stray line beside it: the ring, and the line dropped.
+    let mut edges = polygon(&[(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)]);
+    edges.push(edge((30.0, 30.0), (30.0, 40.0)));
+    let (pieces, dropped) = from_edges_open(&edges).expect("the rectangle");
+    assert_eq!((pieces.len(), dropped), (1, vec![4]));
+    // Nothing closed at all: no floor.
+    assert!(from_edges_open(&[edge((0.0, 0.0), (10.0, 0.0)), edge((10.0, 0.0), (10.0, 10.0))]).is_none());
+}
+
+#[test]
+fn a_sketch_left_open_closes_along_a_straight_line_between_its_ends() {
+    // A floor drawn with a side that stops short, as a hand-drawn sketch does: no snap closes it, and the closing line does.
+    let mut edges = polygon(&[(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)]);
+    edges[3].b = (0.0, 0.6);
+    assert!(from_edges(&edges).is_none() && from_edges_snapped(&edges).is_none() && from_edges_open(&edges).is_none());
+    let pieces = from_edges_closed(&edges).expect("the loop, closed by a straight line");
+    assert_eq!(pieces.len(), 1);
+    assert_eq!(pieces[0].outer.len(), 4, "the corner the closing line makes: {:?}", pieces[0].outer);
+    // A room's outline left open at one corner: the two ends are joined by a straight line, which is what the sketch means.
+    let edges = vec![
+        edge((0.0, 0.0), (10.0, 0.0)),
+        edge((10.0, 0.0), (10.0, 10.0)),
+        edge((10.0, 10.0), (2.0, 10.0)),
+        edge((2.0, 10.0), (0.0, 6.0)),
+    ];
+    let pieces = from_edges_closed(&edges).expect("closed");
+    assert_eq!(pieces.len(), 1);
+    assert!(pieces[0].outer.len() >= 5, "{:?}", pieces[0].outer);
+    // More ends open than a sketch has: damage, and nothing is guessed.
+    let mut edges = polygon(&[(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)]);
+    for k in 0..5 {
+        edges.push(edge((f64::from(k), -5.0), (f64::from(k), -4.0)));
+    }
+    assert!(from_edges_closed(&edges).is_none());
+}
+
+#[test]
+fn ends_that_miss_by_a_fraction_of_a_millimetre_still_close_the_loop() {
+    // The Snowdon sample has a floor whose two ends miss by 0.06 mm (0.0002 ft): a drawing's rounding, not a gap.
+    let mut edges = polygon(&[(0.0, 0.0), (30.0, 0.0), (30.0, 40.0), (0.0, 40.0)]);
+    edges[3].b = (0.0002, -0.0001);
+    assert!(from_edges(&edges).is_none(), "a miss is not a vertex");
+    let pieces = from_edges_snapped(&edges).expect("the loop, its ends snapped");
+    assert_eq!(pieces.len(), 1);
+    assert_eq!(pieces[0].outer.len(), 4);
+    // A gap of a centimetre is a gap.
+    let mut edges = polygon(&[(0.0, 0.0), (30.0, 0.0), (30.0, 40.0), (0.0, 40.0)]);
+    edges[3].b = (0.03, 0.0);
+    assert!(from_edges_snapped(&edges).is_none());
+}
+
+#[test]
 fn a_sketch_holds_up_to_the_most_curves_it_is_read_from() {
     let ring = |n: usize| -> Vec<(f64, f64)> {
         (0..n)
@@ -62,6 +142,15 @@ fn a_sketch_holds_up_to_the_most_curves_it_is_read_from() {
     };
     assert_eq!(from_edges(&polygon(&ring(MAX_EDGES))).map(|p| p[0].outer.len()), Some(MAX_EDGES));
     assert!(from_edges(&polygon(&ring(MAX_EDGES + 1))).is_none());
+}
+
+#[test]
+fn a_hostile_sketch_of_a_great_many_loose_curves_is_refused_at_once_by_every_way_of_closing_it() {
+    // Each of these once matched every end against every other: tens of thousands of curves that meet nowhere took minutes.
+    let loose: Vec<Edge> = (0..100_000).map(|k| edge((k as f64 * 10.0, 0.0), (k as f64 * 10.0 + 5.0, 0.0))).collect();
+    let at = std::time::Instant::now();
+    assert!(from_edges_closed(&loose).is_none() && from_edges_snapped(&loose).is_none() && from_edges_open(&loose).is_none());
+    assert!(at.elapsed().as_secs() < 2, "{:?}", at.elapsed());
 }
 
 #[test]

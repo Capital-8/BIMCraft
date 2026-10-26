@@ -7,8 +7,9 @@
 //! The boundary of a sketched element (a floor, a ceiling, a roof): its sketch lines, closed into loops.
 //!
 //! A floor is a sketch: boundary curves closing one outer loop and any number of inner loops. In a 2024 or later project
-//! each curve is a record of its own in the category `OST_SketchLines`, with its box and the sketched element's id as the last
-//! slot of its second reference list; the curve itself, a line or an arc, is the first curve record in its data. Before 2024
+//! each curve is a record of its own in the category `OST_SketchLines`, with its box and the sketch's owner among the ids of its
+//! second reference list; the curve itself, a line or an arc, is the first curve record in its data, and both readings come out of
+//! it, so the box says which the curve is. Before 2024
 //! only the box is read, and a segment parallel to an axis is its box: a diagonal leaves two candidate ends, which the loop
 //! itself settles when exactly one open pair fits.
 //!
@@ -18,6 +19,9 @@ use crate::curves::{BoundedArc, BoundedLine, arc_values_at, line_at};
 
 /// Vertex-coincidence tolerance, in feet.
 const VERTEX_EPS: f64 = 1e-6;
+/// How far apart two dangling ends may be and still be one vertex, in feet: a millimetre and a half, the rounding of a drawing
+/// rather than a gap (the Snowdon sample has a floor whose ends miss by 0.0002 ft, and one of 0.0009).
+const SNAP_EPS: f64 = 0.005;
 /// Relative cross product below which three vertices are collinear.
 const COLLINEAR_EPS: f64 = 1e-9;
 /// Largest distance an arc's chords may stray from it, in feet.
@@ -71,21 +75,41 @@ fn in_box(p: [f64; 3], b: &[f64; 6]) -> bool {
     p[0] >= b[0] - BOX_EPS && p[0] <= b[3] + BOX_EPS && p[1] >= b[1] - BOX_EPS && p[1] <= b[4] + BOX_EPS
 }
 
-/// The curve of a sketch line whose box is `bbox`, from its data: the line reading where both ends are in the box, else the
-/// arc reading where all of it is.
+/// How far a curve's plan extent is from the box the file drew around it, on its worst side. A line record reads as an arc and an
+/// arc record as a line, and it is the box that says which it is: an arc record's line reading often lands inside the arc's box,
+/// so "the ends are inside the box" alone is no test.
+fn misfit<'a>(points: impl Iterator<Item = Pt> + 'a, b: &[f64; 6]) -> f64 {
+    let (mut lo, mut hi) = ((f64::MAX, f64::MAX), (f64::MIN, f64::MIN));
+    for p in points {
+        lo = (lo.0.min(p.0), lo.1.min(p.1));
+        hi = (hi.0.max(p.0), hi.1.max(p.1));
+    }
+    if lo.0 > hi.0 {
+        return f64::MAX;
+    }
+    (lo.0 - b[0]).abs().max((lo.1 - b[1]).abs()).max((hi.0 - b[3]).abs()).max((hi.1 - b[4]).abs())
+}
+
+/// The curve of a sketch line whose box is `bbox`, from its data: the line reading or the arc reading, whichever fits the box,
+/// and none where neither is inside it.
 pub fn edge_of(data: &[u8], bbox: &[f64; 6]) -> Option<Edge> {
     let (line, arc) = sketch_curve(data)?;
-    if let Some(l) = line.filter(|l| in_box(l.start(), bbox) && in_box(l.end(), bbox)) {
+    let straight = line.filter(|l| in_box(l.start(), bbox) && in_box(l.end(), bbox)).and_then(|l| {
         let (s, e) = (l.start(), l.end());
-        return ((s[0] - e[0]).hypot(s[1] - e[1]) > VERTEX_EPS).then(|| Edge { a: (s[0], s[1]), b: (e[0], e[1]), mid: Vec::new() });
+        ((s[0] - e[0]).hypot(s[1] - e[1]) > VERTEX_EPS).then(|| Edge { a: (s[0], s[1]), b: (e[0], e[1]), mid: Vec::new() })
+    });
+    let curved = arc.as_ref().and_then(arc_points).filter(|points| points.iter().all(|p| in_box(*p, bbox))).and_then(|points| {
+        let (first, last) = (points.first()?, points.last()?);
+        let mid = points[1..points.len() - 1].iter().map(|p| (p[0], p[1])).collect();
+        Some(Edge { a: (first[0], first[1]), b: (last[0], last[1]), mid })
+    });
+    match (straight, curved) {
+        (Some(s), Some(c)) => {
+            let ends = |e: &Edge| -> Vec<Pt> { std::iter::once(e.a).chain(e.mid.iter().copied()).chain(std::iter::once(e.b)).collect() };
+            Some(if misfit(ends(&c).into_iter(), bbox) < misfit(ends(&s).into_iter(), bbox) { c } else { s })
+        }
+        (straight, curved) => straight.or(curved),
     }
-    let points = arc_points(&arc?)?;
-    if !points.iter().all(|p| in_box(*p, bbox)) {
-        return None;
-    }
-    let (first, last) = (points.first()?, points.last()?);
-    let mid = points[1..points.len() - 1].iter().map(|p| (p[0], p[1])).collect();
-    Some(Edge { a: (first[0], first[1]), b: (last[0], last[1]), mid })
 }
 
 fn same(a: Pt, b: Pt) -> bool {
@@ -121,11 +145,13 @@ struct Graph {
     vertices: Vertices,
     edges: Vec<(usize, usize)>,
     mids: Vec<Vec<Pt>>,
+    /// Which curve of the sketch each edge came from.
+    source: Vec<usize>,
 }
 
 impl Graph {
     fn new() -> Self {
-        Graph { vertices: Vertices::default(), edges: Vec::new(), mids: Vec::new() }
+        Graph { vertices: Vertices::default(), edges: Vec::new(), mids: Vec::new(), source: Vec::new() }
     }
 
     /// Adds the edge; none when it joins a vertex to itself, repeats an edge, or gives a vertex a third edge.
@@ -149,19 +175,67 @@ impl Graph {
         Some(())
     }
 
+    /// The loops the edges close when the pieces that do not close are left out, and which edges those were: every vertex of a
+    /// kept piece has exactly two edges, and a piece with a dangling end is dropped whole.
+    fn loops_of_closed_pieces(&self) -> (Vec<Vec<Pt>>, Vec<usize>) {
+        // Which piece each vertex belongs to, by walking the edges.
+        let mut piece = vec![usize::MAX; self.vertices.points.len()];
+        let mut next = 0;
+        for &(a, b) in &self.edges {
+            match (piece[a], piece[b]) {
+                (usize::MAX, usize::MAX) => {
+                    piece[a] = next;
+                    piece[b] = next;
+                    next += 1;
+                }
+                (usize::MAX, p) => piece[a] = p,
+                (p, usize::MAX) => piece[b] = p,
+                (p, q) if p != q => {
+                    for slot in piece.iter_mut().filter(|s| **s == q) {
+                        *slot = p;
+                    }
+                }
+                _ => {}
+            }
+        }
+        let mut closed = vec![true; next];
+        for (i, &d) in self.vertices.degree.iter().enumerate() {
+            if d != 2 && piece[i] != usize::MAX {
+                closed[piece[i]] = false;
+            }
+        }
+        let mut kept = Vec::new();
+        let mut dropped = Vec::new();
+        for (i, &(a, _)) in self.edges.iter().enumerate() {
+            if closed[piece[a]] {
+                kept.push(i);
+            } else {
+                dropped.push(i);
+            }
+        }
+        let loops = self.walk(&kept);
+        (loops, dropped)
+    }
+
     /// The loops the edges close, or none unless every vertex has exactly two.
     fn loops(&self) -> Option<Vec<Vec<Pt>>> {
         if self.vertices.degree.iter().any(|&d| d != 2) {
             return None;
         }
+        Some(self.walk(&(0..self.edges.len()).collect::<Vec<_>>()))
+    }
+
+    /// The loops the edges at `kept` close, every one of their vertices having exactly two of them.
+    fn walk(&self, kept: &[usize]) -> Vec<Vec<Pt>> {
         let mut at: Vec<Vec<usize>> = vec![Vec::new(); self.vertices.points.len()];
-        for (i, &(a, b)) in self.edges.iter().enumerate() {
+        for &i in kept {
+            let (a, b) = self.edges[i];
             at[a].push(i);
             at[b].push(i);
         }
         let mut used = vec![false; self.edges.len()];
         let mut loops = Vec::new();
-        for first in 0..self.edges.len() {
+        for &first in kept {
             if used[first] {
                 continue;
             }
@@ -171,7 +245,8 @@ impl Graph {
             ring.extend(self.mids[first].iter().copied());
             while current != start {
                 ring.push(self.vertices.points[current]);
-                let next = at[current].iter().copied().find(|&e| !used[e])?;
+                // Every vertex of a kept piece has two edges, so one of them is always unvisited.
+                let Some(next) = at[current].iter().copied().find(|&e| !used[e]) else { break };
                 used[next] = true;
                 let (a, b) = self.edges[next];
                 if a == current {
@@ -184,7 +259,7 @@ impl Graph {
             }
             loops.push(ring);
         }
-        Some(loops)
+        loops
     }
 }
 
@@ -198,6 +273,121 @@ pub fn from_edges(edges: &[Edge]) -> Option<Vec<Piece>> {
         g.push(e.a, e.b, e.mid.clone())?;
     }
     pieces(g.loops()?)
+}
+
+/// The regions the curves close, leaving out the curves that close nothing (a sketch line floating inside a floor's outline, as
+/// the structural sample has), the index of each of those, or none where no loop closes at all.
+pub fn from_edges_open(edges: &[Edge]) -> Option<(Vec<Piece>, Vec<usize>)> {
+    if edges.len() < 3 {
+        return None;
+    }
+    let mut g = Graph::new();
+    for (i, e) in edges.iter().enumerate() {
+        g.push(e.a, e.b, e.mid.clone())?;
+        g.source.push(i);
+    }
+    let (loops, dropped) = g.loops_of_closed_pieces();
+    if loops.is_empty() {
+        return None;
+    }
+    Some((pieces(loops)?, dropped.into_iter().map(|i| g.source[i]).collect()))
+}
+
+/// The regions the curves close with the ends that do not meet joined by a straight line, or none where more than
+/// MAX_CLOSING ends are open (that is no sketch but damage), or where the lines they make still close nothing.
+pub fn from_edges_closed(edges: &[Edge]) -> Option<Vec<Piece>> {
+    if edges.len() < 3 || edges.len() > MAX_EDGES {
+        return None;
+    }
+    let mut ends: Vec<(Pt, usize)> = Vec::new();
+    for e in edges {
+        for p in [e.a, e.b] {
+            match ends.iter_mut().find(|(q, _)| same(*q, p)) {
+                Some((_, n)) => *n += 1,
+                None => ends.push((p, 1)),
+            }
+        }
+    }
+    let dangling: Vec<Pt> = ends.iter().filter(|(_, n)| *n != 2).map(|(p, _)| *p).collect();
+    if dangling.is_empty() || dangling.len() > MAX_CLOSING || !dangling.len().is_multiple_of(2) {
+        return None;
+    }
+    // Nearest first, each end taken once: a sketch left open by a drawing's slip closes the short way.
+    let mut pairs: Vec<(f64, usize, usize)> = Vec::new();
+    for (i, a) in dangling.iter().enumerate() {
+        for (j, b) in dangling.iter().enumerate().skip(i + 1) {
+            pairs.push(((a.0 - b.0).hypot(a.1 - b.1), i, j));
+        }
+    }
+    pairs.sort_by(|x, y| x.0.total_cmp(&y.0));
+    let mut taken = vec![false; dangling.len()];
+    let mut all: Vec<Edge> = edges.to_vec();
+    for (_, i, j) in pairs {
+        if taken[i] || taken[j] {
+            continue;
+        }
+        taken[i] = true;
+        taken[j] = true;
+        all.push(Edge { a: dangling[i], b: dangling[j], mid: Vec::new() });
+    }
+    from_edges(&all)
+}
+
+/// The most ends a sketch may leave open for from_edges_closed to join: a floor or a roof has a handful, a hostile file more.
+const MAX_CLOSING: usize = 8;
+
+/// The regions the curves close, the ends that miss one another by less than [`SNAP_EPS`] taken for the one vertex they are, or
+/// none unless they close with no choice left.
+pub fn from_edges_snapped(edges: &[Edge]) -> Option<Vec<Piece>> {
+    // The matching of ends below compares each with every other: bounded here like the graph's own edges.
+    if edges.len() > MAX_EDGES {
+        return None;
+    }
+    if let Some(pieces) = from_edges(edges) {
+        return Some(pieces);
+    }
+    // Every end, and how many curves meet at it; the ones no loop leaves alone are the ends a snap may join.
+    let mut ends: Vec<(Pt, usize)> = Vec::new();
+    for e in edges {
+        for p in [e.a, e.b] {
+            match ends.iter_mut().find(|(q, _)| same(*q, p)) {
+                Some((_, n)) => *n += 1,
+                None => ends.push((p, 1)),
+            }
+        }
+    }
+    let dangling: Vec<Pt> = ends.iter().filter(|(_, n)| *n != 2).map(|(p, _)| *p).collect();
+    // A handful of ends may be a drawing's rounding; many are damage, and nothing is guessed then.
+    if dangling.is_empty() || dangling.len() > 8 {
+        return None;
+    }
+    // The pairs worth joining, nearest first, each end taken once.
+    let mut pairs: Vec<(f64, usize, usize)> = Vec::new();
+    for (i, a) in dangling.iter().enumerate() {
+        for (j, b) in dangling.iter().enumerate().skip(i + 1) {
+            let d = (a.0 - b.0).hypot(a.1 - b.1);
+            if d > VERTEX_EPS && d <= SNAP_EPS {
+                pairs.push((d, i, j));
+            }
+        }
+    }
+    pairs.sort_by(|x, y| x.0.total_cmp(&y.0));
+    let mut taken = vec![false; dangling.len()];
+    let mut moves: Vec<(Pt, Pt)> = Vec::new();
+    for (_, i, j) in pairs {
+        if taken[i] || taken[j] {
+            continue;
+        }
+        taken[i] = true;
+        taken[j] = true;
+        moves.push((dangling[i], dangling[j]));
+    }
+    if moves.is_empty() {
+        return None;
+    }
+    let moved = |p: Pt| moves.iter().find(|(from, _)| same(*from, p)).map_or(p, |(_, to)| *to);
+    let joined: Vec<Edge> = edges.iter().map(|e| Edge { a: moved(e.a), b: moved(e.b), mid: e.mid.clone() }).collect();
+    from_edges(&joined)
 }
 
 /// The regions the curves close when only their plan boxes `[min x, min y, max x, max y]` are known.
