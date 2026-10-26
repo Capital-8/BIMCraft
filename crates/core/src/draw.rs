@@ -362,35 +362,123 @@ pub fn offset(c: &Curve, by: f64) -> Option<Curve> {
             let r = radius - by;
             (r > TOL).then_some(Curve::Circle { centre: *centre, radius: r })
         }
-        Curve::Poly { points, arcs, closed } => {
-            let segs = c.segments();
-            let n = points.len();
-            if segs.is_empty() {
-                return None;
-            }
-            // Each segment's way off at its ends, to its left.
-            let normals: Vec<(P2, P2)> = segs.iter().map(|s| (s.tangent(0.0).perp(), s.tangent(s.length()).perp())).collect();
-            let corner = |i: usize| -> P2 {
-                let p = points[i];
-                let before =
-                    if i == 0 { if *closed { normals.last().map(|x| x.1) } else { None } } else { normals.get(i - 1).map(|x| x.1) };
-                let after = if i < segs.len() { normals.get(i).map(|x| x.0) } else { None };
-                match (before, after) {
-                    (Some(a), Some(b)) => {
-                        // Where the two offset ways meet: the mitre.
-                        let m = (a + b).unit();
-                        let cos = m.dot(a);
-                        if cos.abs() < 0.1 { p + a * by } else { p + m * (by / cos) }
-                    }
-                    (Some(a), None) | (None, Some(a)) => p + a * by,
-                    (None, None) => p,
-                }
-            };
-            let pts: Vec<P2> = (0..n).map(corner).collect();
-            let out = Curve::Poly { points: pts, arcs: arcs.clone(), closed: *closed };
-            out.check("").is_ok().then_some(out)
-        }
+        Curve::Poly { arcs, closed, .. } => offset_poly(c, arcs, *closed, by),
         Curve::Ellipse { .. } | Curve::Spline { .. } | Curve::Fit { .. } => curves::offset_fit(c, by),
+    }
+}
+
+/// How far a mitre may reach past the offset, in offsets: a corner sharper than about 1°, whose two moved sides would
+/// meet miles out, is not offset.
+const MITRE: f64 = 50.0;
+
+/// A polyline of lines and arcs moved `by` to its left: each line along itself, each arc round its own centre (a radius
+/// less `by` where it turns left, more where it turns right), and each corner where the two moved sides meet. None where a
+/// side vanishes or turns round (the offset is further in than the line is wide), or two sides never meet.
+fn offset_poly(c: &Curve, arcs: &[f64], closed: bool, by: f64) -> Option<Curve> {
+    let segs = c.segments();
+    let n = segs.len();
+    if n == 0 || !by.is_finite() {
+        return None;
+    }
+    let turn = |i: usize| arcs.get(i).copied().unwrap_or(0.0).signum();
+    // Each side moved: the line it runs along, or the circle.
+    let moved: Vec<Along> = segs
+        .iter()
+        .enumerate()
+        .map(|(i, s)| match (s.centre(), s.radius(), arcs.get(i).is_some_and(|a| *a != 0.0)) {
+            (Some(o), Some(r), true) => {
+                let r = r - turn(i) * by;
+                (r > TOL).then_some(Along::Circle(o, r))
+            }
+            _ => {
+                let u = s.tangent(0.0).perp() * by;
+                Some(Along::Line(s.start + u, s.end + u))
+            }
+        })
+        .collect::<Option<_>>()?;
+    // Where side `i` ends moved and where side `i + 1` begins moved: one point when they join smoothly.
+    let (ends, starts): (Vec<P2>, Vec<P2>) = segs.iter().map(|s| (s.at(s.length(), by), s.at(0.0, by))).unzip();
+    let join = |i: usize, j: usize| -> Option<P2> {
+        let (from, to) = (ends[i], starts[j]);
+        let here = (from + to) * 0.5;
+        let reach = MITRE * by.abs().max(TOL);
+        let x = crossings(moved[i], moved[j])
+            .into_iter()
+            .filter(|x| x.is_finite() && x.dist(here) <= reach)
+            .min_by(|p, q| p.dist(here).total_cmp(&q.dist(here)));
+        // Moved sides that don't cross, or only far away, still join when they already meet.
+        x.or_else(|| (from.dist(to) <= TOL).then_some(here))
+    };
+    // The corners: an open line has its first and last where the first side begins and the last ends.
+    let mut pts: Vec<P2> = Vec::with_capacity(n + 1);
+    if closed {
+        for k in 0..n {
+            pts.push(join((k + n - 1) % n, k)?);
+        }
+    } else {
+        pts.push(starts[0]);
+        for k in 1..n {
+            pts.push(join(k - 1, k)?);
+        }
+        pts.push(ends[n - 1]);
+    }
+    // Each side between its corners: a line stays straight and keeps its way; an arc turns about the same centre as far as
+    // its corners now lie apart, the way it turned, and no further than a turn short of a circle.
+    let mut out_arcs: Vec<f64> = Vec::with_capacity(n);
+    for (i, s) in segs.iter().enumerate() {
+        let (a, b) = (pts[i], pts[(i + 1) % pts.len()]);
+        match moved[i] {
+            Along::Line(..) => {
+                if (b - a).dot(s.end - s.start) <= 0.0 {
+                    return None;
+                }
+                out_arcs.push(0.0);
+            }
+            Along::Circle(o, _) => {
+                let (t, was) = (turn(i), arcs.get(i).copied().unwrap_or(0.0).abs().to_radians());
+                let angle = |p: P2| (p.1 - o.1).atan2(p.0 - o.0);
+                let round = (t * (angle(b) - angle(a))).rem_euclid(std::f64::consts::TAU);
+                // The turn nearest to what it was (it moves by less than a half turn).
+                let now = was + (round - was + std::f64::consts::PI).rem_euclid(std::f64::consts::TAU) - std::f64::consts::PI;
+                if !(now > 1e-9 && now < std::f64::consts::TAU) {
+                    return None;
+                }
+                out_arcs.push(t * now.to_degrees());
+            }
+        }
+    }
+    let out = Curve::Poly { points: pts, arcs: if out_arcs.iter().all(|a| *a == 0.0) { Vec::new() } else { out_arcs }, closed };
+    out.check("").is_ok().then_some(out)
+}
+
+/// Where two lines or circles (run on past their ends) cross: none, one or two points.
+fn crossings(ga: Along, gb: Along) -> Vec<P2> {
+    let line_circle = |p: P2, q: P2, o: P2, r: f64| -> Vec<P2> {
+        let u = (q - p).unit();
+        let f = p - o;
+        let (bb, cc) = (f.dot(u), f.dot(f) - r * r);
+        let disc = bb * bb - cc;
+        if disc < 0.0 {
+            return Vec::new();
+        }
+        let sq = disc.sqrt();
+        vec![p + u * (-bb - sq), p + u * (-bb + sq)]
+    };
+    match (ga, gb) {
+        (Along::Line(p, q), Along::Line(r, t)) => crate::geom::line_intersection(p, q, r, t).into_iter().collect(),
+        (Along::Line(p, q), Along::Circle(o, r)) | (Along::Circle(o, r), Along::Line(p, q)) => line_circle(p, q, o, r),
+        (Along::Circle(o1, r1), Along::Circle(o2, r2)) => {
+            let d = o1.dist(o2);
+            if d < 1e-9 || d > r1 + r2 || d < (r1 - r2).abs() {
+                Vec::new()
+            } else {
+                let x = (d * d + r1 * r1 - r2 * r2) / (2.0 * d);
+                let h = (r1 * r1 - x * x).max(0.0).sqrt();
+                let u = (o2 - o1).unit();
+                let m = o1 + u * x;
+                vec![m + u.perp() * h, m - u.perp() * h]
+            }
+        }
     }
 }
 
@@ -479,35 +567,7 @@ fn along(c: &Curve) -> Option<Along> {
 
 /// Where two lines or arcs meet, run on past their ends: the crossing nearest `near`, or none (parallel, apart).
 pub fn meet(a: &Curve, b: &Curve, near: P2) -> Option<P2> {
-    let (ga, gb) = (along(a)?, along(b)?);
-    let line_circle = |p: P2, q: P2, o: P2, r: f64| -> Vec<P2> {
-        let u = (q - p).unit();
-        let f = p - o;
-        let (bb, cc) = (f.dot(u), f.dot(f) - r * r);
-        let disc = bb * bb - cc;
-        if disc < 0.0 {
-            return Vec::new();
-        }
-        let sq = disc.sqrt();
-        vec![p + u * (-bb - sq), p + u * (-bb + sq)]
-    };
-    let found: Vec<P2> = match (ga, gb) {
-        (Along::Line(p, q), Along::Line(r, t)) => crate::geom::line_intersection(p, q, r, t).into_iter().collect(),
-        (Along::Line(p, q), Along::Circle(o, r)) | (Along::Circle(o, r), Along::Line(p, q)) => line_circle(p, q, o, r),
-        (Along::Circle(o1, r1), Along::Circle(o2, r2)) => {
-            let d = o1.dist(o2);
-            if d < 1e-9 || d > r1 + r2 || d < (r1 - r2).abs() {
-                Vec::new()
-            } else {
-                let x = (d * d + r1 * r1 - r2 * r2) / (2.0 * d);
-                let h = (r1 * r1 - x * x).max(0.0).sqrt();
-                let u = (o2 - o1).unit();
-                let m = o1 + u * x;
-                vec![m + u.perp() * h, m - u.perp() * h]
-            }
-        }
-    };
-    found.into_iter().filter(|p| p.is_finite()).min_by(|x, y| x.dist(near).total_cmp(&y.dist(near)))
+    crossings(along(a)?, along(b)?).into_iter().filter(|p| p.is_finite()).min_by(|x, y| x.dist(near).total_cmp(&y.dist(near)))
 }
 
 /// A line or an arc trimmed or extended to `x` (on it, or on its line or circle run on): the end on the far side of `keep`
@@ -630,6 +690,79 @@ mod tests {
         assert!(offset(&Curve::Circle { centre: P2(0.0, 0.0), radius: 100.0 }, 200.0).is_none(), "inside out");
         let picked = pick(&Curve::line(P2(0.0, 0.0), P2(1000.0, 0.0)), P2(500.0, -50.0), 300.0).unwrap_or_else(|| panic!("pick"));
         assert_eq!(picked, Curve::line(P2(0.0, -300.0), P2(1000.0, -300.0)), "to the side it was picked on");
+    }
+
+    #[test]
+    fn an_offset_polyline_keeps_each_arc_about_its_own_centre_at_a_corner_that_is_not_tangent_too() {
+        // A line, then an arc leaving it 45° to the left: radius 1000, from (1000, 0) up to (1000, 1414.2).
+        let top = 1000.0 * 2f64.sqrt();
+        let p = Curve::Poly { points: vec![P2(0.0, 0.0), P2(1000.0, 0.0), P2(1000.0, top)], arcs: vec![0.0, 90.0], closed: false };
+        for (by, radius) in [(100.0, 900.0), (-100.0, 1100.0)] {
+            let o = offset(&p, by).unwrap_or_else(|| panic!("offset {by}"));
+            let (segs, was) = (o.segments(), p.segments());
+            assert!(segs[1].centre().zip(was[1].centre()).is_some_and(|(c, w)| c.dist(w) < 1e-6), "{by}: about the same centre");
+            assert!(segs[1].radius().is_some_and(|r| (r - radius).abs() < 1e-6), "{by}: radius {:?}", segs[1].radius());
+            // No point of it lies nearer the line than the offset (the chords of an arc may sag by FLAT): it was down to 90.4 mm.
+            let nearest = o.points().iter().map(|q| p.nearest(*q).1).fold(f64::INFINITY, f64::min);
+            assert!(nearest >= by.abs() - curves::FLAT - 1e-6, "{by}: {nearest} mm from the original");
+        }
+        // The same of a D: a half disc, its flat side and its arc, grown and shrunk by a hundred.
+        let d = Curve::Poly { points: vec![P2(0.0, 0.0), P2(4000.0, 0.0)], arcs: vec![0.0, 180.0], closed: true };
+        let radii: Vec<f64> = [100.0, -100.0]
+            .iter()
+            .map(|by| offset(&d, *by).and_then(|o| o.segments().iter().find_map(|s| s.radius())).unwrap_or_default())
+            .collect();
+        assert!(radii.iter().any(|r| (r - 2100.0).abs() < 1e-6) && radii.iter().any(|r| (r - 1900.0).abs() < 1e-6), "{radii:?}");
+    }
+
+    #[test]
+    fn an_offset_further_in_than_a_shape_is_wide_is_none_not_a_smaller_one_turned_inside_out() {
+        let ring = |s: f64| Curve::Poly { points: vec![P2(0.0, 0.0), P2(s, 0.0), P2(s, s), P2(0.0, s)], arcs: vec![], closed: true };
+        // Counter-clockwise, so its left is in: 600 into a square a metre across is past its middle.
+        assert!(offset(&ring(1000.0), 600.0).is_none(), "was a flipped square 200 across");
+        let inner = offset(&ring(1000.0), 400.0).unwrap_or_else(|| panic!("400 in"));
+        assert!((inner.length() - 800.0).abs() < 1e-6, "{}", inner.length());
+        assert!(offset(&ring(1000.0), -600.0).is_some(), "out, it only grows");
+        // Through the Options Bar's Offset: a rectangle shrunk by more than half of it makes nothing.
+        let o = Options { offset: -600.0, ..Options::default() };
+        assert!(make(Shape::Rectangle, &[P2(0.0, 0.0), P2(1000.0, 1000.0)], &o, None).is_none());
+        // An arc whose radius the offset would use up, and a side that turns round.
+        assert!(offset(&Curve::arc(P2(0.0, 0.0), P2(2000.0, 0.0), 180.0), 1100.0).is_none());
+        assert!(offset(&Curve::arc(P2(0.0, 0.0), P2(2000.0, 0.0), 180.0), -1100.0).is_some());
+    }
+
+    #[test]
+    fn a_rectangle_and_a_polygon_grow_and_shrink_by_the_offset_with_their_corners_made_whichever_way_they_are_drawn() {
+        use crate::sketch::{SketchLine, solve};
+        let area = |curves: Vec<Curve>| {
+            let lines: Vec<SketchLine> = curves.into_iter().map(SketchLine::from).collect();
+            solve(&lines).map(|p| p.area()).unwrap_or(f64::NAN)
+        };
+        for (a, b) in [
+            (P2(0.0, 0.0), P2(2000.0, 1000.0)),
+            (P2(2000.0, 1000.0), P2(0.0, 0.0)),
+            (P2(0.0, 1000.0), P2(2000.0, 0.0)),
+            (P2(2000.0, 0.0), P2(0.0, 1000.0)),
+        ] {
+            for (by, sides) in [(100.0, 2200.0 * 1200.0), (-100.0, 1800.0 * 800.0), (0.0, 2000.0 * 1000.0)] {
+                let o = Options { offset: by, ..Options::default() };
+                let made = make(Shape::Rectangle, &[a, b], &o, None).unwrap_or_default();
+                assert_eq!(made.len(), 4);
+                assert!((area(made) - sides).abs() < 1e-3, "{a:?} to {b:?}, offset {by}");
+            }
+        }
+        // A hexagon of apothem 866.025 (corner at 1000): +100 makes it one of 966.025, whose area is 2·√3·a².
+        let hex = |by: f64, shape: Shape| {
+            let o = Options { offset: by, ..Options::default() };
+            area(make(shape, &[P2(0.0, 0.0), P2(1000.0, 0.0)], &o, None).unwrap_or_default())
+        };
+        let a = 1000.0 * 3f64.sqrt() / 2.0;
+        for (by, apothem) in [(100.0, a + 100.0), (-100.0, a - 100.0)] {
+            let want = 2.0 * 3f64.sqrt() * apothem * apothem;
+            assert!((hex(by, Shape::Inscribed) - want).abs() < 1e-3, "inscribed {by}: {}", hex(by, Shape::Inscribed));
+        }
+        // Circumscribed: the side's middle is the clicked point, 1000 out, so +100 makes the apothem 1100.
+        assert!((hex(100.0, Shape::Circumscribed) - 2.0 * 3f64.sqrt() * 1100.0 * 1100.0).abs() < 1e-3);
     }
 
     #[test]
