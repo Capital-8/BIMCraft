@@ -215,6 +215,8 @@ pub struct Drawing {
     /// what is sized already (a view's lines on a sheet).
     pub pens: Vec<Option<Pen>>,
     regions: regions::Layers,
+    /// What it could not draw as asked, in English (a fill pattern too dense for the view): for a front end to say.
+    pub notes: Vec<String>,
     /// What the pens draw in this view, mm on paper: the project's line weights at its scale.
     pub(crate) weights: Weights,
     /// The element being drawn now, and the part of it.
@@ -239,6 +241,7 @@ impl Drawing {
             parts: Vec::new(),
             pens: Vec::new(),
             regions: regions::Layers::default(),
+            notes: Vec::new(),
             weights: Weights::default(),
             owner: None,
             part: Part::Projection,
@@ -251,6 +254,13 @@ impl Drawing {
     pub(crate) fn model_under_regions(&mut self, section: Option<Id>) {
         self.linked_under();
         self.regions = regions::Layers::new(self.prims.len(), section);
+    }
+    /// The picture the section drawn under the regions is over, which they keep the ink of: given by whoever has it, else drawn
+    /// when a region first wants it.
+    pub(crate) fn picture(&mut self, m: &Model, section: Id, image: &Image) {
+        if regions::wanted(m, section) {
+            self.regions.picture(image, self.view);
+        }
     }
 
     /// What the primitives pushed next draw.
@@ -995,17 +1005,28 @@ pub fn section_image(m: &Model, scene: &Scene, id: impl Key, view: View, tints: 
 /// the solids, in poché; its levels, named past its end; the grids it crosses; its notes and spot
 /// elevations; and its name. Cropped, only what lies between its crop's heights.
 pub fn section(m: &Model, id: impl Key, view: View) -> Drawing {
-    section_in(m, id, view, annotation(m, id, view), scale_of(m, id))
+    section_in(m, id, view, annotation(m, id, view), scale_of(m, id), None)
+}
+
+/// [`section`], over `picture`, which [`section_image`] drew (at `view`'s size or a multiple of it): what its regions keep of
+/// the picture's ink comes from there, instead of from a picture drawn again, which costs as much as the picture does.
+pub fn section_over(m: &Model, id: impl Key, view: View, picture: &Image) -> Drawing {
+    section_in(m, id, view, annotation(m, id, view), scale_of(m, id), Some(picture))
 }
 
 /// Section or elevation `id` as `section` draws it, its annotation `k` times the size it is laid out at: a sheet's, at
 /// paper size. Its pens are the line weights' at the scale `k` and `view` make, a viewport's.
 pub fn section_at(m: &Model, id: impl Key, view: View, k: f32) -> Drawing {
-    section_in(m, id, view, k, f64::from(k) * sheet::DENSITY / view.scale)
+    section_in(m, id, view, k, f64::from(k) * sheet::DENSITY / view.scale, None)
+}
+
+/// [`section_at`], over `picture` as [`section_over`] is.
+pub fn section_at_over(m: &Model, id: impl Key, view: View, k: f32, picture: &Image) -> Drawing {
+    section_in(m, id, view, k, f64::from(k) * sheet::DENSITY / view.scale, Some(picture))
 }
 
 /// [`section_at`], its pens the line weights' at 1 : `n`.
-fn section_in(m: &Model, id: impl Key, view: View, k: f32, n: f64) -> Drawing {
+fn section_in(m: &Model, id: impl Key, view: View, k: f32, n: f64, picture: Option<&Image>) -> Drawing {
     let mut d = Drawing::new(view);
     (d.k, d.paper, d.detail, d.weights) = (k, paper_of(n, view.scale), detail_of(m, id), m.line_weights().at(n));
     let Some(v) = m.section(id) else { return d };
@@ -1175,6 +1196,9 @@ fn section_in(m: &Model, id: impl Key, view: View, k: f32, n: f64) -> Drawing {
         d.crop(a, b, |_| false);
     }
     d.model_under_regions(m.elements.id(id));
+    if let (Some(image), Some(section)) = (picture, m.elements.id(id)) {
+        d.picture(m, section, image);
+    }
     // Each level over as much of its extent as the view sees, named past its end.
     for (level, from, to) in level_spans(m, v, &look) {
         let (from, to) = (from.max(first), to.min(last));
@@ -1237,8 +1261,9 @@ fn section_in(m: &Model, id: impl Key, view: View, k: f32, n: f64) -> Drawing {
 pub fn section_png(m: &Model, id: impl Key, view: View) -> Result<Vec<u8>, String> {
     let image = section_image(m, &Scene::new(m), id, view, &[]).ok_or_else(|| format!("{id} is not a section or an elevation"))?;
     let size = tiny_skia::IntSize::from_wh(image.width, image.height).ok_or("the image size is out of range")?;
+    let drawing = section_over(m, id, view, &image);
     let mut pm = Pixmap::from_vec(image.rgba, size).ok_or("the image size is out of range")?;
-    paint(&mut pm, &section(m, id, view));
+    paint(&mut pm, &drawing);
     pm.encode_png().map_err(|e| e.to_string())
 }
 
@@ -2294,15 +2319,9 @@ fn radial(d: &mut Drawing, m: &Model, dim: &Dimension) {
     d.text(&text, (x + u.0 as f32 * w, y - u.1 as f32 * w), d.px(10.0), INK);
 }
 
-/// A text note: its lines down from its top left corner, turned as it is, and its leader with an
-/// arrow at its end.
-/// A detail line, in its style's pen, colour and pattern: its dashes as long on the paper the view stands for as the
-/// pattern says, solid where they'd be too small to see.
-/// A filled region: over the paper where its type masks, its background pattern, then its foreground, each in its colour
-/// (a solid one filled, a drafting one's lengths mm on the view's paper, a model one's mm), then its boundary's lines in
-/// their style, unless it has none. A sketch that doesn't close draws nothing.
 /// Fill pattern `p` over `rings` (model mm; `pieces`, the same with their holes cut out, for a solid one) in `color`, its
-/// lines thin, started at `placed`'s origin and turned its angle. Lines closer than a pixel are too dense to read: left out.
+/// lines thin, started at `placed`'s origin and turned its angle. Lines closer than a pixel are too dense to read: left out,
+/// and so are all of them when there would be more than a drawing can hold, which `d.notes` says.
 fn fill_pattern(d: &mut Drawing, p: &crate::fills::FillPattern, rings: &[Vec<P2>], pieces: &[Vec<P2>], color: Rgb, placed: (P2, f64)) {
     let part = std::mem::replace(&mut d.part, Part::Pattern);
     if p.is_solid() {
@@ -2319,31 +2338,55 @@ fn fill_pattern(d: &mut Drawing, p: &crate::fills::FillPattern, rings: &[Vec<P2>
     };
     let closest = p.lines.iter().map(|l| l.spacing).fold(f64::INFINITY, f64::min) * k * d.view.scale;
     if closest >= 1.0 {
-        for [a, b] in crate::fills::strokes_placed(p, rings, k, window, 50_000, placed).unwrap_or_default() {
-            d.line(&[a, b], Pen::FINE, color, false);
+        match crate::fills::strokes_placed(p, rings, k, window, 50_000, placed) {
+            Some(strokes) => {
+                for [a, b] in strokes {
+                    d.line(&[a, b], Pen::FINE, color, false);
+                }
+            }
+            None => {
+                let who = d.owner.map_or_else(|| "a fill pattern".to_string(), |id| format!("the fill pattern of element {id}"));
+                let note =
+                    format!("{who} has more lines than a view can hold at this scale, so none is drawn: zoom in, or space its lines wider");
+                if d.notes.len() < 32 && !d.notes.contains(&note) {
+                    d.notes.push(note);
+                }
+            }
         }
     }
     d.part = part;
 }
 
+/// A filled region: over the paper where its type masks, its background pattern, then its foreground, each in its colour
+/// (a solid one filled, a drafting one's lengths mm on the view's paper, a model one's mm), then its boundary's lines in
+/// their style, unless it has none. A sketch that doesn't close draws nothing.
 pub(crate) fn filled_region(d: &mut Drawing, m: &Model, r: &FilledRegion) {
     let Some(t) = m.region_types.get(&r.type_name) else { return };
     let Ok(profile) = crate::sketch::solve(&r.sketch) else { return };
     let part = std::mem::replace(&mut d.part, Part::Pattern);
+    let layers: Vec<(&crate::fills::FillPattern, Rgb)> = [(&t.background, t.background_color), (&t.foreground, t.foreground_color)]
+        .into_iter()
+        .filter_map(|(name, [cr, cg, cb])| Some((name.as_ref().and_then(|n| m.fill_patterns.get(n))?, Rgb(cr, cg, cb))))
+        .collect();
     for region in &profile.regions {
         let rings: Vec<Vec<P2>> = std::iter::once(region.outer.clone()).chain(region.holes.iter().cloned()).collect();
-        let pieces = region.holes.iter().fold(vec![region.outer.clone()], |ps, hole| walls::minus(&ps, hole));
+        // Its outline less its holes, as convex pieces: a solid fill and a mask need them, and they cost more than a
+        // pattern's lines do, which run through the rings as they are.
+        let pieces = if t.masking || layers.iter().any(|(p, _)| p.is_solid()) {
+            region.holes.iter().fold(vec![region.outer.clone()], |ps, hole| walls::minus(&ps, hole))
+        } else {
+            Vec::new()
+        };
         if t.masking {
             d.fill(&pieces, PAPER);
             regions::mask(d, &pieces);
         }
         let before_patterns = d.prims.len();
-        for (name, [cr, cg, cb]) in [(&t.background, t.background_color), (&t.foreground, t.foreground_color)] {
-            let Some(p) = name.as_ref().and_then(|n| m.fill_patterns.get(n)) else { continue };
-            fill_pattern(d, p, &rings, &pieces, Rgb(cr, cg, cb), (r.pattern_origin, r.pattern_angle));
+        for (p, color) in &layers {
+            fill_pattern(d, p, &rings, &pieces, *color, (r.pattern_origin, r.pattern_angle));
         }
         if !t.masking && d.prims.len() > before_patterns {
-            regions::foreground(d, m, &pieces);
+            regions::foreground(d, m, &rings);
         }
     }
     d.part = part;
@@ -2358,6 +2401,8 @@ pub(crate) fn filled_region(d: &mut Drawing, m: &Model, r: &FilledRegion) {
     }
 }
 
+/// A detail line, in its style's pen, colour and pattern: its dashes as long on the paper the view stands for as the
+/// pattern says, solid where they'd be too small to see.
 pub(crate) fn detail_line(d: &mut Drawing, m: &Model, l: &DetailLine) {
     let Some(st) = m.line_styles.get(&l.style) else { return };
     let px_per_mm = sheet::DENSITY as f32 * d.paper;
@@ -2539,6 +2584,8 @@ pub(crate) fn detail_group(d: &mut Drawing, m: &Model, g: &crate::groups::Detail
     }
 }
 
+/// A text note: its lines down from its top left corner, turned as it is, and its leader with an
+/// arrow at its end.
 pub(crate) fn note(d: &mut Drawing, n: &Note) {
     let h = d.px((n.size * sheet::DENSITY) as f32);
     // Counter-clockwise in the view, clockwise on screen.
@@ -2711,12 +2758,12 @@ fn hex(c: Rgb) -> String {
     format!("#{:02x}{:02x}{:02x}", c.0, c.1, c.2)
 }
 
-/// SVG path data for a polyline or ring.
 /// A dash's lengths, a space between each: as SVG's `stroke-dasharray` and PDF's `d` take them.
 pub(crate) fn spaced(dash: &[f32]) -> String {
     dash.iter().map(f32::to_string).collect::<Vec<_>>().join(" ")
 }
 
+/// SVG path data for a polyline or ring.
 fn path_data(pts: &[(f32, f32)], closed: bool) -> String {
     let mut s = String::new();
     for (i, (x, y)) in pts.iter().enumerate() {
