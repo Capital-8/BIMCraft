@@ -384,9 +384,9 @@ const WORDS: &[[&str; 3]] = &[
     ],
     ["Dark Mode", "Modo escuro", "Modo oscuro"],
     [
-        "Dark Mode: the window and the views light on dark; sheets stay paper. It starts as your system's theme",
-        "Modo escuro: a janela e as vistas claras sobre fundo escuro; as folhas continuam papel. Começa no tema do sistema",
-        "Modo oscuro: la ventana y las vistas, claras sobre oscuro; los planos siguen siendo papel. Empieza con el tema del sistema",
+        "Choose a theme, including a dark interface with a light canvas",
+        "Escolha um tema, incluindo uma interface escura com uma tela clara",
+        "Elija un tema, incluida una interfaz oscura con un lienzo claro",
     ],
     ["Crop View", "Recortar vista", "Recortar vista"],
     ["Duplicate View", "Duplicar vista", "Duplicar vista"],
@@ -2488,6 +2488,7 @@ const WORDS: &[[&str; 3]] = &[
     ["As the System", "Como o sistema", "Como el sistema"],
     ["Light", "Claro", "Claro"],
     ["Dark", "Escuro", "Oscuro"],
+    ["Dark UI, Light Canvas", "Interface escura, tela clara", "Interfaz oscura, lienzo claro"],
     ["Ribbon", "Faixa de opções", "Cinta de opciones"],
     ["Minimize the ribbon to its tabs", "Minimizar a faixa de opções às abas", "Minimizar la cinta de opciones a sus pestañas"],
     [

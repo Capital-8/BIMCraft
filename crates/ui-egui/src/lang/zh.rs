@@ -180,10 +180,7 @@ pub(super) const WORDS: &[[&str; 2]] = &[
     ["Thin Lines", "细线"],
     ["Thin Lines (TL): every line one pixel wide", "细线 (TL)：所有线条均为一个像素宽"],
     ["Dark Mode", "深色模式"],
-    [
-        "Dark Mode: the window and the views light on dark; sheets stay paper. It starts as your system's theme",
-        "深色模式：窗口和视图为深底浅色；图纸仍保持纸张样式。启动时跟随系统主题",
-    ],
+    ["Choose a theme, including a dark interface with a light canvas", "选择主题，包括深色界面和浅色画布"],
     ["Crop View", "裁剪视图"],
     ["Duplicate View", "复制视图"],
     ["Duplicate", "复制"],
@@ -1536,6 +1533,7 @@ pub(super) const WORDS: &[[&str; 2]] = &[
     ["As the System", "跟随系统"],
     ["Light", "浅色"],
     ["Dark", "深色"],
+    ["Dark UI, Light Canvas", "深色界面，浅色画布"],
     ["Ribbon", "功能区"],
     ["Minimize the ribbon to its tabs", "将功能区最小化为选项卡"],
     [
