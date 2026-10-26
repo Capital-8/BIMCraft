@@ -16,6 +16,10 @@ placed with no scale takes the view's. The units name the scales and list the on
 1" = 200'-0"), and 1 : n for any other. The Scale menu, Properties, templates and sheets' titles name them so, and a scale is typed
 as n, 1 : n, or two lengths (`1/4" = 1'-0"`).
 
+The view control bar's High Contrast Point Clouds (`footer.rs`, wherever the project or a link holds a scan, in a plan, a section, an elevation
+and the 3D view) fills the view's `pointcloud` category with one colour, the user's, in one `graphics` command; how it behaves is in
+[point clouds](point-clouds.md).
+
 Paper space and model space. A view's geometry is model millimetres; its annotation and its line weights are millimetres of the paper the
 view stands for, 1 : n of the model. A sheet is that paper ([`sheet::DENSITY`] px to the mm). On screen, or in an image of a view, `k`
 says how big the paper is at the zoom: a paper mm is `DENSITY * k` px. A line's weight is a pen (`pen.rs`): 1 to 16, each a width on

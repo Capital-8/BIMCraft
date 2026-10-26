@@ -72,11 +72,15 @@ dark canvas, dims them so the lightened ink over them still reads. A scan the vi
 `Look::filled`) is ink itself: its picture is marked `ink` and the dark canvas leaves it undimmed.
 
 A scan's own colours are mid-tones that read poorly over paper or the dark canvas, so the view control bar (`footer.rs`) has
-High Contrast Point Clouds wherever the project has a scan: it fills the view's `pointcloud` category with `HIGH_CONTRAST`, a
+High Contrast Point Clouds wherever the project or a model it links holds a scan (the bar asks the model the views draw whether it holds
+one, which is cheap because a command drops a scan nothing places): it fills the view's `pointcloud` category with `HIGH_CONTRAST`, a
 crimson that reads on both and apart from the model's black lines (or the colour the user picks in Settings > Graphics, kept
 as `high_contrast` in `settings.json` and read back only when it is `[r, g, b]`), through the `graphics` command (merged into the category's
 override, so its halftone or lines stay), and again takes the fill away. It is lit whenever the category has a fill, whoever set
-it, and greyed out when a view template controls the categories.
+it, and greyed out when a view template controls the categories. It sets the category's override and no other: `Look::of` applies the
+category's, then each view filter's, then the element's own, the last prevailing, so a scan given a colour of its own in
+Visibility/Graphics (or picked out by a filter that fills) keeps it whatever the button does. The button is lit for the category
+and can't tell, since what the scans come to is the whole `Look` for every frame of the bar; its tooltip says so instead.
 
 A plan snaps to a scan where its cut plane cuts it, to trace what was measured: of the points within `snap::CUT_BAND` of the cut,
 the nearest to the cursor seen from above (`Kind::Point`, "Point Cloud", switched by `Snaps::cloud` in Manage > Snaps). It comes

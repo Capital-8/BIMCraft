@@ -91,7 +91,9 @@ fn pick_colour(h: &mut Harness<BimApp>, to: [u8; 3]) {
     h.get_by_role_and_label(Role::ColorWell, "High contrast colour").click();
     h.run();
     for (k, letter) in ["R", "G", "B"].into_iter().enumerate() {
-        let field = |text: String| move |n: &egui_kittest::kittest::AccessKitNode<'_>| n.role() == Role::SpinButton && n.value().as_deref() == Some(&text);
+        let field = |text: String| {
+            move |n: &egui_kittest::kittest::AccessKitNode<'_>| n.role() == Role::SpinButton && n.value().as_deref() == Some(&text)
+        };
         let now = h.state().scan_contrast[k];
         h.get_by(field(format!("{letter} {now}"))).click();
         h.run();
@@ -335,4 +337,66 @@ fn a_dark_canvas_dims_a_scans_own_colours_but_not_the_colour_high_contrast_gives
     press(&mut h, "Dark Mode");
     assert!(!crate::style::dark());
     assert_eq!(picture_tints(&h), [egui::Color32::WHITE]);
+}
+
+#[test]
+fn high_contrast_is_offered_where_only_a_linked_model_holds_the_scans_and_fills_them() {
+    use bimcraft_core::graphics::Look;
+    let dir = tempfile::tempdir().unwrap();
+    let survey = dir.path().join("survey.bimcraft");
+    let mut s = Session::new();
+    s.execute("point_cloud", &json!({"path": face("link", "face.xyz", 0.0)})).unwrap();
+    s.execute("save", &json!({"path": survey})).unwrap();
+    let mut h = app("");
+    assert!(h.query_by_label("High Contrast Point Clouds").is_none(), "no scan, no button");
+    h.state_mut().link_path(&survey);
+    h.run();
+    // The project holds no scan of its own: the link builds one, which the plan draws.
+    assert!(h.state().session.model.clouds.is_empty() && scans(&h).is_empty());
+    press(&mut h, "High Contrast Point Clouds");
+    let drawn = h.state_mut().view_model();
+    let linked = drawn.elements.iter().find(|(_, e)| matches!(e, Element::PointCloud(_))).map(|(id, _)| *id).unwrap();
+    let level = drawn.levels()[0].0;
+    assert!(Look::of(&drawn, level).filled(linked), "the linked scan is drawn in the colour");
+    assert!(lit(&h, "High Contrast Point Clouds"));
+}
+
+#[test]
+fn high_contrast_goes_with_the_last_scan_placed_and_comes_back_with_it() {
+    let path = face("last", "face.xyz", 0.0);
+    let mut h = app(&format!("point_cloud {}", json!({"path": path})));
+    assert!(h.query_by_label("High Contrast Point Clouds").is_some());
+    // The bar asks only whether the project holds a scan; a scan nothing places is dropped by the command that left it so.
+    let placed = scans(&h);
+    h.state_mut().run("delete", json!({"ids": placed}));
+    h.run();
+    assert!(h.state().session.model.clouds.is_empty());
+    assert!(h.query_by_label("High Contrast Point Clouds").is_none());
+    h.state_mut().run("undo", json!({}));
+    h.run();
+    assert!(h.query_by_label("High Contrast Point Clouds").is_some());
+}
+
+#[test]
+fn a_scan_with_a_colour_of_its_own_keeps_it_and_the_buttons_tip_says_so() {
+    use bimcraft_core::graphics::Look;
+    use bimcraft_core::render::Rgb;
+    let path = face("own", "face.xyz", 0.0);
+    let mut h = app(&format!("point_cloud {}", json!({"path": path})));
+    let scan = scans(&h)[0];
+    // A colour given to this scan alone comes after the category's, whatever the category says.
+    h.state_mut().run("graphics", json!({"elements": {scan.to_string(): {"projection": {"fill": [0, 255, 0]}}}}));
+    h.run();
+    press(&mut h, "High Contrast Point Clouds");
+    let m = &h.state().session.model;
+    assert_eq!(Look::of(m, m.levels()[0].0).surface(scan, Rgb(1, 2, 3)), Rgb(0, 255, 0), "the scan keeps its own colour");
+    assert!(lit(&h, "High Contrast Point Clouds"), "the button lights for the category, which is what it sets");
+    // The tip says the button doesn't reach it.
+    let at = h.get_by_role_and_label(Role::Button, "High Contrast Point Clouds").rect().center();
+    h.hover_at(at);
+    for _ in 0..4 {
+        h.run();
+    }
+    let said = painted_text(&h).into_iter().find(|t| t.starts_with("High Contrast Point Clouds:")).unwrap_or_default();
+    assert!(said.contains("a colour of its own in Visibility/Graphics keeps it"), "{said:?}");
 }

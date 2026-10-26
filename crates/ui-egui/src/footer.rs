@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use bimcraft_core::engine::Session;
 use bimcraft_core::graphics::{self, ANNOTATION, Detail, Group, MODEL, VisualStyle};
-use bimcraft_core::model::{Element, Id, Model};
+use bimcraft_core::model::{Id, Model};
 use egui::{
     Color32, FontId, Frame, Key, Margin, Popup, Response, RichText, Sense, Shape, Stroke, StrokeKind, TextEdit, Ui, WidgetInfo, WidgetType,
     pos2, vec2,
@@ -248,10 +248,16 @@ impl BimApp {
     /// command, one undo step.
     pub(crate) fn toggle_scan_contrast(&mut self) {
         let Some(view) = self.graphic_view() else { return };
-        let filled = self.graphics_shown().categories.get(graphics::SCANS[0]).is_some_and(|o| o.projection.fill.is_some());
+        let filled = self.scans_filled();
         // The command merges what it's given into the override: a null fill takes it away.
         let fill = if filled { Value::Null } else { json!(self.scan_contrast) };
         self.run("graphics", json!({"view": view, "categories": {graphics::SCANS[0]: {"projection": {"fill": fill}}}}));
+    }
+
+    /// Whether the view fills its point clouds with a colour, whoever set it. That is the category's override, which a scan's own
+    /// (or a view filter's) comes after: a scan with its own colour is lit here and keeps it.
+    fn scans_filled(&self) -> bool {
+        self.graphics_shown().categories.get(graphics::SCANS[0]).is_some_and(|o| o.projection.fill.is_some())
     }
 
     /// The Scale and Detail Level menus of a plan, a ceiling plan, a section or an elevation, `view`: what the view keeps.
@@ -370,12 +376,13 @@ impl BimApp {
                 if small_button(ui, Icon::Reveal, "Reveal Hidden Elements", temp.reveal, tip).clicked() {
                     self.temp_reveal();
                 }
-                // Only where the project has a scan to show.
-                if self.session.model.elements.values().any(|e| matches!(e, Element::PointCloud(_))) {
-                    let filled = self.graphics_shown().categories.get(graphics::SCANS[0]).is_some_and(|o| o.projection.fill.is_some());
+                // Only where there is a scan to show: the project's or a link's. A command drops a scan nothing places, so one held
+                // is one placed.
+                if !self.linked_model().clouds.is_empty() {
+                    let filled = self.scans_filled();
                     let set_by = self.controlled_by(Group::Categories);
                     let tip = "High Contrast Point Clouds: draw this view's scans in one strong colour, so what they show reads; \
-                               again for their own colours";
+                               again for their own colours. A scan given a colour of its own in Visibility/Graphics keeps it.";
                     let r = ui
                         .add_enabled_ui(set_by.is_none(), |ui| {
                             small_button(ui, Icon::PointCloud, "High Contrast Point Clouds", filled, tip)
