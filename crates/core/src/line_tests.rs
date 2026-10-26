@@ -346,6 +346,37 @@ fn fillet_rounds_two_walls_with_an_arc_wall_of_the_first_ones_type() {
 }
 
 #[test]
+fn arcs_that_reach_past_the_model_and_polylines_that_would_take_millions_of_points_are_refused_at_once() {
+    let mut s = Session::new();
+    let before = s.model.clone();
+    let wiggle = |n: usize, turn: f64| -> Value {
+        let points: Vec<Value> = (0..n).map(|i| json!([i as f64 * 1.0e4, if i % 2 == 0 { 0.0 } else { 100.0 }])).collect();
+        json!({"points": points, "arcs": vec![turn; n - 1]})
+    };
+    let hostile = [
+        (json!({"start": [0, 0], "end": [1000, 0], "arc": 359.9999999999}), "reaches further"),
+        (json!({"start": [0, 0], "end": [1000, 0], "through": [500, 1e-9]}), ""),
+        (json!({"centre": [1e9, 1e9], "radius": 1e9}), "reaches further"),
+        (json!({"centre": [9e8, 0], "radii": [2e8, 100]}), "reaches further"),
+        (wiggle(10_000, 175.0), "points to draw within"),
+        (wiggle(10_000, 350.0), "points to draw within"),
+    ];
+    for (p, says) in hostile {
+        let t = std::time::Instant::now();
+        let r = s.execute("detail_line", &p);
+        assert!(t.elapsed().as_secs_f64() < 1.0, "{} s", t.elapsed().as_secs_f64());
+        if says.is_empty() {
+            // Near-straight enough to be a line: made, as a line.
+            assert!(r.is_ok(), "{r:?}");
+            continue;
+        }
+        let e = r.unwrap_err();
+        assert!(e.contains(says), "{p}: {e}");
+    }
+    assert_eq!(s.model.elements.len(), before.elements.len() + 1, "only the near-straight one was made");
+}
+
+#[test]
 fn fillet_leaves_a_wall_s_doors_where_they_are_in_the_plan_and_refuses_to_cut_one_off() {
     let mut s = Session::new();
     // Wall a starts at the corner, so a fillet moves its start along it by 1500.

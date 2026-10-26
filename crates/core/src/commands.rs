@@ -163,7 +163,10 @@ pub static ALL: &[Command] = &[
          [[x,y],[x,y]], structural?} a slab (a structural one with `structural`, as Revit's Floor: Structural), its top at the level, or `offset` mm above it, open through `openings` (holes inside it, apart); no boundary = the outline \
          of the level's walls along their centre lines, open over each loop of them standing free inside, joined to none of \
          the outer ones and with no room in it (a courtyard). Sloped: its top rises `slope` degrees (negative, falls) along \
-         the slope arrow, from its tail, where it's at the offset, toward its head",
+         the slope arrow, from its tail, where it's at the offset, toward its head. An outline, and each opening, is simple: \
+         no edge across another or along it, none ending part way along one, no spike or keyhole slit (`ceiling`, `roof` \
+         and `shaft` too, and `modify`, `move` and `edit_boundary` of any of them: they are refused, saying which edges); a \
+         file that has one still opens, and works until a command changes its outline",
         floor,
     ),
     edit(
@@ -182,8 +185,11 @@ pub static ALL: &[Command] = &[
          either way round, joined end to end (within 1 mm) into closed loops; a loop inside no other (or inside a hole) an \
          outline, counter-clockwise, one inside an outline a hole in it, clockwise. Gives each region's `outline`, `holes` and \
          `area_m2`, or every problem with the lines it's about (numbered from 0): ends no other line meets, lines that \
-         intersect or overlap, three or more lines at a point. `sketch` on floor, ceiling, roof and shaft, and edit_boundary, \
-         take the same lines for one outline and its holes",
+         intersect or overlap (a line too: a polyline round a bow tie crosses itself), three or more lines at a point. \
+         A sketch is solved as the straight pieces its lines are drawn with (an arc, a circle or a curve is cut into chords, \
+         a circle into up to 8,193): past 200,000 of them, or when they lie so close together that telling which cross \
+         takes more than ten million steps, it is refused at once. `sketch` on floor, ceiling, roof and shaft, and \
+         edit_boundary, take the same lines for one outline and its holes",
         sketch_lines,
     ),
     edit(
@@ -202,7 +208,8 @@ pub static ALL: &[Command] = &[
         "{id, sketch?: [[[x,y],[x,y]],…]} redraws a floor's, a ceiling's, a roof's footprint's or a shaft's outline and its \
          holes (a floor's or a ceiling's openings, a roof's courtyards; a shaft has none) as a sketch, all at once (see \
          `sketch`); a roof's gable edges stay gables where the new footprint has the same edge. Without `sketch`, gives the \
-         outline and holes it has now, as the lines to edit",
+         outline and holes it has now, as the lines to edit. The outline must be simple, as `floor` says; a line that \
+         crosses itself is found as two that cross are",
         edit_boundary,
     ),
     edit(
@@ -690,7 +697,8 @@ pub static ALL: &[Command] = &[
         "modify",
         "Modify",
         &[],
-        "{id | ids: [id,…], …fields} change fields as `elements` shows them, of one element or several; `level` and `top_level` may be names",
+        "{id | ids: [id,…], …fields} change fields as `elements` shows them, of one element or several; `level` and `top_level` may be names. A floor's, a \
+         ceiling's, a roof's or a shaft's outline it sets is held to what `floor` says of it",
         modify,
     ),
     edit(
@@ -960,7 +968,10 @@ pub static ALL: &[Command] = &[
          or a sheet by number (paper mm). It draws in line style `style` (Thin Lines unless told), only in its view, and \
          goes with it; with `insulation`, a width in mm, it draws as batt insulation along its curve, as Revit's Insulation; \
          with `centre_mark` true, a small cross marks the centre of its arcs, circle or ellipse; with `cloud`, an arc length \
-         in mm, it draws as a revision cloud's scallops along it (outward round a loop), of `revision` (any text)",
+         in mm, it draws as a revision cloud's scallops along it (outward round a loop), of `revision` (any text). An \
+         arc, a circle or an ellipse lies within 1,000 km of the origin (an arc of 359.9999999999° is a circle of radius \
+         5.7e14 mm, and is refused), and a polyline's arcs take no more than 8,192 points to draw within 0.25 mm: 10,000 \
+         arcs of 175° are refused",
         detail_line,
     ),
     edit(
