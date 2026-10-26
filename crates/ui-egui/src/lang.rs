@@ -221,6 +221,7 @@ pub fn category(category: &str, several: bool) -> String {
         "schedule" => (["Schedule", "Tabela", "Tabla"], ["Schedules", "Tabelas", "Tablas"]),
         "view3d" => (["3D View", "Vista 3D", "Vista 3D"], ["3D Views", "Vistas 3D", "Vistas 3D"]),
         "link" => (["Linked Model", "Modelo vinculado", "Modelo vinculado"], ["Linked Models", "Modelos vinculados", "Modelos vinculados"]),
+        "pointcloud" => (["Point Cloud", "Nuvem de pontos", "Nube de puntos"], ["Point Clouds", "Nuvens de pontos", "Nubes de puntos"]),
         other => return other.to_string(),
     };
     get().project().of(if several { many } else { one }).to_string()
@@ -1761,7 +1762,57 @@ const WORDS: &[[&str; 3]] = &[
     ["Order", "Ordem", "Orden"],
     // Revit's shortcuts: Keyboard Shortcuts (KS), the names it gives those no ribbon button has, and what Create
     // Similar and Select All Instances say when nothing fits.
-    ["Keyboard Shortcuts", "Atalhos de teclado", "Atajos de teclado"],
+    ["Keyboard Shortcuts", "Teclas de Atalho", "Atajos de teclado"],
+    ["Shortcuts", "Teclas de Atalho", "Atajos de teclado"],
+    [
+        "Keyboard Shortcuts (KS): customize, edit, and load shortcut keys",
+        "Teclas de Atalho (KS): personalize, edite e carregue teclas de atalho",
+        "Atajos de teclado (KS): personalizar, editar y cargar teclas de atajo",
+    ],
+    ["Load File...", "Carregar arquivo...", "Cargar archivo..."],
+    ["Add Shortcut", "Adicionar tecla de atalho", "Añadir atajo"],
+    ["Restore Defaults", "Restaurar padrões", "Restaurar valores predeterminados"],
+    ["Shortcut Keys:", "Teclas de atalho:", "Teclas de método abreviado:"],
+    ["Command / Tool:", "Comando / Ferramenta:", "Comando / Herramienta:"],
+    ["Edit", "Editar", "Editar"],
+    ["The shortcut '{}' already exists for '{}'.", "O atalho '{}' já existe para '{}'.", "El atajo '{}' ya existe para '{}'."],
+    ["Shortcut '{}' added for '{}'.", "Atalho '{}' adicionado para '{}'.", "Atajo '{}' añadido para '{}'."],
+    ["Shortcut '{}' updated.", "Atalho '{}' atualizado.", "Atajo '{}' actualizado."],
+    ["Loaded {} shortcuts from file.", "Carregados {} atalhos do arquivo.", "Cargados {} atajos del archivo."],
+    [
+        "That is too big to be a shortcuts file.",
+        "Isso é grande demais para ser um arquivo de atalhos.",
+        "Eso es demasiado grande para ser un archivo de atajos.",
+    ],
+    ["{} Skipped {}.", "{} Ignorados: {}.", "{} Omitidos: {}."],
+    [
+        "Shortcut keys are two characters, letters or numbers.",
+        "As teclas de atalho têm dois caracteres, letras ou números.",
+        "Las teclas de atajo son dos caracteres, letras o números.",
+    ],
+    [
+        "Select an element first to match its properties",
+        "Selecione um elemento primeiro para igualar suas propriedades",
+        "Seleccione un elemento primero para igualar sus propiedades",
+    ],
+    [
+        "The selected element has no type to match",
+        "O elemento selecionado não possui tipo para igualar",
+        "El elemento seleccionado no tiene tipo para igualar",
+    ],
+    [
+        "Match Properties: source type '{}' selected. Select target elements and press MA again.",
+        "Igualar propriedades: tipo de origem '{}' selecionado. Selecione os elementos de destino e pressione MA novamente.",
+        "Igualar propiedades: tipo de origen '{}' seleccionado. Seleccione los elementos de destino y presione MA nuevamente.",
+    ],
+    [
+        "Matched properties: applied type '{}' to {} element(s)",
+        "Propriedades igualadas: tipo '{}' aplicado a {} elemento(s)",
+        "Propiedades igualadas: tipo '{}' aplicado a {} elemento(s)",
+    ],
+    ["Select an action to assign.", "Selecione uma ação para atribuir.", "Seleccione una acción para asignar."],
+    ["Failed to read file: {}", "Falha ao ler arquivo: {}", "Error al leer el archivo: {}"],
+    ["Match Properties", "Igualar propriedades", "Igualar propiedades"],
     ["Create Similar", "Criar similar", "Crear similar"],
     ["Select All Instances", "Selecionar todas as instâncias", "Seleccionar todos los ejemplares"],
     ["Aligned Dimension", "Cota alinhada", "Cota alineada"],
@@ -1776,6 +1827,37 @@ const WORDS: &[[&str; 3]] = &[
         "selecione primeiro um elemento que tenha um tipo",
         "selecciona primero un elemento que tenga un tipo",
     ],
+    // Insert > Point Cloud.
+    ["Insert", "Inserir", "Insertar"],
+    ["Link", "Vincular", "Vincular"],
+    [
+        "Point Cloud: laser scans (PTS, XYZ, PLY, LAS or E57) brought into the project, one file or a survey's stations as one scan, drawn in the 3D view, plans and sections and snapped to",
+        "Nuvem de pontos: escaneamentos a laser (PTS, XYZ, PLY, LAS ou E57) trazidos para o projeto, um arquivo ou as estações de um levantamento como um só escaneamento, desenhados na vista 3D, nas plantas e nos cortes e usados como snap",
+        "Nube de puntos: escaneos láser (PTS, XYZ, PLY, LAS o E57) traídos al proyecto, un archivo o las estaciones de un levantamiento como un solo escaneo, dibujados en la vista 3D, las plantas y los cortes y usados como referencia",
+    ],
+    ["Point clouds", "Nuvens de pontos", "Nubes de puntos"],
+    [
+        "{} files, brought in as one scan's stations",
+        "{} arquivos, trazidos como as estações de um só escaneamento",
+        "{} archivos, traídos como las estaciones de un solo escaneo",
+    ],
+    ["Units", "Unidades", "Unidades"],
+    ["Spacing (mm)", "Espaçamento (mm)", "Espaciado (mm)"],
+    ["all the points", "todos os pontos", "todos los puntos"],
+    ["Positioning", "Posicionamento", "Posicionamiento"],
+    ["Auto - Center to Center", "Auto - Centro a centro", "Auto - Centro a centro"],
+    ["Auto - Origin to Origin", "Auto - Origem a origem", "Auto - Origen a origen"],
+    [
+        "Its middle on the project's origin and its foot on the level",
+        "O meio dele na origem do projeto e a base dele no nível",
+        "Su centro en el origen del proyecto y su base en el nivel",
+    ],
+    [
+        "Where its file's coordinates put it, as the survey placed it",
+        "Onde as coordenadas do arquivo o colocam, como o levantamento o posicionou",
+        "Donde lo ponen las coordenadas de su archivo, como lo situó el levantamiento",
+    ],
+    ["Scan", "Escaneamento", "Escaneo"],
     // Snaps and the ruler.
     ["Measure", "Medir", "Medir"],
     [
@@ -1808,6 +1890,12 @@ const WORDS: &[[&str; 3]] = &[
     ["Centre", "Centro", "Centro"],
     ["Perpendicular", "Perpendicular", "Perpendicular"],
     ["Nearest", "Mais próximo", "Más cercano"],
+    ["Point Cloud", "Nuvem de pontos", "Nube de puntos"],
+    [
+        "A scan's points where the plan's cut plane cuts it, to trace what was measured",
+        "Os pontos de um escaneamento onde o plano de corte da planta o corta, para seguir o que foi medido",
+        "Los puntos de un escaneo donde el plano de corte de la planta lo corta, para seguir lo que se midió",
+    ],
     [
         "The ends of walls, grids and what else is drawn, and the points picked so far",
         "As extremidades de paredes, eixos e do que mais estiver desenhado, e os pontos já clicados",
