@@ -45,11 +45,16 @@ warn() {
   if [ -n "${GITHUB_ACTIONS:-}" ]; then echo "::warning::$*"; else echo "warning: $*" >&2; fi
 }
 
-# The readme, the licences and the notice (a build that includes the Revit reader is Apache-2.0, which asks for it), into a
+# The readme, the licences and the notice (a build that includes the Revit reader is Apache-2.0, which asks for it), and the
+# licence of the fonts the desktop's executable holds (the OFL asks for it with every copy; NOTICE says where it is), into a
 # package's directory.
 copy_docs() {
-  local dest="$1" f
+  local dest="$1" f font
   for f in README.md LICENSE-MIT LICENSE-APACHE NOTICE; do
     cp "$ROOT/$f" "$dest/"
+  done
+  for font in ibm-plex-sans ibm-plex-mono; do
+    mkdir -p "$dest/fonts/$font"
+    cp "$ROOT/assets/fonts/$font/OFL.txt" "$dest/fonts/$font/"
   done
 }

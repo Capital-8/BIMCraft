@@ -55,6 +55,10 @@ try {
   Run-Msiexec "/i `"$msiPath`" INSTALLFOLDER=`"$dir`""
   Expect (Test-Path "$dir\bimcraft.exe") 'bimcraft.exe in the folder that was chosen'
   Expect (Test-Path "$dir\bimcraft-cli.exe") 'bimcraft-cli.exe in the folder that was chosen'
+  # The notice and the fonts' licence (the OFL asks for it with every copy of the fonts bimcraft.exe holds).
+  foreach ($file in 'LICENSE-MIT', 'LICENSE-APACHE', 'NOTICE', 'fonts\ibm-plex-sans\OFL.txt', 'fonts\ibm-plex-mono\OFL.txt') {
+    Expect (Test-Path "$dir\$file") "$file in the folder that was chosen"
+  }
   Expect (-not (Test-Path $programFiles)) 'nothing in Program Files'
   $appPath = (Get-Item 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\bimcraft.exe').GetValue('')
   Expect ($appPath -eq "$dir\bimcraft.exe") "App Paths names the chosen folder, not '$appPath'"

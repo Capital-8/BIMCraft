@@ -5022,6 +5022,7 @@ mod clouds;
 mod control;
 mod dialog;
 mod dock;
+mod fonts;
 mod gpu;
 mod light_canvas;
 mod lineweights;

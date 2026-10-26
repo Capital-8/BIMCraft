@@ -34,7 +34,13 @@
     <Property Id="ARPHELPLINK" Value="https://github.com/IPedrax/BIMCraft/issues" />
 
     <StandardDirectory Id="ProgramFiles64Folder">
-      <Directory Id="INSTALLFOLDER" Name="BIMCraft" />
+      <Directory Id="INSTALLFOLDER" Name="BIMCraft">
+        <!-- The fonts' licence, where NOTICE says it is: fonts\ibm-plex-sans\OFL.txt and fonts\ibm-plex-mono\OFL.txt. -->
+        <Directory Id="FontsFolder" Name="fonts">
+          <Directory Id="PlexSansFolder" Name="ibm-plex-sans" />
+          <Directory Id="PlexMonoFolder" Name="ibm-plex-mono" />
+        </Directory>
+      </Directory>
     </StandardDirectory>
 
     <!-- Where the previous install put BIMCraft, from the key the app component writes, so an upgrade (the wizard's, or an
@@ -89,6 +95,12 @@
       </Component>
       <Component Id="NoticeFile" Directory="INSTALLFOLDER">
         <File Id="Notice" Source="NOTICE" KeyPath="yes" />
+      </Component>
+      <Component Id="PlexSansLicence" Directory="PlexSansFolder">
+        <File Id="PlexSansOfl" Source="assets\fonts\ibm-plex-sans\OFL.txt" KeyPath="yes" />
+      </Component>
+      <Component Id="PlexMonoLicence" Directory="PlexMonoFolder">
+        <File Id="PlexMonoOfl" Source="assets\fonts\ibm-plex-mono\OFL.txt" KeyPath="yes" />
       </Component>
       <!-- A shortcut that isn't advertised needs a registry key path, and in a profile folder (the
            desktop, which per-machine is the Public one) that key must be under HKCU (ICE38, ICE43, ICE57). -->

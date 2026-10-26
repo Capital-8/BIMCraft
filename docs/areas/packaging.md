@@ -9,3 +9,8 @@ Moved from the root `CLAUDE.md`, word for word: the root keeps the rules and the
   and actionlint on the workflow, run the Linux one through, and install the deb in a clean container. The app id is
   `io.github.ipedrax.bimcraft` everywhere (`APP_ID`, the desktop file, AppStream, the Flatpak, the bundle); the icons come
   from `packaging/icons.sh`.
+- Every package ships the licences, `NOTICE` and the interface fonts' two `OFL.txt` (the OFL asks for its text with each copy of
+  the fonts, which the desktop's executable holds): `copy_docs` in `packaging/env.sh` puts them in the Linux packages (the AppImage
+  too), the macOS app's `Contents/Resources` and the command line's zip, and `bimcraft.wxs` and `portable.ps1` do the same on
+  Windows, under `fonts/ibm-plex-sans` and `fonts/ibm-plex-mono` beside `NOTICE`. A new package adds its copy to
+  `every_package_ships_the_notice_and_the_licence_of_the_fonts` (`crates/ui-egui/src/tests/fonts.rs`). A new font goes in `NOTICE` too.

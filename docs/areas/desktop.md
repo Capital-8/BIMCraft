@@ -130,8 +130,10 @@ sideways with the wheel in a window too narrow for it.
 
 The look. `style.rs` holds the tokens: the palettes, light and dark, with a dark app bar; the
 card frame (`style::card`: 8 px corners, a hairline border and a soft shadow, standing `GAP` off the edges it's told to); IBM Plex Sans
-and Mono (`assets/fonts`, SIL OFL 1.1), with `style::semibold` for titles and tabs (the body's face until the window has loaded it, a
-frame after `apply`). `BimApp::show` paints the active view's ground (`backdrop`) under everything, then the app bar (Home, File, the
+and Mono (`assets/fonts`, SIL OFL 1.1; built into the executable, so `NOTICE` names them with their versions and sha256 and every package
+carries it and both OFL.txt, as `copy_docs` in `packaging/env.sh`, `bimcraft.wxs` and `portable.ps1` do: `tests/fonts.rs` checks), with
+`style::semibold` for titles and tabs (the body's face until the window has loaded it, a frame after `apply`). The semibold face is a
+family of its own, and egui does not fall back across families, so the Chinese font joins every family in `style::families` (`lang::use_chinese_font`). `BimApp::show` paints the active view's ground (`backdrop`) under everything, then the app bar (Home, File, the
 Quick Access Toolbar and the title, light on dark, `style::on_app_bar`), and the ribbon, the Options Bar, the status bar and each docked
 palette stack as cards, so the gaps between them read as the view going on beneath; the view control bar is a small card in the view's
 corner. The Options Bar (`BimApp::options_bar`) floats over the view's top left, an `Area` above it, while there's something on it (a

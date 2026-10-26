@@ -74,6 +74,9 @@ package() {
   find "$pkgdir/usr" -type f -perm /111 -exec chmod 0755 {} +
   find "$pkgdir/usr" -type f ! -perm /111 -exec chmod 0644 {} +
   install -Dm644 -t "$pkgdir/usr/share/licenses/$pkgname" "$pkgdir"/usr/share/doc/bimcraft/LICENSE-* "$pkgdir"/usr/share/doc/bimcraft/NOTICE
+  for font in ibm-plex-sans ibm-plex-mono; do
+    install -Dm644 "$pkgdir/usr/share/doc/bimcraft/fonts/$font/OFL.txt" "$pkgdir/usr/share/licenses/$pkgname/fonts/$font/OFL.txt"
+  done
 }
 PKGBUILD
 

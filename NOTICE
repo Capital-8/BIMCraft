@@ -50,3 +50,33 @@ Third-party dependencies
   memchr   Unlicense OR MIT   byte search
 
 See each dependency's own licence for its terms.
+
+==============================================================================
+IBM Plex, the desktop app's lettering
+==============================================================================
+
+The desktop app (bimcraft) letters its windows in two fonts that are built into its executable (crates/ui-egui/src/style.rs
+includes them when it is compiled). They are kept in assets/fonts of the source:
+
+  IBM Plex Sans, the variable font, Version 3.201
+    assets/fonts/ibm-plex-sans/IBMPlexSans-Variable.ttf, 537244 bytes
+    sha256 3b031aa4216174205bd8471f88a49b91f093169e9e87bd5262242bc5967fe2e3
+    its name table says: Copyright 2019 IBM Corp. All rights reserved.
+
+  IBM Plex Mono Regular, Version 2.3
+    assets/fonts/ibm-plex-mono/IBMPlexMono-Regular.ttf, 135580 bytes
+    sha256 6a3412f058c7d8dfd9170c41e85ade48e5156ecb89356110ca57a0a27734af46
+    its name table says: Copyright 2017 IBM Corp. All rights reserved.
+
+The notice that heads the licence file beside each of them reads:
+
+    Copyright (c) 2017 IBM Corp. with Reserved Font Name "Plex"
+
+These Font Software files are licensed under the SIL Open Font License, Version 1.1. Its text is in
+assets/fonts/ibm-plex-sans/OFL.txt and assets/fonts/ibm-plex-mono/OFL.txt (the same text, one beside each font), and every
+copy of BIMCraft carries it: in a package the two files are fonts/ibm-plex-sans/OFL.txt and fonts/ibm-plex-mono/OFL.txt
+beside this file (in the Linux packages under /usr/share/doc/bimcraft, in the macOS app in Contents/Resources).
+
+BIMCraft does not change the fonts: it picks a weight of the variable font when it draws, and that is all. "Plex" is a
+Reserved Font Name, so the fonts keep it. "IBM Plex" is a trademark of IBM Corp, registered in many jurisdictions worldwide.
+The place the two files were obtained from was not recorded when they were added.
