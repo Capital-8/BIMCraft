@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 use crate::curves::Curve;
 use crate::geom::{self, P2, Region};
 use crate::ids::{Guid, Id};
-use crate::model::{MAX_COORD, MAX_POINTS, TOL};
+use crate::model::{Element, MAX_COORD, MAX_POINTS, Model, TOL};
 
 /// A straight line, from one end to the other.
 pub type Line = [P2; 2];
@@ -542,6 +542,56 @@ pub fn check(who: &str, lines: &[SketchLine]) -> Result<(), String> {
         return Err(format!("{who}: its sketch is drawn as {pieces} straight pieces, more than {MAX_PIECES}"));
     }
     Ok(())
+}
+
+/// The rings an element draws its outline with, each with what to call it: a floor's, a ceiling's or a roof's boundary and its
+/// openings or courtyards, a shaft's boundary.
+fn rings_of(e: &Element) -> Vec<(String, &[P2])> {
+    let (boundary, holes, what): (&[P2], &[Vec<P2>], &str) = match e {
+        Element::Floor(f) => (&f.boundary, &f.openings, "opening"),
+        Element::Ceiling(c) => (&c.boundary, &c.openings, "opening"),
+        Element::Roof(r) if r.extrusion.is_none() => (&r.boundary, &r.courtyards, "courtyard"),
+        Element::Shaft(s) => (&s.boundary, &[], ""),
+        _ => return Vec::new(),
+    };
+    std::iter::once(("boundary".to_string(), boundary))
+        .chain(holes.iter().enumerate().map(|(i, h)| (format!("{what} {i}"), h.as_slice())))
+        .collect()
+}
+
+impl Model {
+    /// What a command must leave true of what it made or changed, which [`Model::check`] doesn't ask of the whole project
+    /// because a file from before it (or an IFC or Revit file with a keyhole slab) may break it and still open: a floor's,
+    /// ceiling's or roof's outline and each of its openings or courtyards, and a shaft's outline, that a command made or
+    /// changed is simple, as the sketch of its edges solves: no edge across another or along it, none ending part way along
+    /// one, no spike or keyhole. `before` is the project the command began with. The engine asks it after every command
+    /// that is an undo step, but Insert from File.
+    pub fn check_edits(&self, before: &Model) -> Result<(), String> {
+        for (&id, e) in &self.elements {
+            let rings = rings_of(e);
+            if rings.is_empty() || before.elements.get(id).is_some_and(|b| rings_of(b) == rings) {
+                continue;
+            }
+            for (what, ring) in rings {
+                // A ring of fewer than three points, or too many, or one of points that aren't numbers in range, is
+                // `Model::check`'s to refuse.
+                let numbers = ring.iter().all(|p| p.is_finite() && p.0.abs() <= MAX_COORD && p.1.abs() <= MAX_COORD);
+                if !(3..=MAX_POINTS).contains(&ring.len()) || !numbers {
+                    continue;
+                }
+                if let Err(problems) = solve(&lines_of(ring, &[]))
+                    && !problems.iter().all(|p| matches!(p, Problem::NoArea { .. }))
+                {
+                    return Err(format!(
+                        "{} {id}: its {what} isn't a simple outline: {}; redraw it with `edit_boundary`",
+                        e.category(),
+                        say(&problems, &|i| format!("edge {i}"))
+                    ));
+                }
+            }
+        }
+        Ok(())
+    }
 }
 
 /// Points made one where they lie within [`TOL`] of each other: a grid of cells [`TOL`] across holds them, so a point is
@@ -1172,6 +1222,65 @@ mod command_tests {
         let f = run(&mut s, "floor", json!({"boundary": [[0, 0], [4000, 0], [4000, 0], [4000, 4000], [0, 4000], [0, 0]]}));
         let Some(Element::Floor(fl)) = s.model.elements.get(f["id"].as_u64().unwrap()) else { panic!() };
         assert_eq!(fl.boundary.len(), 4);
+    }
+
+    /// A bow tie with a quarter of its area left: no edge across another but the first and third.
+    const BOW: [[i32; 2]; 4] = [[0, 0], [4000, 4000], [4000, 0], [0, 2000]];
+
+    #[test]
+    fn a_simple_outline_is_asked_of_whatever_a_command_makes_or_changes_and_not_only_of_floor() {
+        let mut s = Session::new();
+        let f = run(&mut s, "floor", json!({"boundary": [[0, 0], [4000, 0], [4000, 4000], [0, 4000]]}))["id"].clone();
+        let c = run(&mut s, "ceiling", json!({"boundary": [[0, 0], [4000, 0], [4000, 4000], [0, 4000]]}))["id"].clone();
+        let r = run(&mut s, "roof", json!({"boundary": [[0, 0], [4000, 0], [4000, 4000], [0, 4000]], "slope": 0}))["id"].clone();
+        let h = run(&mut s, "shaft", json!({"boundary": [[0, 0], [1000, 0], [1000, 1000], [0, 1000]]}))["id"].clone();
+        let before = s.model.clone();
+        // Modify set it too, where only `floor` refused it: the outline, an opening, a courtyard.
+        for (id, key, value) in [
+            (&f, "boundary", json!(BOW)),
+            (&c, "boundary", json!(BOW)),
+            (&r, "boundary", json!(BOW)),
+            (&h, "boundary", json!(BOW)),
+            (&f, "openings", json!([[[1000, 1000], [2000, 2000], [2000, 1000], [1000, 2000]]])),
+            (&r, "courtyards", json!([[[1000, 1000], [2000, 2000], [2000, 1000], [1000, 2000]]])),
+        ] {
+            let e = s.execute("modify", &json!({"id": id, key: value})).unwrap_err();
+            assert!(e.contains("isn't a simple outline") && e.contains("edge"), "{key}: {e}");
+        }
+        assert_eq!(*s.model, *before);
+        // A keyhole slit, a point on another edge and a spike are not simple either.
+        let slit = json!([[0, 0], [4000, 0], [4000, 4000], [2000, 4000], [2000, 2000], [2000, 4000], [0, 4000]]);
+        assert!(s.execute("modify", &json!({"id": h, "boundary": slit})).unwrap_err().contains("simple"));
+        // A simple one is as before.
+        run(&mut s, "modify", json!({"id": f, "boundary": [[0, 0], [5000, 0], [5000, 3000], [0, 3000]]}));
+    }
+
+    #[test]
+    fn a_file_with_an_outline_that_is_not_simple_still_opens_and_what_changes_it_is_asked_to_redraw_it() {
+        let mut s = Session::new();
+        let f = run(&mut s, "floor", json!({"boundary": [[0, 0], [4000, 0], [4000, 4000], [0, 4000]]}))["id"].as_u64().unwrap();
+        // Written as an old file would have it: a boundary the check of the whole project lets by.
+        if let Some(Element::Floor(fl)) = s.model_mut().elements.get_mut(f) {
+            fl.boundary = BOW.iter().map(|p| crate::geom::P2(f64::from(p[0]), f64::from(p[1]))).collect();
+        }
+        assert_eq!(s.model.check(), Ok(()));
+        let path = std::env::temp_dir().join(format!("bimcraft-bow-{}.bimcraft", std::process::id()));
+        std::fs::write(&path, s.model.to_json().unwrap()).unwrap();
+        let mut t = Session::new();
+        let opened = t.execute("open", &json!({"path": path.to_string_lossy()}));
+        let inserted = Session::new().execute("insert", &json!({"path": path.to_string_lossy()}));
+        std::fs::remove_file(&path).ok();
+        opened.unwrap();
+        inserted.unwrap();
+        // What leaves its outline alone goes through; what moves it is asked to redraw it, and a redrawn one is fine.
+        run(&mut t, "modify", json!({"id": f, "offset": 100}));
+        let e = t.execute("move", &json!({"ids": [f], "by": [1000, 0]})).unwrap_err();
+        assert!(e.contains("isn't a simple outline") && e.contains("edit_boundary"), "{e}");
+        run(&mut t, "edit_boundary", json!({"id": f, "sketch": square(0.0, 0.0, 4000.0)}));
+        run(&mut t, "move", json!({"ids": [f], "by": [1000, 0]}));
+        // Or it goes.
+        let g = run(&mut t, "floor", json!({"boundary": [[0, 0], [4000, 0], [4000, 4000], [0, 4000]]}))["id"].clone();
+        run(&mut t, "delete", json!({"ids": [g]}));
     }
 
     #[test]

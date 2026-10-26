@@ -3475,9 +3475,9 @@ fn floor(s: &mut Session, p: &Value) -> R {
             let (boundary, found) = match absent(p.get("boundary")) {
                 true => floor_outline(m, level)
                     .ok_or_else(|| bad(c, format!("no walls enclose an area on {}; give `boundary`", level_name(m, level))))?,
-                false => (ring(c, "boundary", points(c, p, "boundary")?)?, Vec::new()),
+                false => (ring(points(c, p, "boundary")?), Vec::new()),
             };
-            (boundary, rings(c, "opening", p, "openings")?.unwrap_or(found), Vec::new())
+            (boundary, rings(c, p, "openings")?.unwrap_or(found), Vec::new())
         }
     };
     if geom::area(&boundary) < 0.0 {
@@ -3520,7 +3520,7 @@ fn ceiling(s: &mut Session, p: &Value) -> R {
     let sketch = drawn.as_ref().map(|(_, lines)| lines.clone()).unwrap_or_default();
     let (mut boundary, found) = match (drawn, absent(p.get("boundary")), point_opt(c, p, "point")?) {
         (Some((r, _)), ..) => (r.outer, r.holes),
-        (None, false, _) => (ring(c, "boundary", points(c, p, "boundary")?)?, Vec::new()),
+        (None, false, _) => (ring(points(c, p, "boundary")?), Vec::new()),
         // The room's free floor: what the walls' faces close around the point, and the walls standing
         // inside it, clockwise as a floor's openings are.
         (None, true, Some(at)) => geom::region_at(&m.face_lines(level), at, TOL)
@@ -3534,7 +3534,7 @@ fn ceiling(s: &mut Session, p: &Value) -> R {
     if geom::area(&boundary) < 0.0 {
         boundary.reverse();
     }
-    let openings: Vec<Vec<P2>> = rings(c, "opening", p, "openings")?.unwrap_or(found);
+    let openings: Vec<Vec<P2>> = rings(c, p, "openings")?.unwrap_or(found);
     let offset = num(c, p, "offset")?.unwrap_or(CEILING_HEIGHT);
     // Its openings lie inside it and apart, or the model refuses it.
     let area = m2(geom::area(&boundary) - openings.iter().map(|o| geom::area(o).abs()).sum::<f64>());
@@ -3557,7 +3557,7 @@ fn shaft(s: &mut Session, p: &Value) -> R {
     let (mut boundary, sketch) = match sketched(c, p, "", &[])? {
         Some((r, lines)) if r.holes.is_empty() => (r.outer, lines),
         Some(_) => return Err(bad(c, "a shaft is one outline with no holes in it: sketch each hole as a shaft of its own")),
-        None => (ring(c, "boundary", points(c, p, "boundary")?)?, Vec::new()),
+        None => (ring(points(c, p, "boundary")?), Vec::new()),
     };
     if geom::area(&boundary) < 0.0 {
         boundary.reverse();
@@ -4333,7 +4333,7 @@ fn roof(s: &mut Session, p: &Value) -> R {
     let overhang = num(c, p, "overhang")?.unwrap_or(if given || extrusion.is_some() { 0.0 } else { 500.0 });
     let (boundary, found) = match (drawn, given, &extrusion) {
         (Some((r, _)), ..) => (r.outer, r.holes),
-        (None, true, _) => (ring(c, "boundary", points(c, p, "boundary")?)?, Vec::new()),
+        (None, true, _) => (ring(points(c, p, "boundary")?), Vec::new()),
         (None, false, Some(_)) => (Vec::new(), Vec::new()),
         (None, false, None) => roof_footprint(m, level, overhang).map_err(|e| bad(c, e))?,
     };
@@ -4342,13 +4342,13 @@ fn roof(s: &mut Session, p: &Value) -> R {
         type_name,
         level,
         boundary,
-        courtyards: rings(c, "courtyard", p, "courtyards")?.unwrap_or(found),
+        courtyards: rings(c, p, "courtyards")?.unwrap_or(found),
         slope: if extrusion.is_some() { 0.0 } else { num(c, p, "slope")?.unwrap_or(30.0) },
         overhang,
         gable: flag(c, p, "gable")?,
         gables: shaped(c, p, "gables", "a list of edge numbers")?.unwrap_or_default(),
         offset: num(c, p, "offset")?.unwrap_or(0.0),
-        openings: rings(c, "opening", p, "openings")?.unwrap_or_default(),
+        openings: rings(c, p, "openings")?.unwrap_or_default(),
         join: id_opt(c, p, "join")?,
         extrusion,
         sketch,
@@ -4509,10 +4509,11 @@ fn sketched(c: &str, p: &Value, holes: &str, old: &[SketchLine]) -> Result<Optio
     }
 }
 
-/// A ring given as points (`what`: a boundary, an opening), any point repeating the one before it (or at its end, the
-/// first) left out, judged as the sketch of its edges, edge i from point i to the next: none crossing or along another.
-/// Fewer than three points, or no area, [`Model::check`] refuses.
-fn ring(c: &str, what: &str, given: Vec<P2>) -> Result<Vec<P2>, String> {
+/// A ring given as points (a boundary, an opening), any point repeating the one before it (or at its end, the first) left
+/// out, and the points a millimetre from the one before, so a click twice on a corner is one. Whether it is simple, no edge
+/// across another or along it, [`Model::check_edits`] says after the command (`modify` is held to it too); fewer than
+/// three points, or no area, [`Model::check`] refuses.
+fn ring(given: Vec<P2>) -> Vec<P2> {
     let mut r: Vec<P2> = Vec::with_capacity(given.len());
     for q in given {
         if r.last().is_none_or(|l| l.dist(q) > TOL) {
@@ -4522,20 +4523,13 @@ fn ring(c: &str, what: &str, given: Vec<P2>) -> Result<Vec<P2>, String> {
     while r.len() > 1 && r.first().zip(r.last()).is_some_and(|(a, b)| a.dist(*b) <= TOL) {
         r.pop();
     }
-    if r.len() < 3 || r.iter().any(|q| !q.is_finite()) {
-        return Ok(r);
-    }
-    match sketch::solve(&sketch::lines_of(&r, &[])) {
-        Ok(_) => Ok(r),
-        Err(e) if e.iter().all(|p| matches!(p, sketch::Problem::NoArea { .. })) => Ok(r),
-        Err(e) => Err(bad(c, format!("{what} isn't a simple outline: {}", sketch::say(&e, &|i| format!("edge {i}"))))),
-    }
+    r
 }
 
-/// Rings given under `key` (a floor's openings, a roof's courtyards), each judged as [`ring`] judges one.
-fn rings(c: &str, what: &str, p: &Value, key: &str) -> Result<Option<Vec<Vec<P2>>>, String> {
+/// Rings given under `key` (a floor's openings, a roof's courtyards), each cleaned as [`ring`] cleans one.
+fn rings(c: &str, p: &Value, key: &str) -> Result<Option<Vec<Vec<P2>>>, String> {
     let Some(given) = shaped::<Vec<Vec<P2>>>(c, p, key, "a list of outlines [[[x,y],…],…]")? else { return Ok(None) };
-    given.into_iter().enumerate().map(|(i, r)| ring(c, &format!("{what} {i}"), r)).collect::<Result<_, _>>().map(Some)
+    Ok(Some(given.into_iter().map(ring).collect()))
 }
 
 fn sketch_lines(_: &mut Session, p: &Value) -> R {

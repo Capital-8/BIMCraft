@@ -61,8 +61,17 @@ ids in use, so one a line had before it was deleted and the file saved may be gi
 (the kept sketch while it still draws the outline, `sketch::draws`, else the outline's edges as new lines) and with one
 redraws it, a line sent back with its `id` keeping it (keeping a roof's gables on edges that stay); the `sketch` command
 solves without making anything. Messages name a line by its id, or its place in the list while it has none. A boundary
-given as points is judged as the sketch of its edges when a command is given it (a repeated point dropped first), but
-`Model::check` doesn't: a file, or an IFC import, with a keyhole outline still opens and stays editable.
+given as points is cleaned (a repeated point dropped, and one within a millimetre of the last), and every outline a command
+makes or changes, whichever command (`floor`, `modify`, `edit_boundary`, `move`…), is judged as the sketch of its edges
+(`Model::check_edits`, asked by the engine after each command but Insert from File): a floor's, ceiling's or roof's boundary,
+an opening or a courtyard, a shaft's boundary, that crosses itself or lies along itself, has an edge ending part way along
+another, or a spike or keyhole slit, is refused, saying which edges and where. That is a change from the base, which let
+`modify` and the commands that weren't given points set such an outline. `Model::check` doesn't judge the whole project by
+it: a file, an IFC import or a Revit import with a keyhole outline still opens, and what leaves its outline alone (`modify`
+of its offset, `delete`, `edit_boundary` with a sketch that is simple) still works; what moves or copies it is asked to redraw
+it first. One line that crosses itself (a closed polyline round a bow tie, a spline with a loop) is found as two lines
+crossing are, and a sketch is refused at once past 200,000 straight pieces (a circle is up to 8,193 of them), or when its
+pieces lie so close together that telling which cross would take ten million steps.
 
 The desktop's sketch mode (`crates/ui-egui/src/sketch.rs`) holds the lines until Finish Edit Mode, which solves them
 first and says what's wrong for whoever drew it (`sketch::friendly`: what to fix, kind by kind, where, in the project's
