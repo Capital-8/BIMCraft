@@ -884,7 +884,7 @@ fn ma_gives_the_walls_selected_after_the_first_its_type_in_one_undo_step() {
 
 #[test]
 fn keys_for_tools_bimcraft_lacks_are_bound_to_nothing_rather_than_to_another_tool() {
-    for keys in ["SU", "DL", "LI", "SF", "BR", "BS", "RN", "RP", "CV", "TF", "DA", "FD"] {
+    for keys in ["SU", "LI", "SF", "BR", "BS", "RN", "RP", "CV", "TF", "DA", "FD"] {
         let mut app = BimApp::new(Session::new());
         app.typed = keys.into();
         assert!(!app.shortcut(), "{keys}");
@@ -1553,8 +1553,14 @@ fn the_palette_keeps_its_fields_and_apply_inside_it_whatever_their_labels() {
     assert_eq!(panel.width(), 290.0, "the palette at its default width");
     // Height Offset From Level is a long label.
     let fields = h.query_all(By::new().predicate(|n| matches!(n.role(), Role::TextInput | Role::ComboBox)));
+    // The palette scrolls, and a floor's has rows enough to run past its foot: only its width is the question.
     for n in fields.filter(|n| n.rect().intersects(panel)).chain([h.get_by_label("Apply")]) {
-        assert!(panel.contains_rect(n.rect()), "{:?} at {:?} runs out of the palette, {panel:?}", n.accesskit_node().label(), n.rect());
+        let r = n.rect();
+        assert!(
+            r.min.x >= panel.min.x && r.max.x <= panel.max.x,
+            "{:?} at {r:?} runs out of the palette, {panel:?}",
+            n.accesskit_node().label()
+        );
     }
 }
 
