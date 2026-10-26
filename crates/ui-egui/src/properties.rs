@@ -95,6 +95,16 @@ fn field_of(e: &Value, key: &str, kind: Kind) -> Value {
     }
 }
 
+/// Whether parameter `key` means anything for the one element `e` (as its JSON has it): a detail line's Center Mark Visible is
+/// for an arc or a circle, its Revision for a cloud; on any other line they would only be switches that do nothing.
+fn relevant(e: &Value, key: &str) -> bool {
+    match (e["shape"].as_str(), key) {
+        (Some(shape), "centre_mark") => matches!(shape, "arc" | "circle"),
+        (Some(_), "revision") => !e["cloud"].is_null(),
+        _ => true,
+    }
+}
+
 /// `{key: val}` for `modify`, nested through the dots: modify merges into fields that are objects.
 fn nested(key: &str, val: Value) -> Value {
     key.rsplit('.').fold(val, |v, k| json!({ k: v }))
@@ -936,7 +946,8 @@ impl BimApp {
             Subject::View3D => ("3d view", None),
             Subject::Schedule => ("schedule", None),
         };
-        if category == "region"
+        // A region being sketched has the type its sketch will make; one selected has its own.
+        if matches!(subject, Subject::New("region"))
             && let Some(sk) = &self.sketch
         {
             current = Some(sk.region.0.clone());
@@ -1109,6 +1120,9 @@ impl BimApp {
                         let val = &v[key];
                         // A length one element hasn't got (a straight wall's radius): no row.
                         if ids.len() == 1 && matches!(kind, LengthShown | LengthIf) && val.is_null() {
+                            continue;
+                        }
+                        if ids.len() == 1 && !relevant(&first, key) {
                             continue;
                         }
                         let kind = match kind {

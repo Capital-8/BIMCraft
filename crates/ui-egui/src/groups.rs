@@ -34,13 +34,11 @@ impl BimApp {
             self.status = Status { text: t("select a detail group to ungroup").into(), error: true };
             return;
         }
-        let mut back = Vec::new();
-        for id in groups {
-            if let Some(r) = self.run("ungroup", json!({"id": id})) {
-                back.extend(r["ids"].as_array().into_iter().flatten().filter_map(|v| v.as_u64()));
-            }
+        // All of them in one step: one Ctrl+Z puts every group back.
+        let done = self.run_all("Ungroup", "ungroup", groups.iter().map(|id| json!({"id": id})).collect());
+        if !done.is_empty() {
+            self.selection = done.iter().flat_map(|r| r["ids"].as_array().into_iter().flatten().filter_map(|v| v.as_u64())).collect();
         }
-        self.selection = back;
     }
 
     /// Whether the selection holds a detail group, for Ungroup.

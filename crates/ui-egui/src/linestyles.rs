@@ -2,18 +2,22 @@
 //! patterns (dashes, dots and spaces, mm on paper), on two tabs of one draft, applied as one undo step (OK and Apply), or
 //! dropped (Cancel).
 
+use std::collections::{BTreeMap, BTreeSet};
+
 use bimcraft_core::engine::Session;
 use bimcraft_core::lines::{LinePattern, LineStyle, MAX_SEGMENT, MAX_SEGMENTS, MIN_SEGMENT, SOLID, Segment};
 use bimcraft_core::model::Model;
 use bimcraft_core::pen::{MAX_PEN, Pen};
 use egui::{
-    Align, Button, Color32, ComboBox, Context, DragValue, Grid, Id as UiId, Layout, Modal, RichText, ScrollArea, Sense, Stroke, TextEdit,
-    Ui, WidgetInfo, WidgetType, vec2,
+    Align, Button, ComboBox, Context, DragValue, Grid, Id as UiId, Layout, Modal, RichText, ScrollArea, Sense, Stroke, TextEdit, Ui,
+    WidgetInfo, WidgetType, vec2,
 };
 use serde_json::{Value, json};
 
 use crate::graphics::pen_name;
 use crate::lang::{t, tf};
+use crate::renames::{self, Row};
+use crate::style::pal;
 use crate::{BimApp, Status};
 
 /// The dialog's tabs.
@@ -44,6 +48,10 @@ pub(crate) struct LineStylesDialog {
     /// Patterns deleted: their rows stay, so the styles' indices do, and are skipped.
     gone: Vec<bool>,
     open: Option<usize>,
+    /// Why Apply was refused, said in the dialog.
+    error: Option<String>,
+    /// The patterns and styles the project held when this opened: a draft is not applied over a project that has changed since.
+    held: (BTreeMap<String, LinePattern>, BTreeMap<String, LineStyle>),
 }
 
 impl LineStylesDialog {
@@ -61,7 +69,28 @@ impl LineStylesDialog {
             })
             .collect();
         let gone = vec![false; patterns.len()];
-        LineStylesDialog { tab: 0, styles, patterns, gone, open: None }
+        let held = (m.line_patterns.clone(), m.line_styles.clone());
+        LineStylesDialog { tab: 0, styles, patterns, gone, open: None, error: None, held }
+    }
+
+    /// What stops the draft being applied: a project that changed since it was opened (an agent's command, say), or a name
+    /// left blank or used twice, which the commands would take for a listing or for an edit of the entry of that name.
+    fn check(&self, m: &Model) -> Result<(), String> {
+        if self.held.0 != m.line_patterns || self.held.1 != m.line_styles {
+            return Err(t("The project changed while this window was open: Cancel, and open it again.").to_string());
+        }
+        for names in [self.styles.iter().map(|s| s.name.trim()).collect::<Vec<_>>(), self.live().map(|(_, p)| p.name.trim()).collect()] {
+            let mut seen = BTreeSet::new();
+            for n in names {
+                if n.is_empty() {
+                    return Err(t("Enter a name for every style and pattern.").to_string());
+                }
+                if !seen.insert(n) {
+                    return Err(tf("The name `{}` is already in use.", &[n]));
+                }
+            }
+        }
+        Ok(())
     }
 
     /// The patterns not deleted, with their rows.
@@ -143,10 +172,9 @@ fn styles_tab(ui: &mut Ui, d: &mut LineStylesDialog) {
                 let who = s.name.clone();
                 name_field(ui, &mut s.name, tf("{}: Name", &[&who]));
                 pen_field(ui, &mut s.pen, tf("{}: Line Weight", &[&who]));
-                let mut c = Color32::from_rgb(s.color[0], s.color[1], s.color[2]);
-                let r = ui.color_edit_button_srgba(&mut c);
+                // Red, green and blue only: the alpha slider of an RGBA button premultiplies them and darkens the colour.
+                let r = ui.color_edit_button_srgb(&mut s.color);
                 r.widget_info(|| WidgetInfo::labeled(WidgetType::ColorButton, true, tf("{}: Colour", &[&who])));
-                s.color = [c.r(), c.g(), c.b()];
                 let shown =
                     s.pattern.and_then(|p| names.iter().find(|(i, _)| *i == p)).map_or_else(|| t(SOLID).to_string(), |(_, n)| n.clone());
                 let label = tf("{}: Pattern", &[&who]);
@@ -269,43 +297,36 @@ fn patterns_tab(ui: &mut Ui, d: &mut LineStylesDialog) {
 }
 
 impl LineStylesDialog {
-    /// What the draft asks of the project, as commands in an order each can be done in: patterns made and changed (and
-    /// renamed, which renames them in the styles), styles made and changed, then what's deleted, styles before patterns.
+    /// What the draft asks of the project, as commands in an order each can be done in: patterns renamed (so a chain or a
+    /// swap goes through, [`renames`]), made and changed, styles renamed, made and changed, then what's deleted, styles before
+    /// patterns. An entry deleted and made again under its name is changed in place.
     fn commands(&self, m: &Model) -> Vec<(&'static str, Value)> {
-        let mut out = Vec::new();
-        let segments = |r: &PatternRow| json!(r.segments);
+        let mut out: Vec<(&'static str, Value)> = Vec::new();
+        let rows: Vec<Row> =
+            (self.patterns.iter().zip(&self.gone)).map(|(r, g)| Row { was: r.was.as_deref(), name: &r.name, gone: *g }).collect();
+        let patterns = renames::plan(&m.line_patterns.keys().cloned().collect(), &rows);
+        out.extend(patterns.renames.iter().map(|(from, to)| ("line_pattern", json!({"name": from, "rename": to}))));
         for (_, r) in self.live() {
-            let now = LinePattern(r.segments.clone());
-            match &r.was {
-                Some(was) if *was == r.name && m.line_patterns.get(was) == Some(&now) => {}
-                Some(was) => out.push(("line_pattern", json!({"name": was, "rename": r.name, "segments": segments(r)}))),
-                None => out.push(("line_pattern", json!({"name": r.name, "segments": segments(r)}))),
+            if r.was.as_ref().and_then(|w| m.line_patterns.get(w)) != Some(&LinePattern(r.segments.clone())) {
+                out.push(("line_pattern", json!({"name": r.name, "segments": r.segments})));
             }
         }
-        let pattern_of = |s: &StyleRow| s.pattern.and_then(|i| self.patterns.get(i)).map_or_else(|| json!(SOLID), |p| json!(p.name));
+        let kept: BTreeSet<&str> = self.styles.iter().filter_map(|s| s.was.as_deref()).collect();
+        let mut rows: Vec<Row> = self.styles.iter().map(|s| Row { was: s.was.as_deref(), name: &s.name, gone: false }).collect();
+        rows.extend(m.line_styles.keys().filter(|n| !kept.contains(n.as_str())).map(|n| Row { was: Some(n), name: n, gone: true }));
+        let styles = renames::plan(&m.line_styles.keys().cloned().collect(), &rows);
+        out.extend(styles.renames.iter().map(|(from, to)| ("line_style", json!({"name": from, "rename": to}))));
         for s in &self.styles {
-            let mine =
-                LineStyle { pen: s.pen, color: s.color, pattern: s.pattern.and_then(|i| self.patterns.get(i)).map(|p| p.name.clone()) };
-            let mut p = json!({"pen": s.pen, "color": s.color, "pattern": pattern_of(s)});
-            match &s.was {
-                // A pattern renamed renames it in the style already: what the style holds then is what to compare.
-                Some(was) if *was == s.name && m.line_styles.get(was).is_some_and(|x| styles_match(x, &mine, self)) => continue,
-                Some(was) => {
-                    p["name"] = json!(was);
-                    p["rename"] = json!(s.name);
-                }
-                None => p["name"] = json!(s.name),
-            }
-            out.push(("line_style", p));
-        }
-        for was in m.line_styles.keys().filter(|n| !self.styles.iter().any(|s| s.was.as_ref() == Some(n))) {
-            out.push(("line_style", json!({"name": was, "delete": true})));
-        }
-        for r in self.patterns.iter().zip(&self.gone).filter(|(_, g)| **g).map(|(r, _)| r) {
-            if let Some(was) = &r.was {
-                out.push(("line_pattern", json!({"name": was, "delete": true})));
+            let pattern = s.pattern.and_then(|i| self.patterns.get(i)).map(|p| p.name.clone());
+            let mine = LineStyle { pen: s.pen, color: s.color, pattern: pattern.clone() };
+            // A pattern renamed renames it in the style already: what the style holds then is what to compare.
+            if !s.was.as_ref().and_then(|w| m.line_styles.get(w)).is_some_and(|x| styles_match(x, &mine, self)) {
+                let pattern = pattern.map_or_else(|| json!(SOLID), |p| json!(p));
+                out.push(("line_style", json!({"name": s.name, "pen": s.pen, "color": s.color, "pattern": pattern})));
             }
         }
+        out.extend(styles.deletes.iter().map(|n| ("line_style", json!({"name": n, "delete": true}))));
+        out.extend(patterns.deletes.iter().map(|n| ("line_pattern", json!({"name": n, "delete": true}))));
         out
     }
 }
@@ -338,6 +359,9 @@ impl BimApp {
             } else {
                 patterns_tab(ui, &mut d);
             }
+            if let Some(error) = &d.error {
+                ui.colored_label(pal().error, error);
+            }
             ui.add_space(8.0);
             ui.with_layout(Layout::right_to_left(Align::Min), |ui| {
                 apply = ui.button(t("Apply")).clicked();
@@ -345,31 +369,37 @@ impl BimApp {
                 ok = ui.button(t("OK")).clicked();
             });
         });
-        // What changed, as one undo step, all or nothing: a refusal keeps the dialog open to fix it, saying why.
-        let mut failed = false;
-        if ok || apply {
-            let commands = d.commands(&self.session.model);
-            if !commands.is_empty() {
-                let done = self
-                    .session
-                    .transaction("Line Styles", |s: &mut Session| commands.iter().try_for_each(|(c, p)| s.execute(c, p).map(|_| ())));
-                match done {
-                    Ok(()) => self.status = Status::default(),
-                    Err(e) => {
-                        self.status = Status { text: e, error: true };
-                        failed = true;
-                    }
-                }
-            }
-            if apply && !failed {
-                let tab = d.tab;
-                d = LineStylesDialog::new(&self.session.model);
-                d.tab = tab;
-            }
-        }
+        let failed = (ok || apply) && !self.apply_line_styles(&mut d, apply);
         if failed || !(ok || cancel || r.should_close()) {
             self.line_styles_dialog = Some(d);
         }
+    }
+
+    /// OK and Apply: what changed, as one undo step, all or nothing; a refusal (a project that changed since it opened, a name
+    /// blank or used twice, the core's reasons) keeps the dialog open to fix it, saying why in itself. Whether it was done.
+    fn apply_line_styles(&mut self, d: &mut LineStylesDialog, apply: bool) -> bool {
+        d.error = None;
+        d.styles.iter_mut().for_each(|s| s.name = s.name.trim().to_string());
+        d.patterns.iter_mut().for_each(|p| p.name = p.name.trim().to_string());
+        let done = d.check(&self.session.model).and_then(|()| {
+            let commands = d.commands(&self.session.model);
+            if commands.is_empty() {
+                return Ok(());
+            }
+            self.session.transaction("Line Styles", |s: &mut Session| commands.iter().try_for_each(|(c, p)| s.execute(c, p).map(|_| ())))
+        });
+        if let Err(e) = done {
+            d.error = Some(e.clone());
+            self.status = Status { text: e, error: true };
+            return false;
+        }
+        self.status = Status::default();
+        if apply {
+            let tab = d.tab;
+            *d = LineStylesDialog::new(&self.session.model);
+            d.tab = tab;
+        }
+        true
     }
 }
 

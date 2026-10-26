@@ -234,21 +234,6 @@ pub fn category(category: &str, several: bool) -> String {
 /// The interface's words in English, Brazilian Portuguese and Spanish; the core's words (schedule
 /// names and headings) besides.
 const WORDS: &[[&str; 3]] = &[
-    ["Foreground Pattern", "Padrão de primeiro plano", "Patrón de primer plano"],
-    ["Background Pattern", "Padrão de fundo", "Patrón de fondo"],
-    ["Foreground Color", "Cor de primeiro plano", "Color de primer plano"],
-    ["Background Color", "Cor de fundo", "Color de fondo"],
-    [
-        "Changes to a type affect every filled region of that type.",
-        "Alterações em um tipo afetam todas as regiões preenchidas desse tipo.",
-        "Los cambios en un tipo afectan a todas las regiones rellenas de ese tipo.",
-    ],
-    [
-        "Enter a name for every type and pattern.",
-        "Insira um nome para cada tipo e padrão.",
-        "Introduzca un nombre para cada tipo y patrón.",
-    ],
-    ["The name `{}` is already in use.", "O nome `{}` já está em uso.", "El nombre `{}` ya está en uso."],
     ["Autosave", "Salvamento automático", "Guardado automático"],
     [
         "An agent can work on this project: bimcraft-cli mcp --connect {}",
@@ -1130,6 +1115,17 @@ const WORDS: &[[&str; 3]] = &[
     ],
     ["The lines are shown in red.", "As linhas aparecem em vermelho.", "Las líneas se muestran en rojo."],
     [
+        "Finish or cancel the sketch before leaving its plan.",
+        "Conclua ou cancele o esboço antes de sair da sua planta.",
+        "Termine o cancele el boceto antes de salir de su plano.",
+    ],
+    [
+        "A loop needs three lines: click a point that isn't the start.",
+        "Um contorno precisa de três linhas: clique em um ponto que não seja o início.",
+        "Un contorno necesita tres líneas: haga clic en un punto que no sea el inicio.",
+    ],
+    ["`{}` is not a number of sides", "`{}` não é um número de lados", "`{}` no es un número de lados"],
+    [
         "The loop is open: {} line ends don't meet another line.",
         "O contorno está aberto: {} pontas de linha não encontram outra linha.",
         "El bucle está abierto: {} extremos de línea no se encuentran con otra línea.",
@@ -1167,6 +1163,11 @@ const WORDS: &[[&str; 3]] = &[
     ["Style", "Estilo", "Estilo"],
     ["Pattern", "Padrão", "Patrón"],
     ["New Style", "Novo estilo", "Nuevo estilo"],
+    [
+        "Enter a name for every style and pattern.",
+        "Insira um nome para cada estilo e padrão.",
+        "Introduzca un nombre para cada estilo y patrón.",
+    ],
     ["New Pattern", "Novo padrão", "Nuevo patrón"],
     ["Line Weight", "Espessura de linha", "Grosor de línea"],
     ["Colour", "Cor", "Color"],
@@ -3277,7 +3278,39 @@ const WORDS: &[[&str; 3]] = &[
         "Nuvem de revisão: uma nuvem em volta do que mudou, da revisão na barra de opções; um retângulo por padrão, qualquer forma do painel Desenhar",
         "Nube de revisión: una nube alrededor de lo que cambió, de la revisión de la barra de opciones; un rectángulo por defecto, cualquier forma del panel Dibujar",
     ],
+    ["Foreground Pattern", "Padrão de primeiro plano", "Patrón de primer plano"],
+    ["Background Pattern", "Padrão de fundo", "Patrón de fondo"],
+    ["Foreground Color", "Cor de primeiro plano", "Color de primer plano"],
+    ["Background Color", "Cor de fundo", "Color de fondo"],
+    [
+        "Changes to a type affect every filled region of that type.",
+        "Alterações em um tipo afetam todas as regiões preenchidas desse tipo.",
+        "Los cambios en un tipo afectan a todas las regiones rellenas de ese tipo.",
+    ],
+    [
+        "Enter a name for every type and pattern.",
+        "Insira um nome para cada tipo e padrão.",
+        "Introduzca un nombre para cada tipo y patrón.",
+    ],
+    ["The name `{}` is already in use.", "O nome `{}` já está em uso.", "El nombre `{}` ya está en uso."],
     ["Edit Lines", "Editar linhas", "Editar líneas"],
+    ["{}: Edit Lines", "{}: editar linhas", "{}: editar líneas"],
+    ["Replace Same Name", "Substituir de mesmo nome", "Reemplazar del mismo nombre"],
+    [
+        "A pattern of the file replaces the one of its name in this list; else it is left out",
+        "Um padrão do arquivo substitui o de mesmo nome nesta lista; senão, é deixado de fora",
+        "Un patrón del archivo sustituye al del mismo nombre de esta lista; si no, se deja fuera",
+    ],
+    [
+        "{} already exists: save under a name ending in .pat to replace it.",
+        "{} já existe: salve com um nome terminado em .pat para substituí-lo.",
+        "{} ya existe: guarde con un nombre que termine en .pat para sustituirlo.",
+    ],
+    [
+        "The project changed while this window was open: Cancel, and open it again.",
+        "O projeto mudou enquanto esta janela estava aberta: cancele e abra de novo.",
+        "El proyecto cambió mientras esta ventana estaba abierta: cancele y ábrala de nuevo.",
+    ],
     ["X", "X", "X"],
     ["Y", "Y", "Y"],
     ["Shift", "Deslocamento", "Desplazamiento"],

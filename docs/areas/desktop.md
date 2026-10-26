@@ -188,3 +188,29 @@ for the tool. Load File reads JSON (`{"WA": "Wall"}`), Revit's `<Shortcut Comman
 a description is an action only by its whole name in one of the interface's languages (`resolve_action`), and a key that is not two characters, names no action or
 is another action's is skipped and counted in the message. Custom shortcuts last while the window is open. Match Properties (MA) is the `match_properties`
 command; with one element selected the window remembers its type for the next one drawn, with several it gives the others of the first's category its type.
+
+Annotation dialogs and draw tools. Manage > Fill Patterns (`fillpatterns.rs`, also Edit Type of a filled region) and Manage > Line Styles
+(`linestyles.rs`) edit a draft of the project's entries and send it as one transaction: what is deleted and made again under its name is changed in
+place, and renames go through `renames::plan`, which runs a chain from its end and a swap through a spare name (the core refuses a rename onto a name
+that is taken). A draft keeps the entries the project held when it opened and is refused over a project that has changed since (an agent's command),
+so Apply never undoes or deletes what the draft never saw. A blank or repeated name is refused in the dialog. What an import or an export says
+(`note`) is said in the dialog, not in the status bar, which can lie over its buttons. A PAT file is read by the `import_fill_patterns` command on a scratch
+project that holds the draft's names, so the command's keep or replace rule and its caps are the dialog's too (Replace Same Name is the command's
+`replace`); an export to a name without `.pat` does not write over a file of that name with `.pat`. The preview draws a type as the plan does, in the canvas colours.
+In a test a file dialog is answered through `dialog::BEGUN`; no system dialog opens.
+
+The Draw panel's tools leave nothing behind: `set_tool` drops Insulation and Revision Cloud (the Detail Line tool's) and the lines picked for Fillet Arc and
+Trim/Extend (`forget_picks`), a sketch's picks are dropped when its lines change (`track_sketch`, once a frame) and when it ends, and a shape's typed numbers are
+dropped when the shape changes. A fillet that does not fit keeps its two lines picked and spends the digits; a click that sizes the arc clears them. A number of the
+Options Bar that the shape in hand takes and cannot read (`options_error`) is red and makes nothing. A sketch keeps the lines as they were before each change
+(`Sketch::track`), so Ctrl+Z takes back a fillet, a trim or a grip move whole; it belongs to the plan it began in, and the window comes back to that plan until Finish or
+Cancel Edit Mode. egui draws a Dot (a dash of a hundredth of a millimetre) about a pixel and a half long, so it shows; `a_dot_of_a_hundredth_of_a_millimetre_still_draws_about_a_pixel_on_the_canvas`
+fails if that changes.
+
+Limits of the annotation stack, left as they are: the desktop has no group type rename, delete or edit (the `group_type` command does them), and a group taken
+apart with Ungroup and made again with Create Group cannot take its old name (the core refuses a name in use), so what was placed from the old type does not follow;
+detail groups and repeating details are placed in plans only; Properties' Group row is read only. Pick Lines and the polygons are Draw-panel tools that make
+curves, not commands, so an agent draws the curves they would make. A sketch's Trim, Offset, Split, Fillet, Join, Vertex and Convert Spline (`sketch_modify` and its neighbours
+in `draw.rs`) act on the sketch the window holds with the core's `draw` and `curves` functions and are not commands, so the CLI and MCP cannot reach them. The Align tool's
+pattern geometry (`align_pattern` in `canvas.rs`) is the window's until the core has `Model::align_pattern`. The patterns list is not virtualized: rows off the screen paint
+no swatch, but each still lays out its widgets.

@@ -6,7 +6,7 @@
 use std::future::Future;
 use std::path::PathBuf;
 use std::pin::Pin;
-use std::sync::mpsc::{Receiver, TryRecvError, channel};
+use std::sync::mpsc::{Receiver, Sender, TryRecvError, channel};
 
 use egui::Context;
 
@@ -62,14 +62,7 @@ impl BimApp {
             return;
         }
         let (tx, answer) = channel();
-        let ctx = ctx.clone();
-        // The future is made by the caller, on the window's thread: on macOS that is where the dialog is begun (its sheet opens
-        // at once and does not block), and only waiting for it is done on the thread below.
-        std::thread::spawn(move || {
-            let files = pollster::block_on(future);
-            let _ = tx.send(files.map(|f| f.iter().map(|f| f.path().to_path_buf()).collect()));
-            ctx.request_repaint();
-        });
+        wait(ctx, future, tx);
         self.dialog = Some(Dialog { answer, then });
     }
 
@@ -88,4 +81,30 @@ impl BimApp {
             Err(TryRecvError::Disconnected) => self.dialog = None,
         }
     }
+}
+
+/// Waits for `future`'s answer on a thread of its own and sends it on `tx`. The future is made by the caller, on the window's
+/// thread: on macOS that is where the dialog is begun (its sheet opens at once and does not block), and only waiting for it
+/// is done on the thread.
+#[cfg(not(test))]
+fn wait(ctx: &Context, future: Pin<Box<dyn Future<Output = Option<Vec<rfd::FileHandle>>> + Send>>, tx: Sender<Option<Vec<PathBuf>>>) {
+    let ctx = ctx.clone();
+    std::thread::spawn(move || {
+        let files = pollster::block_on(future);
+        let _ = tx.send(files.map(|f| f.iter().map(|f| f.path().to_path_buf()).collect()));
+        ctx.request_repaint();
+    });
+}
+
+/// A test opens no system dialog: the dialog it begins is answered through `BEGUN`'s sender.
+#[cfg(test)]
+fn wait(_: &Context, future: Pin<Box<dyn Future<Output = Option<Vec<rfd::FileHandle>>> + Send>>, tx: Sender<Option<Vec<PathBuf>>>) {
+    drop(future);
+    BEGUN.with(|b| b.borrow_mut().push(tx));
+}
+
+#[cfg(test)]
+thread_local! {
+    /// The answer to each dialog begun in the test's thread, oldest first.
+    pub(crate) static BEGUN: std::cell::RefCell<Vec<Sender<Option<Vec<PathBuf>>>>> = const { std::cell::RefCell::new(Vec::new()) };
 }
