@@ -2335,15 +2335,22 @@ impl BimApp {
             })
             .response
             .rect;
-        // The project and the view, centred, where Revit's title bar has them.
-        let at = pos2(ui.max_rect().center().x, row.center().y);
-        ui.painter().text(
-            at,
-            Align2::CENTER_CENTER,
+        // The project and the view, centred where Revit's title bar has them: in the window's middle when they fit between the
+        // buttons on the left and, where the window draws its own title bar, the caption buttons on the right; else as near it
+        // as that room allows, and cut short where even it is too little.
+        let gap = 12.0;
+        let right = ui.max_rect().right() + if self.own_bar() { 8.0 - 3.0 * titlebar::BUTTON_WIDTH } else { 0.0 } - gap;
+        let left = row.right() + gap;
+        let mut title = egui::text::LayoutJob::simple_singleline(
             format!("{} · {view}", self.session.model.name),
             FontId::proportional(12.5),
             pal().app_bar_muted,
         );
+        title.wrap = egui::text::TextWrapping::truncate_at_width((right - left).max(0.0));
+        let galley = ui.painter().layout_job(title);
+        let width = galley.size().x;
+        let x = ui.max_rect().center().x.clamp(left + width / 2.0, (right - width / 2.0).max(left + width / 2.0));
+        ui.painter().galley(pos2(x - width / 2.0, row.center().y - galley.size().y / 2.0), galley, pal().app_bar_muted);
     }
 
     /// The arrow beside Undo (or with `redo`, Redo): a list of the steps, the next first, as Revit's. Hovering one marks it
@@ -2415,6 +2422,12 @@ impl BimApp {
             ui.horizontal(|ui| {
                 // The tabs, scrolling sideways (with the wheel) in a window too narrow for them; the fold button at the end.
                 let room = ui.available_width() - 32.0;
+                // The tab that has just been picked (or a contextual tab that has just come) is brought into view: the row
+                // scrolls in a window too narrow for it, and its last tabs are out of sight.
+                let seen = UiId::new("ribbon-tab-seen");
+                let now = self.tab as u8;
+                let changed = ui.ctx().data(|d| d.get_temp::<u8>(seen)) != Some(now);
+                ui.ctx().data_mut(|d| d.insert_temp(seen, now));
                 ScrollArea::horizontal()
                     .id_salt("ribbon-tabs")
                     .max_width(room)
@@ -2437,10 +2450,16 @@ impl BimApp {
                                 (Tab::Modify, "Modify"),
                             ] {
                                 let r = tab_button(ui, label, self.tab == tab, false);
+                                if changed && self.tab == tab {
+                                    r.scroll_to_me(None);
+                                }
                                 self.ribbon_tab(&r, tab);
                             }
                             if let Some(name) = self.context() {
                                 let r = tab_button(ui, &name, self.tab == Tab::Context, true);
+                                if changed && self.tab == Tab::Context {
+                                    r.scroll_to_me(None);
+                                }
                                 self.ribbon_tab(&r, Tab::Context);
                             }
                         });
@@ -3283,7 +3302,8 @@ impl BimApp {
     }
 
     fn options(&mut self, ui: &mut Ui) {
-        ui.horizontal(|ui| {
+        // Wrapped: in a narrow view (the window's least) the bar takes a second line rather than run over the zoom buttons.
+        ui.horizontal_wrapped(|ui| {
             ui.set_min_height(24.0);
             if let Some(name) = self.context() {
                 // Painted: the tab already names it for screen readers.

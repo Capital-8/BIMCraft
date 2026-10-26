@@ -11,7 +11,7 @@ const WINDOW: egui::Rect = egui::Rect::from_min_max(pos2(0.0, 0.0), pos2(1280.0,
 /// The app as it opens on Windows and Linux: drawing its own title bar. Its root `Ui` is the whole window, as eframe's is (not
 /// inset by the margin `app()` keeps, which would hide where the window's edges meet the bar's buttons). Its frames are short,
 /// so two clicks are a double-click.
-fn own(script: &str) -> Harness<'static, BimApp> {
+pub(super) fn own(script: &str) -> Harness<'static, BimApp> {
     let mut session = Session::new();
     session.script(script).unwrap();
     let show = |ui: &mut egui::Ui, app: &mut BimApp| {

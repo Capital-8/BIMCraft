@@ -113,6 +113,8 @@ pub enum Target {
 pub const FLOAT_SIZE: Vec2 = vec2(300.0, 420.0);
 /// A view's window, when it starts floating.
 pub const VIEW_SIZE: Vec2 = vec2(640.0, 440.0);
+/// The least height the last card on a side is given: its header, its tabs and its search, with room for a few rows.
+const LAST_MIN: f32 = 150.0;
 /// How wide the strip along the docked view's edge is that docks a palette there, in points.
 const EDGE: f32 = 36.0;
 /// How far the strips stand in from the view's edge, in points.
@@ -430,9 +432,13 @@ impl BimApp {
             // An even share of what's left, but of the last two the first takes a little more (Properties over the
             // Project Browser, as they start).
             let share = if n - i == 2 { 0.55 } else { 1.0 / (n - i) as f32 };
+            // A card over others leaves them what they need, so the last never runs under the status bar when the window shrinks
+            // under a card that was taller: the others' least, 80 each, and the last's header, tabs and search.
+            let gap = f32::from(crate::style::gap());
+            let most = ui.available_height() - (n - i - 2) as f32 * (80.0 + gap) - LAST_MIN - gap;
             let panel = match side {
                 Side::Bottom => Panel::left(id).default_size(ui.available_width() * share),
-                _ => Panel::top(id).default_size(ui.available_height() * share),
+                _ => Panel::top(id).default_size(ui.available_height() * share).max_size(most.max(80.0)),
             };
             panel.frame(frame).show_separator_line(false).resizable(true).min_size(80.0).show(ui, |ui| {
                 ui.set_min_size(ui.available_size());
@@ -550,7 +556,7 @@ impl BimApp {
 
     /// What a palette shows, under its title: as wide as where it's docked, its scroll bar at the edge.
     pub(crate) fn palette_body(&mut self, ui: &mut Ui, p: Palette) {
-        let scroll = egui::ScrollArea::vertical().auto_shrink([false, false]);
+        let scroll = egui::ScrollArea::vertical().auto_shrink([false, false]).min_scrolled_height(0.0);
         match p {
             Palette::Properties => {
                 scroll.id_salt("properties").show(ui, |ui| Frame::new().inner_margin(8.0).show(ui, |ui| self.properties(ui)));

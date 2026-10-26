@@ -5086,6 +5086,7 @@ mod objectstyles;
 mod planviews;
 mod purge;
 mod revit;
+mod smallest;
 mod start;
 mod titlebar;
 mod window;

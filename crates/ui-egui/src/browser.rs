@@ -187,7 +187,7 @@ impl BimApp {
             self.browser_search(ui);
         });
         ui.separator();
-        let scroll = egui::ScrollArea::vertical().auto_shrink([false, false]);
+        let scroll = egui::ScrollArea::vertical().auto_shrink([false, false]).min_scrolled_height(0.0);
         scroll.id_salt("browser").show(ui, |ui| egui::Frame::new().inner_margin(8.0).show(ui, |ui| self.browser(ui)));
     }
 
