@@ -354,7 +354,8 @@ fn arcs_that_reach_past_the_model_and_polylines_that_would_take_millions_of_poin
         json!({"points": points, "arcs": vec![turn; n - 1]})
     };
     let hostile = [
-        (json!({"start": [0, 0], "end": [1000, 0], "arc": 359.9999999999}), "reaches further"),
+        (json!({"start": [0, 0], "end": [1000, 0], "arc": 359.9999999999}), "an arc"),
+        (json!({"start": [0, 0], "end": [1000, 0], "arc": 359.99999999}), "reaches further"),
         (json!({"start": [0, 0], "end": [1000, 0], "through": [500, 1e-9]}), ""),
         (json!({"centre": [1e9, 1e9], "radius": 1e9}), "reaches further"),
         (json!({"centre": [9e8, 0], "radii": [2e8, 100]}), "reaches further"),
@@ -374,6 +375,67 @@ fn arcs_that_reach_past_the_model_and_polylines_that_would_take_millions_of_poin
         assert!(e.contains(says), "{p}: {e}");
     }
     assert_eq!(s.model.elements.len(), before.elements.len() + 1, "only the near-straight one was made");
+}
+
+#[test]
+fn what_is_drawn_is_kept_to_the_micron_and_an_arcs_turn_to_a_billionth_of_a_degree_vertices_too() {
+    let mut s = Session::new();
+    let noisy = 1000.0 + 6.1e-14;
+    let a = line(&mut s, json!({"start": [0.0, 0.0], "end": [2000.0, 0.0], "through": [noisy, 1000.0 + 1.1e-13]}));
+    let Curve::Poly { points, arcs, .. } = curve(&s, a) else { panic!("an arc") };
+    assert_eq!(points, vec![P2(0.0, 0.0), P2(2000.0, 0.0)]);
+    assert!(arcs.iter().all(|t| (t * 1e9).round() / 1e9 == *t), "{arcs:?}");
+    let ring = line(&mut s, json!({"points": [[0.0, 3000.0], [1000.0 + 4e-14, 3000.0], [1000.0, 4000.0 + 3e-14]], "closed": true}));
+    assert!(curve(&s, ring).vertices().iter().all(|p| (p.0 * 1e3).round() / 1e3 == p.0 && (p.1 * 1e3).round() / 1e3 == p.1));
+    // A vertex added and a spline converted come out to the micron too.
+    let v = line(&mut s, json!({"points": [[0, 6000], [3000, 6000], [3000, 9000]]}));
+    run(&mut s, "vertex", json!({"id": v, "at": [1000.0 / 3.0, 6000.0]}));
+    let added = curve(&s, v).vertices();
+    assert_eq!(added.len(), 4);
+    assert!(added.iter().all(|p| (p.0 * 1e3).round() / 1e3 == p.0), "{added:?}");
+    let sp = line(&mut s, json!({"fit": [[0, 12000], [1000, 12700], [2000, 12000], [3100, 12300]]}));
+    run(&mut s, "convert_spline", json!({"id": sp}));
+    assert!(curve(&s, sp).vertices().iter().all(|p| (p.0 * 1e3).round() / 1e3 == p.0 && (p.1 * 1e3).round() / 1e3 == p.1));
+}
+
+#[test]
+fn a_vertex_is_added_or_taken_only_near_the_line_and_fillet_names_a_line_that_is_not_straight() {
+    let mut s = Session::new();
+    let v = line(&mut s, json!({"points": [[0, 0], [3000, 0], [3000, 3000]]}));
+    let before = s.model.clone();
+    let e = s.execute("vertex", &json!({"id": v, "at": [1500, 5000]})).unwrap_err();
+    assert!(e.contains("isn't on detail line") && e.contains("mm from it"), "{e}");
+    let e = s.execute("vertex", &json!({"id": v, "at": [9000, 9000], "delete": true})).unwrap_err();
+    assert!(e.contains("isn't on a vertex of detail line"), "{e}");
+    assert_eq!(*s.model, *before);
+    run(&mut s, "vertex", json!({"id": v, "at": [1500, 50]}));
+    run(&mut s, "vertex", json!({"id": v, "at": [3030, 20], "delete": true}));
+    // Fillet Arc rounds two straight lines: a circle or a spline is named, not told it "isn't straight".
+    let c = line(&mut s, json!({"centre": [0, 5000], "radius": 800}));
+    let l = line(&mut s, json!({"start": [0, 4000], "end": [3000, 4000]}));
+    let e = s.execute("fillet", &json!({"ids": [c, l], "radius": 100})).unwrap_err();
+    assert!(e.contains(&format!("detail line {c} is a circle")) && e.contains("straight lines"), "{e}");
+    let sp = line(&mut s, json!({"control": [[0, 8000], [500, 9000], [1000, 8000]]}));
+    let e = s.execute("fillet", &json!({"ids": [l, sp], "radius": 100})).unwrap_err();
+    assert!(e.contains("is a spline"), "{e}");
+}
+
+#[test]
+fn insert_from_file_brings_the_line_styles_and_patterns_a_detail_line_is_drawn_in() {
+    let mut s = Session::new();
+    run(&mut s, "line_pattern", json!({"name": "Fence", "segments": [{"dash": 4}, {"space": 1}, "dot", {"space": 1}]}));
+    run(&mut s, "line_style", json!({"name": "Fence Line", "pen": 3, "color": [200, 0, 0], "pattern": "Fence"}));
+    let l = line(&mut s, json!({"points": [[0, 0], [1000, 0]], "style": "Fence Line"}));
+    let path = std::env::temp_dir().join(format!("bimcraft-insert-styles-{}.bimcraft", std::process::id()));
+    std::fs::write(&path, s.model.to_json().unwrap_or_default()).unwrap_or_else(|e| panic!("{e}"));
+    let mut t = Session::new();
+    let r = t.execute("insert", &json!({"path": path.to_string_lossy(), "ids": [l]}));
+    std::fs::remove_file(&path).ok();
+    let r = r.unwrap_or_else(|e| panic!("{e}"));
+    assert!(t.model.line_styles.contains_key("Fence Line") && t.model.line_patterns.contains_key("Fence"));
+    assert_eq!(t.model.line_styles["Fence Line"].pattern.as_deref(), Some("Fence"));
+    let here = r["ids"][l.to_string()].as_u64().unwrap_or_default();
+    assert!(matches!(t.model.elements.get(here), Some(Element::DetailLine(d)) if d.style == "Fence Line"), "{r}");
 }
 
 #[test]

@@ -71,7 +71,7 @@ it: a file, an IFC import or a Revit import with a keyhole outline still opens, 
 of its offset, `delete`, `edit_boundary` with a sketch that is simple) still works; what moves or copies it is asked to redraw
 it first. One line that crosses itself (a closed polyline round a bow tie, a spline with a loop) is found as two lines
 crossing are, and a sketch is refused at once past 200,000 straight pieces (a circle is up to 8,193 of them), or when its
-pieces lie so close together that telling which cross would take ten million steps.
+pieces lie so close together that telling which cross would take six million steps.
 
 The desktop's sketch mode (`crates/ui-egui/src/sketch.rs`) holds the lines until Finish Edit Mode, which solves them
 first and says what's wrong for whoever drew it (`sketch::friendly`: what to fix, kind by kind, where, in the project's

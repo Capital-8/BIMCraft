@@ -71,7 +71,8 @@ pub static ALL: &[Command] = &[
          this project's of the same name, where it has one). Each keeps its id unless this project has that id, and its GUID \
          unless this project has that GUID: then it's a copy, with a GUID of its own (the same file inserted into itself is \
          copied whole). What they point at among themselves follows them. A name or a number taken here gets ` 2`, ` 3`…; \
-         types, families, materials and parameters this project hasn't come by name. Returns `ids` {there: here}, \
+         types, families, materials and parameters this project hasn't come by name, and so do the line styles (with their line \
+         patterns), fill patterns, filled region types and detail groups a detail line, a filled region or a group uses. Returns `ids` {there: here}, \
          `copies`, `library`, `left_out`",
         insert_from,
     ),
@@ -188,7 +189,7 @@ pub static ALL: &[Command] = &[
          intersect or overlap (a line too: a polyline round a bow tie crosses itself), three or more lines at a point. \
          A sketch is solved as the straight pieces its lines are drawn with (an arc, a circle or a curve is cut into chords, \
          a circle into up to 8,193): past 200,000 of them, or when they lie so close together that telling which cross \
-         takes more than ten million steps, it is refused at once. `sketch` on floor, ceiling, roof and shaft, and \
+         takes more than six million steps, it is refused at once. `sketch` on floor, ceiling, roof and shaft, and \
          edit_boundary, take the same lines for one outline and its holes",
         sketch_lines,
     ),
@@ -4464,7 +4465,6 @@ fn dormer(s: &mut Session, p: &Value) -> R {
     Ok(json!({"roof": roof, "walls": walls, "window": window}))
 }
 
-/// `key` as JSON shaped like `T` (a list of at most `MAX_POINTS`), or none.
 /// A sketch line as a command takes it: `[[x,y],[x,y]]` straight, `[[x,y],[x,y],[x,y]]` an arc from the first to the
 /// second through the third, or `{start, end, through?, id?}`, `id` one of the sketch's lines it keeps.
 #[derive(serde::Deserialize)]
@@ -4498,6 +4498,11 @@ fn sketch_param(c: &str, p: &Value, key: &str, old: &[SketchLine]) -> Result<Opt
                         bad(c, format!("`{key}` line {i}: {id} isn't a line of this sketch; leave `id` out for a new one"))
                     })?;
                     (l.id, l.guid) = (was.id, was.guid);
+                    // Sent back by its id, it keeps the style and the invisibility it had, unless it is given them again.
+                    l.style = l.style.or_else(|| was.style.clone());
+                    if p.get(key).and_then(|v| v.get(i)).is_none_or(|o| o.get("invisible").is_none()) {
+                        l.invisible = was.invisible;
+                    }
                 }
                 Ok(l)
             }
@@ -4611,6 +4616,7 @@ fn edit_boundary(s: &mut Session, p: &Value) -> R {
     Ok(json!({"id": id, "area_m2": area}))
 }
 
+/// `key` as JSON shaped like `T` (a list of at most `MAX_POINTS`), or none.
 fn shaped<T: serde::de::DeserializeOwned>(c: &str, p: &Value, key: &str, shape: &str) -> Result<Option<T>, String> {
     match p.get(key) {
         v if absent(v) => Ok(None),
@@ -6748,8 +6754,14 @@ fn fillet(s: &mut Session, p: &Value) -> R {
     if !(radius.is_finite() && radius > TOL && radius <= MAX_COORD) {
         return Err(bad(c, format!("`radius` is more than {TOL} mm, not {radius}")));
     }
+    // Two straight lines, not a circle, a polyline or a spline (Revit rounds the corner of two lines).
+    for (id, l) in [(a, &la), (b, &lb)] {
+        if l.curve.kind() != "line" {
+            return Err(bad(c, format!("detail line {id} is a {}: Fillet Arc rounds two straight lines", l.curve.kind())));
+        }
+    }
     let (ca, arc, cb) = crate::draw::fillet_lines(&la.curve, &lb.curve, radius).ok_or_else(|| {
-        bad(c, "the lines are straight, meet at an angle and are long enough for the arc; these aren't, or it doesn't fit")
+        bad(c, "the lines meet at an angle and are long enough for the arc; these are parallel, or too short for it, or it doesn't fit")
     })?;
     let (ca, arc, cb) = (ca.map(micron), arc.map(micron), cb.map(micron));
     let m = s.model_mut();
@@ -6773,6 +6785,12 @@ fn vertex(s: &mut Session, p: &Value) -> R {
     let (id, l) = line_of(c, &s.model, p)?;
     let at = point_req(c, p, "at")?;
     let delete = flag(c, p, "delete")?;
+    // Near the line, as Split asks, or the vertex nearest: not a point across the drawing.
+    let off = if delete { l.curve.vertices().iter().map(|v| v.dist(at)).fold(f64::INFINITY, f64::min) } else { l.curve.nearest(at).1 };
+    if off > 100.0 && off.is_finite() {
+        let on = if delete { "a vertex of detail line" } else { "detail line" };
+        return Err(bad(c, format!("[{}, {}] isn't on {on} {id}: it is {} mm from it", at.0, at.1, hundredth(off))));
+    }
     let curve = if delete { l.curve.without_vertex(at) } else { l.curve.with_vertex(at) }.ok_or_else(|| {
         bad(
             c,
@@ -6782,7 +6800,7 @@ fn vertex(s: &mut Session, p: &Value) -> R {
             },
         )
     })?;
-    s.model_mut().elements.insert(id, Element::DetailLine(DetailLine { curve, ..l }));
+    s.model_mut().elements.insert(id, Element::DetailLine(DetailLine { curve: rounded(curve), ..l }));
     Ok(json!({"id": id}))
 }
 
@@ -6791,6 +6809,7 @@ fn convert_spline(s: &mut Session, p: &Value) -> R {
     let (id, l) = line_of(c, &s.model, p)?;
     let curve = l.curve.converted().ok_or_else(|| bad(c, format!("detail line {id} is a {}, not a spline", l.curve.kind())))?;
     let kind = curve.kind();
+    let curve = rounded(curve);
     s.model_mut().elements.insert(id, Element::DetailLine(DetailLine { curve, ..l }));
     Ok(json!({"id": id, "shape": kind}))
 }
@@ -7170,9 +7189,26 @@ fn curve_param(c: &str, p: &Value) -> Result<crate::curves::Curve, String> {
         .unwrap_or_default();
     let f: crate::curves::Fields =
         serde_json::from_value(Value::Object(fields)).map_err(|e| bad(c, format!("{e}: a line is {}", crate::curves::FORMS)))?;
-    let curve = f.curve().map_err(|e| bad(c, e))?;
+    let curve = rounded(f.curve().map_err(|e| bad(c, e))?);
     curve.check("the line").map_err(|e| bad(c, e))?;
     Ok(curve)
+}
+
+/// A curve with its points to the micron and an arc's turn to a billionth of a degree, what was meant to be exact without
+/// float noise (a quarter turn drawn from three clicks is 90, not 90.00000000000001); nothing else of it changes.
+fn rounded(c: crate::curves::Curve) -> crate::curves::Curve {
+    use crate::curves::Curve;
+    match c {
+        Curve::Poly { points, arcs, closed } => {
+            let arcs: Vec<f64> = arcs.into_iter().map(degrees).collect();
+            let arcs = if arcs.iter().all(|a| *a == 0.0) { Vec::new() } else { arcs };
+            Curve::Poly { points: points.into_iter().map(micron).collect(), arcs, closed }
+        }
+        Curve::Circle { centre, radius } => Curve::Circle { centre: micron(centre), radius },
+        Curve::Ellipse { centre, radii, angle, span } => Curve::Ellipse { centre: micron(centre), radii, angle, span },
+        Curve::Spline { control, knots } => Curve::Spline { control: control.into_iter().map(micron).collect(), knots },
+        Curve::Fit { points, tangents } => Curve::Fit { points: points.into_iter().map(micron).collect(), tangents },
+    }
 }
 
 fn detail_line(s: &mut Session, p: &Value) -> R {

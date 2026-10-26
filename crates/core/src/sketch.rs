@@ -132,10 +132,10 @@ pub const MAX_PIECES: usize = 200_000;
 
 /// The most steps [`solve`] takes finding which pieces meet: past it the pieces lie too close together, long and slanted
 /// (ten thousand parallel diagonals), to tell without trying every pair, and the sketch is refused rather than waited for.
-const MAX_WORK: usize = 10_000_000;
+const MAX_WORK: usize = 6_000_000;
 
 /// The most steps [`solve`] takes nesting the loops, each a point of a loop looked at while finding which loops hold which.
-const MAX_NEST: usize = 50_000_000;
+const MAX_NEST: usize = 15_000_000;
 
 /// The most problems [`solve`] names: past that, the first ones are enough to start fixing.
 pub const MAX_PROBLEMS: usize = 100;
@@ -628,7 +628,9 @@ impl Welder {
 /// Boxes `[x0, y0, x1, y1]` in a tree (halved again and again along their longer side, a few to a leaf), to find which
 /// overlap which, and which hold a point, without trying them all.
 struct Boxes {
-    boxes: Vec<[f64; 4]>,
+    /// The boxes in the order the leaves hold them, so that looking through a leaf is looking through a stretch of memory.
+    packed: Vec<[f64; 4]>,
+    /// Each packed box's place in the boxes given.
     order: Vec<usize>,
     nodes: Vec<Node>,
 }
@@ -655,7 +657,7 @@ impl Boxes {
         if !boxes.is_empty() {
             Boxes::build(&boxes, &mut order, 0, &mut nodes);
         }
-        Boxes { boxes, order, nodes }
+        Boxes { packed: order.iter().map(|&i| boxes[i]).collect(), order, nodes }
     }
 
     /// The node for `order[from..from + len]`, which is `slice`, and the ones under it: the index of the first.
@@ -694,12 +696,11 @@ impl Boxes {
             }
             match (na.kids, nb.kids) {
                 (None, None) => {
-                    let (xs, ys) = (&self.order[na.from..na.to], &self.order[nb.from..nb.to]);
-                    for (k, &i) in xs.iter().enumerate() {
+                    for k in na.from..na.to {
                         // The same leaf: each pair once.
-                        for &j in if a == b { &xs[k + 1..] } else { ys } {
+                        for l in if a == b { k + 1..na.to } else { nb.from..nb.to } {
                             *work += 1;
-                            if overlap(&self.boxes[i], &self.boxes[j]) && !f(i, j) {
+                            if overlap(&self.packed[k], &self.packed[l]) && !f(self.order[k], self.order[l]) {
                                 return Ok(false);
                             }
                         }
@@ -734,8 +735,8 @@ impl Boxes {
             match node.kids {
                 Some(kids) => stack.extend(kids),
                 None => {
-                    for &i in &self.order[node.from..node.to] {
-                        if holds(&self.boxes[i]) && !f(i) {
+                    for k in node.from..node.to {
+                        if holds(&self.packed[k]) && !f(self.order[k]) {
                             return;
                         }
                     }
@@ -1413,6 +1414,40 @@ mod command_tests {
     }
 
     #[test]
+    fn a_boundary_line_sent_back_by_its_id_keeps_its_style_and_its_invisibility_unless_given_them_again() {
+        let mut s = Session::new();
+        let sketch = json!([
+            {"start": [0, 0], "end": [4000, 0], "style": "Hidden Lines"},
+            {"start": [4000, 0], "end": [4000, 3000], "invisible": true},
+            [[4000, 3000], [0, 0]]
+        ]);
+        let r = run(&mut s, "filled_region", json!({"sketch": sketch}))["id"].clone();
+        let now = run(&mut s, "edit_boundary", json!({"id": r}))["sketch"].clone();
+        let (a, b, c) = (&now[0], &now[1], &now[2]);
+        // Only where they go, by id.
+        let back = json!([
+            {"id": a["id"], "start": [0, 0], "end": [4000, 0]},
+            {"id": b["id"], "start": [4000, 0], "end": [4000, 3000]},
+            {"id": c["id"], "start": [4000, 3000], "end": [0, 0]}
+        ]);
+        run(&mut s, "edit_boundary", json!({"id": r, "sketch": back}));
+        let after = run(&mut s, "edit_boundary", json!({"id": r}))["sketch"].clone();
+        assert_eq!(after[0]["style"], "Hidden Lines");
+        assert_eq!(after[1]["invisible"], true);
+        assert!(after[2].get("style").is_none() && after[2].get("invisible").is_none());
+        // Given again, it is what it is told: visible, and in another style.
+        let told = json!([
+            {"id": a["id"], "start": [0, 0], "end": [4000, 0], "style": "Wide Lines"},
+            {"id": b["id"], "start": [4000, 0], "end": [4000, 3000], "invisible": false},
+            {"id": c["id"], "start": [4000, 3000], "end": [0, 0]}
+        ]);
+        run(&mut s, "edit_boundary", json!({"id": r, "sketch": told}));
+        let after = run(&mut s, "edit_boundary", json!({"id": r}))["sketch"].clone();
+        assert_eq!(after[0]["style"], "Wide Lines");
+        assert!(after[1].get("invisible").is_none());
+    }
+
+    #[test]
     fn a_sketch_lines_id_is_not_given_again_while_the_project_is_open_after_the_line_has_gone() {
         let mut s = Session::new();
         let f = run(&mut s, "floor", json!({"sketch": square(0.0, 0.0, 4000.0)}))["id"].clone();
@@ -1510,6 +1545,39 @@ mod hostile_tests {
         assert!(took < 1.0, "{took} s");
         let (r, took) = timed(&mut s, "sketch", &json!({"lines": circles(100, 1.0e6, 1000.0)}));
         assert!(r.unwrap_err().contains("pieces"));
+        assert!(took < 1.0, "{took} s");
+    }
+
+    /// `n` rectangles inside one another, 20 mm apart, each a closed polyline of 640 points, as sketch lines.
+    fn nested_rectangles(n: usize) -> Value {
+        Value::Array(
+            (0..n)
+                .map(|k| {
+                    let h = 1000.0 + 20.0 * k as f64;
+                    // 160 points along each side, going round counter-clockwise from the south-west corner.
+                    let side = |from: [f64; 2], to: [f64; 2]| {
+                        (0..160).map(move |i| {
+                            json!([from[0] + (to[0] - from[0]) * f64::from(i) / 160.0, from[1] + (to[1] - from[1]) * f64::from(i) / 160.0])
+                        })
+                    };
+                    let corners = [[-h, -h], [h, -h], [h, h], [-h, h]];
+                    let pts: Vec<Value> = (0..4).flat_map(|c| side(corners[c], corners[(c + 1) % 4])).collect();
+                    json!({"points": pts, "closed": true})
+                })
+                .collect(),
+        )
+    }
+
+    #[test]
+    fn rectangles_of_six_hundred_points_inside_one_another_are_refused_not_waited_for() {
+        // 180,000 pieces, each loop inside every one outside it: 25 million points to ask about.
+        let (r, took) = timed(&mut Session::new(), "sketch", &json!({"lines": nested_rectangles(280)}));
+        let e = r.unwrap_err();
+        assert!(e.contains("nested too deeply"), "{e}");
+        assert!(took < 1.0, "{took} s");
+        // Half as many are a quarter of that: solved, every other one a hole.
+        let (r, took) = timed(&mut Session::new(), "sketch", &json!({"lines": nested_rectangles(140)}));
+        assert_eq!(r.map(|v| v["regions"].as_array().map(Vec::len)), Ok(Some(70)));
         assert!(took < 1.0, "{took} s");
     }
 
