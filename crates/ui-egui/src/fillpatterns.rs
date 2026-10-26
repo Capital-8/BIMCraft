@@ -243,9 +243,14 @@ fn colour_field(ui: &mut Ui, rgb: &mut [u8; 3], name: String) {
     r.widget_info(|| WidgetInfo::labeled(WidgetType::ColorButton, true, name.clone()));
 }
 
-/// A swatch of `p`, `width` x 22 px, in `colour`: a drafting pattern at 5 px to its mm, a model one at a tenth of a px.
-pub(crate) fn swatch(ui: &mut Ui, p: Option<&FillPattern>, width: f32, colour: Color32) {
+/// A swatch of `p`, `width` x 22 px, in `colour`: a drafting pattern at 5 px to its mm, a model one at a tenth of a px. A
+/// `colour` that is the canvas's (ink as the plan draws it) is shown on the canvas's `paper`: in a dark interface with a light
+/// canvas, black ink would be lost on the interface's own ground.
+pub(crate) fn swatch(ui: &mut Ui, p: Option<&FillPattern>, width: f32, colour: Color32, paper: Option<Color32>) {
     let (rect, _) = ui.allocate_exact_size(vec2(width, 22.0), Sense::hover());
+    if let Some(paper) = paper {
+        ui.painter().rect_filled(rect, 2.0, paper);
+    }
     paint_pattern(ui, rect, p, colour);
     ui.painter().rect_stroke(rect, 2.0, Stroke::new(1.0, ui.visuals().widgets.noninteractive.bg_stroke.color), egui::StrokeKind::Inside);
 }
@@ -308,9 +313,9 @@ fn types_tab(ui: &mut Ui, d: &mut FillPatternsDialog) {
                 {
                     pattern_pick(ui, row, &names, tf("{}: {}", &[&who, t(side)]));
                     colour_field(ui, rgb, tf("{}: {} Colour", &[&who, t(side)]));
-                    // As the plan draws it: black ink light on a dark ground.
+                    // As the plan draws it, on its paper: black ink is light on a dark ground.
                     let ink = crate::canvas::color(bimcraft_core::render::Rgb(rgb[0], rgb[1], rgb[2]));
-                    swatch(ui, row.and_then(|p| patterns.get(p)), 60.0, ink);
+                    swatch(ui, row.and_then(|p| patterns.get(p)), 60.0, ink, Some(crate::canvas::color(PAPER)));
                 }
                 let c = ui.add(Checkbox::without_text(&mut r.masking));
                 c.widget_info(|| WidgetInfo::selected(WidgetType::Checkbox, true, r.masking, tf("{}: Masking", &[&who])));
@@ -504,7 +509,7 @@ fn patterns_tab(ui: &mut Ui, d: &mut FillPatternsDialog) -> Option<FileAsk> {
                     ui.selectable_value(&mut r.pattern.target, Target::Model, t("Model"));
                 });
                 c.response.widget_info(|| WidgetInfo::labeled(WidgetType::ComboBox, true, label.clone()));
-                swatch(ui, Some(&r.pattern), 80.0, ink);
+                swatch(ui, Some(&r.pattern), 80.0, ink, None);
                 match r.pattern.simple() {
                     Some(was) => {
                         let (mut angle, mut spacing, mut cross) = was;

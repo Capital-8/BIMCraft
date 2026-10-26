@@ -449,3 +449,25 @@ fn the_detail_panels_create_group_button_groups_what_is_selected() {
     assert_eq!((ids(&h, "detailgroup").len(), ids(&h, "line").len()), (1, 0));
     assert_eq!(h.state().selection, ids(&h, "detailgroup"));
 }
+
+#[test]
+fn the_type_swatches_stand_on_the_canvas_paper_in_every_look() {
+    // Ink is the canvas's colour, so it needs the canvas's ground: in a dark interface with a light canvas, black on the dialog's
+    // own dark ground would be lost.
+    for (dark, light_canvas) in [(false, false), (true, false), (true, true)] {
+        let mut h = app(BOX);
+        h.state_mut().light_canvas = light_canvas;
+        h.ctx.set_theme(if dark { egui::Theme::Dark } else { egui::Theme::Light });
+        h.run();
+        fill_patterns(&mut h);
+        h.run();
+        let paper = crate::canvas::color(bimcraft_core::render::PAPER);
+        let swatches = painted(&h)
+            .iter()
+            .filter(|s| matches!(s, egui::Shape::Rect(r) if r.fill == paper && (r.rect.width() - 60.0).abs() < 0.5 && (r.rect.height() - 22.0).abs() < 0.5))
+            .count();
+        // Six types, each with a foreground and a background.
+        assert_eq!(swatches, 12, "dark {dark}, light canvas {light_canvas}");
+        assert_eq!(paper == egui::Color32::WHITE, !dark || light_canvas, "the canvas is as light as the look says");
+    }
+}
