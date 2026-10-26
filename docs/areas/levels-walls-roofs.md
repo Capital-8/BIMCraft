@@ -54,8 +54,9 @@ them by how many others each is inside: even, an outline (counter-clockwise), od
 round it, so an island in a hole is an outline again. `solve_one` wants one outline (a floor's, a roof's). The element
 keeps the sketch it was drawn or last edited by (`sketch` on floors, ceilings, roofs and shafts; empty when it was made
 over the walls or read from a file): each line is a part with an id and a GUID of its own (`HasPart`, listed in
-`parts_now` by the element's GUID), going with the element when it moves and new on a copy; part ids are never given
-twice, even after a line is gone. Commands take `sketch` (lines `[[x,y],[x,y]]`, arcs `[[x,y],[x,y],[x,y]]`, or
+`parts_now` by the element's GUID), going with the element when it moves and new on a copy; part ids are not given
+again once a line is gone, for as long as the project is open (the library remembers the lowest it has held; a file holds the
+ids in use, so one a line had before it was deleted and the file saved may be given again after the file is reopened). Commands take `sketch` (lines `[[x,y],[x,y]]`, arcs `[[x,y],[x,y],[x,y]]`, or
 `{start, end, through?, id?}`) in place of `boundary` and its holes; `edit_boundary` without one gives the lines to edit
 (the kept sketch while it still draws the outline, `sketch::draws`, else the outline's edges as new lines) and with one
 redraws it, a line sent back with its `id` keeping it (keeping a roof's gables on edges that stay); the `sketch` command

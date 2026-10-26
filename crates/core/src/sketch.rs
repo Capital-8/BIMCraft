@@ -1304,6 +1304,32 @@ mod command_tests {
     }
 
     #[test]
+    fn a_sketch_lines_id_is_not_given_again_while_the_project_is_open_after_the_line_has_gone() {
+        let mut s = Session::new();
+        let f = run(&mut s, "floor", json!({"sketch": square(0.0, 0.0, 4000.0)}))["id"].clone();
+        let first = lines(&mut s, &f);
+        let ids: Vec<u64> = first.iter().filter_map(|l| l["id"].as_u64()).collect();
+        // Down to a triangle on the first three lines' ids: the fourth's goes.
+        let tri = [([0, 0], [4000, 0]), ([4000, 0], [4000, 4000]), ([4000, 4000], [0, 0])];
+        let kept: Vec<Value> = tri.iter().zip(&ids).map(|((a, b), id)| json!({"id": id, "start": a, "end": b})).collect();
+        run(&mut s, "edit_boundary", json!({"id": f, "sketch": kept}));
+        let now: Vec<u64> = lines(&mut s, &f).iter().filter_map(|l| l["id"].as_u64()).collect();
+        assert_eq!(now, ids[..3], "the three keep theirs");
+        // A line added next time: its id is nobody's before, the fourth's included.
+        let mut more: Vec<Value> = kept.clone();
+        more[2] = json!({"id": ids[2], "start": [2000, 2000], "end": [0, 0]});
+        more.push(json!({"start": [4000, 4000], "end": [2000, 2000]}));
+        run(&mut s, "edit_boundary", json!({"id": f, "sketch": more}));
+        let after: Vec<u64> = lines(&mut s, &f).iter().filter_map(|l| l["id"].as_u64()).collect();
+        assert_eq!(after.len(), 4);
+        assert!(!ids[3..].contains(&after[3]) && after[3] < ids[3], "{after:?} against {ids:?}");
+        // A copy's lines are new ones too, lower still.
+        let copy = run(&mut s, "copy", json!({"ids": [f], "by": [0, 9000]}))["ids"][0].clone();
+        let copied: Vec<u64> = lines(&mut s, &copy).iter().filter_map(|l| l["id"].as_u64()).collect();
+        assert!(copied.iter().all(|c| *c < after[3] && !ids.contains(c)), "{copied:?}");
+    }
+
+    #[test]
     fn an_arc_sketched_rounds_the_floor() {
         let mut s = Session::new();
         let half = json!([[[0, 0], [4000, 0]], [[4000, 0], [0, 0], [2000, 2000]]]);
