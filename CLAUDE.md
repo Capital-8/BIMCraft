@@ -74,7 +74,7 @@ cargo test --workspace
 ## Looking at the result
 
 After a change, look at what it makes, as the area says. How to do it for each kind of result is in
-[docs/areas/looking-at-results.md](docs/areas/looking-at-results.md): the desktop in both themes (a screenshot of the window,
+[docs/areas/looking-at-results.md](docs/areas/looking-at-results.md): the desktop in its three looks (a screenshot of the window,
 rendered without a display), plans and ceiling plans, the 3D view, scale, detail level and style, schedules, sheets as PDF,
 IFC with IfcOpenShell, structure and the discipline tabs, IFC import. For Revit files see
 [docs/areas/revit-import.md](docs/areas/revit-import.md); for the packages, [docs/areas/packaging.md](docs/areas/packaging.md).

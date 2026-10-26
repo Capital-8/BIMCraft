@@ -17,9 +17,17 @@ its page greyed out (`later`).
 View > Dark Mode opens a small theme menu: As the System, Light, Dark, or Dark UI, Light Canvas. The same choices are in
 Settings > User Interface. The last choice keeps plans, ceiling plans, sections, elevations and 3D views on a light background
 while the interface stays dark; sheets stay white paper in every mode. `Settings::light_canvas` is saved alongside `theme`
-in `settings.json`, defaults to false for older files, and survives New/Open. `style::dark` chooses interface colours;
+in `settings.json`, defaults to false for older files, and is only read with the dark theme (`Settings::from_json` drops it from
+any other, so a hand-edited file never leaves the menu with no choice picked). `style::dark` chooses interface colours;
 `style::canvas_dark` controls canvas ink, fill and background conversion, and the section/3D image cache keys. Both software
-and GPU 3D painters use the canvas background.
+and GPU 3D painters use the canvas background. What the drawing paints in a palette (the fill of what is selected or hovered,
+a crop region's outline) takes it from `style::canvas_pal`, which follows the canvas, not `pal`, which follows the interface:
+`DARK`'s fills are near-black on a white drawing. A scan is dimmed only on a dark canvas (`canvas_dark`), so a dark interface
+around a light drawing leaves it as it is.
+
+New and Open (`BimApp::reopened`) keep the look: a new `BimApp` would run `style::apply` again, which sets the theme
+preference back to the system's (and `keep_settings` would then write that over the user's choice), so `reopened` carries
+`styled`, `theme_wanted` and `light_canvas` over.
 
 The system's file dialogs (Open, Save As, the exports, Load Family, Link Model, a material's picture) are asked for through
 `BimApp::ask_file` (`dialog.rs`), never with a blocking `rfd::FileDialog`: a native dialog run inside the window's event
