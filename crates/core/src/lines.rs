@@ -163,6 +163,18 @@ pub fn default_styles() -> BTreeMap<String, LineStyle> {
     styles(Language::English)
 }
 
+/// The style a detail line is drawn in unless told another, of `styles` in `language`: Thin Lines by the name the language
+/// gives it, else by its English name (the styles of a file from before they were named in a language), else whichever is a
+/// thin black solid line, else the first.
+pub fn default_style(styles: &BTreeMap<String, LineStyle>, language: Language) -> Option<&String> {
+    let thin = LineStyle { pen: Pen::FINE, color: [0, 0, 0], pattern: None };
+    [language.word(THIN), THIN]
+        .into_iter()
+        .find_map(|n| styles.get_key_value(n).map(|(k, _)| k))
+        .or_else(|| styles.iter().find(|(_, s)| **s == thin).map(|(k, _)| k))
+        .or_else(|| styles.keys().next())
+}
+
 pub fn is_default_styles(s: &BTreeMap<String, LineStyle>) -> bool {
     *s == default_styles()
 }
@@ -541,6 +553,46 @@ mod tests {
         assert!(l.curve.start().dist(P2(100.0, 200.0)) < 1e-6 && l.curve.end().dist(P2(100.0, 1200.0)) < 1e-6, "{:?}", l.curve);
         let r = s.execute("copy", &json!({"ids": [line], "by": [0, 3000]})).unwrap();
         assert_eq!(r["ids"].as_array().map(Vec::len), Some(1));
+    }
+
+    #[test]
+    fn a_detail_line_with_no_style_is_drawn_in_thin_lines_whatever_the_language_of_the_project_or_its_file() {
+        let thin = |s: &Session, id: Id| match s.model.elements.get(id) {
+            Some(Element::DetailLine(l)) => l.style.clone(),
+            e => panic!("{e:?}"),
+        };
+        for (code, name) in [("en", "Thin Lines"), ("pt", "Linhas finas"), ("es", "Líneas finas")] {
+            let mut s = Session::new();
+            s.execute("new", &json!({"language": code})).unwrap();
+            let id = s.execute("detail_line", &json!({"points": [[0, 0], [1000, 0]]})).unwrap()["id"].as_u64().unwrap();
+            assert_eq!(thin(&s, id), name, "{code}");
+            let region = s
+                .execute("filled_region", &json!({"sketch": [[[0, 0], [1000, 0]], [[1000, 0], [1000, 1000]], [[1000, 1000], [0, 0]]]}))
+                .unwrap();
+            let Some(Element::FilledRegion(r)) = s.model.elements.get(region["id"].as_u64().unwrap()) else { panic!("a region") };
+            assert_eq!(r.line_style.as_deref(), Some(name), "{code}");
+        }
+        // A Portuguese file from before line styles holds none: it reads with the English ones, which are named in Portuguese.
+        let file = Model::new_in("p", Language::Portuguese).to_json().unwrap();
+        let mut v: serde_json::Value = serde_json::from_str(&file).unwrap();
+        for key in ["line_styles", "line_patterns"] {
+            assert!(v.as_object_mut().and_then(|o| o.remove(key)).is_some(), "{key}");
+        }
+        let (m, left_out) = Model::read(&v.to_string()).unwrap();
+        assert!(left_out.is_empty(), "{left_out:?}");
+        assert_eq!(m.line_styles, styles(Language::Portuguese));
+        assert_eq!(m.check(), Ok(()));
+        let mut s = Session::new();
+        s.reset(m, None);
+        let id = s.execute("detail_line", &json!({"points": [[0, 0], [1000, 0]]})).unwrap()["id"].as_u64().unwrap();
+        assert_eq!(thin(&s, id), "Linhas finas");
+        // Whatever the names, the style that is a thin black solid line is the default; else the first.
+        let mut renamed = default_styles();
+        let first = renamed.remove(THIN).unwrap();
+        renamed.insert("Zeta".into(), first);
+        assert_eq!(default_style(&renamed, Language::Portuguese).map(String::as_str), Some("Zeta"));
+        renamed.remove("Zeta");
+        assert_eq!(default_style(&renamed, Language::English).map(String::as_str), renamed.keys().next().map(String::as_str));
     }
 
     #[test]

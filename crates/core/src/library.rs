@@ -214,6 +214,10 @@ pub struct Library {
     by_name: BTreeMap<(Kind, String), Id>,
     by_guid: HashMap<Guid, Id>,
     parts: BTreeMap<Id, Part>,
+    /// The lowest id this library has held, entry or part, even if it has none now (0 before any): new ids count down from
+    /// below it, so an id of something deleted isn't given again while the project is open. A file holds the ids in use,
+    /// not this.
+    lowest: Id,
 }
 
 impl PartialEq for Library {
@@ -291,7 +295,14 @@ impl Library {
         self.by_name.insert((e.kind.clone(), e.name.clone()), id);
         self.by_guid.insert(e.guid, id);
         self.by_id.insert(id, e);
+        self.lowest = self.lowest_id().unwrap_or(id);
         Ok(())
+    }
+
+    /// The lowest id an entry or a part has, or has had.
+    fn lowest_id(&self) -> Option<Id> {
+        let held = self.by_id.keys().next().into_iter().chain(self.parts.keys().next()).copied();
+        held.chain((self.lowest != 0).then_some(self.lowest)).min()
     }
 
     fn remove(&mut self, id: Id) {
@@ -612,8 +623,8 @@ impl Model {
         }
         // New ones: ids down from the library's lowest, GUIDs made in order (a file read the same makes the same).
         let floor = self.elements.keys().next_back().map_or(crate::ids::FIRST_ID, |k| k + 1).max(self.next_id);
-        // Below every entry's and every part's there was, so a part taken away leaves its id unused.
-        let mut below = self.library.first_id().into_iter().chain(self.library.parts.keys().next().copied()).min().unwrap_or(LAST_ID + 1);
+        // Below every entry's and every part's there has been, so a part taken away leaves its id unused.
+        let mut below = self.library.lowest_id().unwrap_or(LAST_ID + 1);
         let given: Vec<(Id, Guid)> = now
             .iter()
             .zip(&keep)
@@ -679,6 +690,7 @@ impl Model {
             }
         }
         self.library.parts = self.parts_now().into_iter().collect();
+        self.library.lowest = self.library.lowest_id().unwrap_or(0);
     }
 
     /// What the library has that has no id and GUID gets them; what it has no more loses them. A rename that kept its
@@ -748,8 +760,7 @@ impl Model {
     /// [`FIRST_ID`](crate::ids::FIRST_ID): one id space, a new project's library not in its elements' way. Should the two
     /// meet, the library goes on past the elements.
     pub fn fresh_library_id(&mut self) -> Id {
-        let lowest = self.library.first_id().into_iter().chain(self.library.parts.keys().next().copied()).min();
-        let below = lowest.map_or(LAST_ID, |f| f.saturating_sub(1));
+        let below = self.library.lowest_id().map_or(LAST_ID, |f| f.saturating_sub(1));
         let floor = self.elements.keys().next_back().map_or(crate::ids::FIRST_ID, |k| k + 1).max(self.next_id);
         let mut id = below;
         while id >= floor && (self.elements.contains_key(id) || self.library.taken(id)) {

@@ -71,7 +71,8 @@ pub static ALL: &[Command] = &[
          this project's of the same name, where it has one). Each keeps its id unless this project has that id, and its GUID \
          unless this project has that GUID: then it's a copy, with a GUID of its own (the same file inserted into itself is \
          copied whole). What they point at among themselves follows them. A name or a number taken here gets ` 2`, ` 3`…; \
-         types, families, materials and parameters this project hasn't come by name. Returns `ids` {there: here}, \
+         types, families, materials and parameters this project hasn't come by name, and so do the line styles (with their line \
+         patterns), fill patterns, filled region types and detail groups a detail line, a filled region or a group uses. Returns `ids` {there: here}, \
          `copies`, `library`, `left_out`",
         insert_from,
     ),
@@ -164,7 +165,10 @@ pub static ALL: &[Command] = &[
          of the level's walls along their centre lines, open over each loop of them standing free inside, joined to none of \
          the outer ones and with no room in it (a courtyard). Sloped: its top rises `slope` degrees (negative, falls) along \
          the slope arrow, from its tail, where it's at the offset, toward its head. Its top's model pattern starts at \
-         `pattern_origin` and turns by `pattern_angle` (see modify)",
+         `pattern_origin` and turns by `pattern_angle` (see modify). An outline, and each opening, is simple: \
+         no edge across another or along it, none ending part way along one, no spike or keyhole slit (`ceiling`, `roof` \
+         and `shaft` too, and `modify`, `move` and `edit_boundary` of any of them: they are refused, saying which edges); a \
+         file that has one still opens, and works until a command changes its outline",
         floor,
     ),
     edit(
@@ -183,8 +187,11 @@ pub static ALL: &[Command] = &[
          either way round, joined end to end (within 1 mm) into closed loops; a loop inside no other (or inside a hole) an \
          outline, counter-clockwise, one inside an outline a hole in it, clockwise. Gives each region's `outline`, `holes` and \
          `area_m2`, or every problem with the lines it's about (numbered from 0): ends no other line meets, lines that \
-         intersect or overlap, three or more lines at a point. `sketch` on floor, ceiling, roof and shaft, and edit_boundary, \
-         take the same lines for one outline and its holes",
+         intersect or overlap (a line too: a polyline round a bow tie crosses itself), three or more lines at a point. \
+         A sketch is solved as the straight pieces its lines are drawn with (an arc, a circle or a curve is cut into chords, \
+         a circle into up to 8,193): past 200,000 of them, or when they lie so close together that telling which cross \
+         takes more than six million steps, it is refused at once. `sketch` on floor, ceiling, roof and shaft, and \
+         edit_boundary, take the same lines for one outline and its holes",
         sketch_lines,
     ),
     edit(
@@ -203,7 +210,8 @@ pub static ALL: &[Command] = &[
         "{id, sketch?: [[[x,y],[x,y]],…]} redraws a floor's, a ceiling's, a roof's footprint's or a shaft's outline and its \
          holes (a floor's or a ceiling's openings, a roof's courtyards; a shaft has none) as a sketch, all at once (see \
          `sketch`); a roof's gable edges stay gables where the new footprint has the same edge. Without `sketch`, gives the \
-         outline and holes it has now, as the lines to edit",
+         outline and holes it has now, as the lines to edit. The outline must be simple, as `floor` says; a line that \
+         crosses itself is found as two that cross are",
         edit_boundary,
     ),
     edit(
@@ -694,7 +702,8 @@ pub static ALL: &[Command] = &[
         "{id | ids: [id,…], …fields} change fields as `elements` shows them, of one element or several; `level` and `top_level` may be names. \
          A filled region's or a floor's model pattern is set by `pattern_origin` [x, y], plan mm, where its lines start, and \
          `pattern_angle`, degrees counter-clockwise (both shown by `elements`); to put a pattern line of one on a reference \
-         line, Model::align_pattern gives the `pattern_origin` that does",
+         line, Model::align_pattern gives the `pattern_origin` that does. A floor's, a ceiling's, a roof's or a shaft's \
+         outline it sets is held to what `floor` says of it",
         modify,
     ),
     edit(
@@ -808,9 +817,9 @@ pub static ALL: &[Command] = &[
     edit(
         "explode",
         "Explode Polyline",
-        &["PX"],
+        &["EX"],
         "{id} takes a detail line that is a polyline apart into a line or an arc for each segment, in its view and style; \
-         the first keeps its id",
+         the first keeps its id. Revit has no shortcut for it: EX is ours, PX being the Plumbing Fixture's on the desktop",
         explode,
     ),
     edit(
@@ -820,33 +829,6 @@ pub static ALL: &[Command] = &[
         "{ids: [id,…]} deleting a wall deletes its doors and windows, deleting those their tags; a view takes its notes and \
          spot elevations, and what a spot elevation reads takes it; dimensions lose what's deleted",
         delete,
-    ),
-    edit(
-        "line_weights",
-        "Line Weights",
-        &[],
-        "{model?: [{scale, widths}, …], annotation?: [16 widths], reset?: true} the project's line weights, as Revit's \
-         Manage > Line Weights: what each pen draws on paper, mm. `model` gives, whole, the model's pens 1 to 16 at each of \
-         its scales (1 to 32 of them, 1 : `scale`): a view draws its walls, doors, patterns and the rest of the model in the \
-         column of the scale nearest its own (by how many times finer or coarser; the finer of two as near). `annotation` \
-         gives the 16 pens that dimensions, tags, text, grids, levels and marks draw in, at any scale. Each width is 0.01 to \
-         20 mm; pen 0 is always a hairline. `reset` goes back to what a project in its units starts with (the model's pens \
-         wider at finer scales; at 1 : 100, pen 4 is 0.18 mm and pen 10 0.35 mm). Without any, it says what they are, each \
-         scale named as the project's units name it, and `own` whether the project has set them",
-        line_weights,
-    ),
-    edit(
-        "object_styles",
-        "Object Styles",
-        &[],
-        "{categories?: {category: {projection?: pen, cut?: pen}, …}, reset?: true} the project's object styles, as Revit's \
-         Manage > Object Styles: the pen (0, a hairline, to 16) each model category draws its lines in where it is seen \
-         (`projection`) and where a view cuts it (`cut`), in every plan and section; a view's Visibility/Graphics overrides \
-         them. A category given keeps the pen it isn't given. The rest of an element's lines keep their own: a compound \
-         wall's layers, a door's jambs, a stair's walk line. `reset` goes back to what a project starts with (cut pen 10 and \
-         seen pen 4; a door's and a window's cut 6, a railing seen 6, a mass 4 both). Without either, it says each model \
-         category's, `own` whether the project has set it apart",
-        object_styles,
     ),
     edit(
         "line_pattern",
@@ -997,7 +979,10 @@ pub static ALL: &[Command] = &[
          with `centre_mark` true, a small cross marks the centre of its arcs, circle or ellipse; with `cloud`, an arc length \
          in mm, it draws as a revision cloud's scallops along it (outward round a loop, a scallop ending at each corner), of \
          `revision` (any text, a label kept with the cloud and listed by `elements`; nothing else reads it); a line is \
-         insulation or a cloud, not both",
+         insulation or a cloud, not both. An \
+         arc, a circle or an ellipse lies within 1,000 km of the origin (an arc of 359.9999999999° is a circle of radius \
+         5.7e14 mm, and is refused), and a polyline's arcs take no more than 8,192 points to draw within 0.25 mm: 10,000 \
+         arcs of 175° are refused",
         detail_line,
     ),
     edit(
@@ -3517,9 +3502,9 @@ fn floor(s: &mut Session, p: &Value) -> R {
             let (boundary, found) = match absent(p.get("boundary")) {
                 true => floor_outline(m, level)
                     .ok_or_else(|| bad(c, format!("no walls enclose an area on {}; give `boundary`", level_name(m, level))))?,
-                false => (ring(c, "boundary", points(c, p, "boundary")?)?, Vec::new()),
+                false => (ring(points(c, p, "boundary")?), Vec::new()),
             };
-            (boundary, rings(c, "opening", p, "openings")?.unwrap_or(found), Vec::new())
+            (boundary, rings(c, p, "openings")?.unwrap_or(found), Vec::new())
         }
     };
     if geom::area(&boundary) < 0.0 {
@@ -3562,7 +3547,7 @@ fn ceiling(s: &mut Session, p: &Value) -> R {
     let sketch = drawn.as_ref().map(|(_, lines)| lines.clone()).unwrap_or_default();
     let (mut boundary, found) = match (drawn, absent(p.get("boundary")), point_opt(c, p, "point")?) {
         (Some((r, _)), ..) => (r.outer, r.holes),
-        (None, false, _) => (ring(c, "boundary", points(c, p, "boundary")?)?, Vec::new()),
+        (None, false, _) => (ring(points(c, p, "boundary")?), Vec::new()),
         // The room's free floor: what the walls' faces close around the point, and the walls standing
         // inside it, clockwise as a floor's openings are.
         (None, true, Some(at)) => geom::region_at(&m.face_lines(level), at, TOL)
@@ -3576,7 +3561,7 @@ fn ceiling(s: &mut Session, p: &Value) -> R {
     if geom::area(&boundary) < 0.0 {
         boundary.reverse();
     }
-    let openings: Vec<Vec<P2>> = rings(c, "opening", p, "openings")?.unwrap_or(found);
+    let openings: Vec<Vec<P2>> = rings(c, p, "openings")?.unwrap_or(found);
     let offset = num(c, p, "offset")?.unwrap_or(CEILING_HEIGHT);
     // Its openings lie inside it and apart, or the model refuses it.
     let area = m2(geom::area(&boundary) - openings.iter().map(|o| geom::area(o).abs()).sum::<f64>());
@@ -3599,7 +3584,7 @@ fn shaft(s: &mut Session, p: &Value) -> R {
     let (mut boundary, sketch) = match sketched(c, p, "", &[])? {
         Some((r, lines)) if r.holes.is_empty() => (r.outer, lines),
         Some(_) => return Err(bad(c, "a shaft is one outline with no holes in it: sketch each hole as a shaft of its own")),
-        None => (ring(c, "boundary", points(c, p, "boundary")?)?, Vec::new()),
+        None => (ring(points(c, p, "boundary")?), Vec::new()),
     };
     if geom::area(&boundary) < 0.0 {
         boundary.reverse();
@@ -4375,7 +4360,7 @@ fn roof(s: &mut Session, p: &Value) -> R {
     let overhang = num(c, p, "overhang")?.unwrap_or(if given || extrusion.is_some() { 0.0 } else { 500.0 });
     let (boundary, found) = match (drawn, given, &extrusion) {
         (Some((r, _)), ..) => (r.outer, r.holes),
-        (None, true, _) => (ring(c, "boundary", points(c, p, "boundary")?)?, Vec::new()),
+        (None, true, _) => (ring(points(c, p, "boundary")?), Vec::new()),
         (None, false, Some(_)) => (Vec::new(), Vec::new()),
         (None, false, None) => roof_footprint(m, level, overhang).map_err(|e| bad(c, e))?,
     };
@@ -4384,13 +4369,13 @@ fn roof(s: &mut Session, p: &Value) -> R {
         type_name,
         level,
         boundary,
-        courtyards: rings(c, "courtyard", p, "courtyards")?.unwrap_or(found),
+        courtyards: rings(c, p, "courtyards")?.unwrap_or(found),
         slope: if extrusion.is_some() { 0.0 } else { num(c, p, "slope")?.unwrap_or(30.0) },
         overhang,
         gable: flag(c, p, "gable")?,
         gables: shaped(c, p, "gables", "a list of edge numbers")?.unwrap_or_default(),
         offset: num(c, p, "offset")?.unwrap_or(0.0),
-        openings: rings(c, "opening", p, "openings")?.unwrap_or_default(),
+        openings: rings(c, p, "openings")?.unwrap_or_default(),
         join: id_opt(c, p, "join")?,
         extrusion,
         sketch,
@@ -4495,7 +4480,6 @@ fn dormer(s: &mut Session, p: &Value) -> R {
     Ok(json!({"roof": roof, "walls": walls, "window": window}))
 }
 
-/// `key` as JSON shaped like `T` (a list of at most `MAX_POINTS`), or none.
 /// A sketch line as a command takes it: `[[x,y],[x,y]]` straight, `[[x,y],[x,y],[x,y]]` an arc from the first to the
 /// second through the third, or `{start, end, through?, id?}`, `id` one of the sketch's lines it keeps.
 #[derive(serde::Deserialize)]
@@ -4529,6 +4513,11 @@ fn sketch_param(c: &str, p: &Value, key: &str, old: &[SketchLine]) -> Result<Opt
                         bad(c, format!("`{key}` line {i}: {id} isn't a line of this sketch; leave `id` out for a new one"))
                     })?;
                     (l.id, l.guid) = (was.id, was.guid);
+                    // Sent back by its id, it keeps the style and the invisibility it had, unless it is given them again.
+                    l.style = l.style.or_else(|| was.style.clone());
+                    if p.get(key).and_then(|v| v.get(i)).is_none_or(|o| o.get("invisible").is_none()) {
+                        l.invisible = was.invisible;
+                    }
                 }
                 Ok(l)
             }
@@ -4551,10 +4540,11 @@ fn sketched(c: &str, p: &Value, holes: &str, old: &[SketchLine]) -> Result<Optio
     }
 }
 
-/// A ring given as points (`what`: a boundary, an opening), any point repeating the one before it (or at its end, the
-/// first) left out, judged as the sketch of its edges, edge i from point i to the next: none crossing or along another.
-/// Fewer than three points, or no area, [`Model::check`] refuses.
-fn ring(c: &str, what: &str, given: Vec<P2>) -> Result<Vec<P2>, String> {
+/// A ring given as points (a boundary, an opening), any point repeating the one before it (or at its end, the first) left
+/// out, and the points a millimetre from the one before, so a click twice on a corner is one. Whether it is simple, no edge
+/// across another or along it, [`Model::check_edits`] says after the command (`modify` is held to it too); fewer than
+/// three points, or no area, [`Model::check`] refuses.
+fn ring(given: Vec<P2>) -> Vec<P2> {
     let mut r: Vec<P2> = Vec::with_capacity(given.len());
     for q in given {
         if r.last().is_none_or(|l| l.dist(q) > TOL) {
@@ -4564,20 +4554,13 @@ fn ring(c: &str, what: &str, given: Vec<P2>) -> Result<Vec<P2>, String> {
     while r.len() > 1 && r.first().zip(r.last()).is_some_and(|(a, b)| a.dist(*b) <= TOL) {
         r.pop();
     }
-    if r.len() < 3 || r.iter().any(|q| !q.is_finite()) {
-        return Ok(r);
-    }
-    match sketch::solve(&sketch::lines_of(&r, &[])) {
-        Ok(_) => Ok(r),
-        Err(e) if e.iter().all(|p| matches!(p, sketch::Problem::NoArea { .. })) => Ok(r),
-        Err(e) => Err(bad(c, format!("{what} isn't a simple outline: {}", sketch::say(&e, &|i| format!("edge {i}"))))),
-    }
+    r
 }
 
-/// Rings given under `key` (a floor's openings, a roof's courtyards), each judged as [`ring`] judges one.
-fn rings(c: &str, what: &str, p: &Value, key: &str) -> Result<Option<Vec<Vec<P2>>>, String> {
+/// Rings given under `key` (a floor's openings, a roof's courtyards), each cleaned as [`ring`] cleans one.
+fn rings(c: &str, p: &Value, key: &str) -> Result<Option<Vec<Vec<P2>>>, String> {
     let Some(given) = shaped::<Vec<Vec<P2>>>(c, p, key, "a list of outlines [[[x,y],…],…]")? else { return Ok(None) };
-    given.into_iter().enumerate().map(|(i, r)| ring(c, &format!("{what} {i}"), r)).collect::<Result<_, _>>().map(Some)
+    Ok(Some(given.into_iter().map(ring).collect()))
 }
 
 fn sketch_lines(_: &mut Session, p: &Value) -> R {
@@ -4648,6 +4631,7 @@ fn edit_boundary(s: &mut Session, p: &Value) -> R {
     Ok(json!({"id": id, "area_m2": area}))
 }
 
+/// `key` as JSON shaped like `T` (a list of at most `MAX_POINTS`), or none.
 fn shaped<T: serde::de::DeserializeOwned>(c: &str, p: &Value, key: &str, shape: &str) -> Result<Option<T>, String> {
     match p.get(key) {
         v if absent(v) => Ok(None),
@@ -6484,7 +6468,13 @@ fn corner(s: &mut Session, p: &Value) -> R {
     let m = &s.model;
     let [a, b] = ids.as_slice() else { return Err(bad(c, "`ids` takes two walls")) };
     if let (Some(Element::DetailLine(la)), Some(Element::DetailLine(lb))) = (m.elements.get(*a), m.elements.get(*b)) {
-        let keep = points(c, p, "keep").ok().filter(|k| k.len() == 2).unwrap_or_else(|| vec![la.curve.middle(), lb.curve.middle()]);
+        if la.view != lb.view {
+            return Err(bad(c, format!("detail lines {a} and {b} are in different views; trim lines of one view")));
+        }
+        let keep = if absent(p.get("keep")) { vec![la.curve.middle(), lb.curve.middle()] } else { points(c, p, "keep")? };
+        if keep.len() != 2 {
+            return Err(bad(c, "`keep` is a point on each line, [[x, y], [x, y]]"));
+        }
         let (ca, cb) = crate::draw::corner(&la.curve, keep[0], &lb.curve, keep[1]).ok_or_else(|| {
             bad(c, "the lines don't meet, run on as far as need be: they're parallel, or an arc's circle misses the other")
         })?;
@@ -6627,11 +6617,9 @@ fn join_polyline(s: &mut Session, p: &Value) -> R {
     let curves: Vec<crate::curves::Curve> = lines.iter().map(|l| l.curve.clone()).collect();
     let curve =
         crate::curves::join(&curves).ok_or_else(|| bad(c, "the lines don't make one chain, each end meeting the next within 1 mm"))?;
-    let m = s.model_mut();
-    for &id in &ids[1..] {
-        m.elements.remove(id);
-    }
-    m.elements.insert(ids[0], Element::DetailLine(DetailLine { curve, ..first }));
+    // The lines joined in go as Delete takes them: a dimension that measured one loses it (and goes, left with fewer than two).
+    delete(s, &json!({"ids": &ids[1..]}))?;
+    s.model_mut().elements.insert(ids[0], Element::DetailLine(DetailLine { curve, ..first }));
     Ok(json!({"id": ids[0]}))
 }
 
@@ -6660,6 +6648,17 @@ fn offset(s: &mut Session, p: &Value) -> R {
     }
 }
 
+/// Whether `boundary` is drawn where detail line `l` is: another detail line of its view, or a plan element on the level
+/// of the plan it is in (a grid, which has no level, in any plan). Its coordinates are the view's: a section's along and
+/// up, a sheet's paper mm, not the plan's.
+fn drawn_in_view(m: &Model, l: &DetailLine, boundary: Id) -> bool {
+    match m.elements.get(boundary) {
+        Some(Element::DetailLine(b)) => b.view == l.view,
+        Some(e) => m.plan_level(l.view).is_some_and(|plan| m.level_of(e).is_none_or(|level| m.guid(plan) == level)),
+        None => false,
+    }
+}
+
 fn trim_extend(s: &mut Session, p: &Value) -> R {
     let c = "trim_extend";
     let m = &s.model;
@@ -6675,6 +6674,12 @@ fn trim_extend(s: &mut Session, p: &Value) -> R {
     let mut done = Vec::new();
     for (&id, &k) in ids.iter().zip(&keep) {
         let Some(Element::DetailLine(l)) = m.elements.get(id) else { return Err(bad(c, format!("{id} is not a detail line"))) };
+        if !drawn_in_view(m, l, boundary) {
+            return Err(bad(
+                c,
+                format!("detail line {id} is in another view than {boundary} is drawn in; trim it to a line of its own view"),
+            ));
+        }
         let x = crate::draw::meet(&l.curve, &edge, k).ok_or_else(|| bad(c, format!("detail line {id} never meets {boundary}")))?;
         let curve = crate::draw::trim_to(&l.curve, k, x)
             .ok_or_else(|| bad(c, format!("detail line {id} can't be cut there: nothing would be left")))?;
@@ -6685,6 +6690,30 @@ fn trim_extend(s: &mut Session, p: &Value) -> R {
         m.elements.insert(id, Element::DetailLine(l));
     }
     Ok(json!({"ids": ids}))
+}
+
+/// The doors and windows of straight wall `id` as they are once it is `before` becomes `after` (cut back at an end): each
+/// where it was in the plan, so its offset along the wall moves by what the start moved. An error if one would be cut off.
+fn keep_openings(c: &str, m: &Model, id: Id, before: &Wall, after: &Wall) -> Result<Vec<(Id, Element)>, String> {
+    let (was, now) = (Axis::of(before), Axis::of(after));
+    let mut out = Vec::new();
+    for (&oid, e) in &m.elements {
+        let (Element::Door(o) | Element::Window(o)) = e else { continue };
+        if !m.same(o.host, id) {
+            continue;
+        }
+        let half = m.opening_type(e).map_or(0.0, |t| t.width / 2.0);
+        let along = ((was.at(o.offset, 0.0) - after.start).dot(now.tangent(0.0)) * 1e3).round() / 1e3;
+        if along - half < -TOL || along + half > now.length() + TOL {
+            return Err(bad(
+                c,
+                format!("{} {oid} is in the part of wall {id} the fillet cuts away; move it along the wall first", e.category()),
+            ));
+        }
+        let o = Opening { offset: along, ..o.clone() };
+        out.push((oid, if matches!(e, Element::Door(_)) { Element::Door(o) } else { Element::Window(o) }));
+    }
+    Ok(out)
 }
 
 fn fillet(s: &mut Session, p: &Value) -> R {
@@ -6714,9 +6743,17 @@ fn fillet(s: &mut Session, p: &Value) -> R {
         let (&[a0, a1], &[b0, b1]) = (pa.as_slice(), pb.as_slice()) else { return Err(bad(c, "the walls can't be rounded")) };
         let mut round = Wall { start: micron(arc.start()), end: micron(arc.end()), arc: degrees(sweep), ..wa.clone() };
         massing::detach(&mut round.params);
+        let (cut_a, cut_b) =
+            (Wall { start: micron(a0), end: micron(a1), ..wa.clone() }, Wall { start: micron(b0), end: micron(b1), ..wb.clone() });
+        // Doors and windows stay where they are in the plan, as `corner` leaves them, or the fillet is refused if it cuts one off.
+        let mut hosted = keep_openings(c, m, a, &wa, &cut_a)?;
+        hosted.extend(keep_openings(c, m, b, &wb, &cut_b)?);
         let m = s.model_mut();
-        m.elements.insert(a, Element::Wall(Wall { start: micron(a0), end: micron(a1), ..wa }));
-        m.elements.insert(b, Element::Wall(Wall { start: micron(b0), end: micron(b1), ..wb }));
+        m.elements.insert(a, Element::Wall(cut_a));
+        m.elements.insert(b, Element::Wall(cut_b));
+        for (id, e) in hosted {
+            m.elements.insert(id, e);
+        }
         let id = m.insert(Element::Wall(round));
         return Ok(json!({"id": id, "ids": [a, b]}));
     }
@@ -6732,8 +6769,14 @@ fn fillet(s: &mut Session, p: &Value) -> R {
     if !(radius.is_finite() && radius > TOL && radius <= MAX_COORD) {
         return Err(bad(c, format!("`radius` is more than {TOL} mm, not {radius}")));
     }
+    // Two straight lines, not a circle, a polyline or a spline (Revit rounds the corner of two lines).
+    for (id, l) in [(a, &la), (b, &lb)] {
+        if l.curve.kind() != "line" {
+            return Err(bad(c, format!("detail line {id} is a {}: Fillet Arc rounds two straight lines", l.curve.kind())));
+        }
+    }
     let (ca, arc, cb) = crate::draw::fillet_lines(&la.curve, &lb.curve, radius).ok_or_else(|| {
-        bad(c, "the lines are straight, meet at an angle and are long enough for the arc; these aren't, or it doesn't fit")
+        bad(c, "the lines meet at an angle and are long enough for the arc; these are parallel, or too short for it, or it doesn't fit")
     })?;
     let (ca, arc, cb) = (ca.map(micron), arc.map(micron), cb.map(micron));
     let m = s.model_mut();
@@ -6757,6 +6800,12 @@ fn vertex(s: &mut Session, p: &Value) -> R {
     let (id, l) = line_of(c, &s.model, p)?;
     let at = point_req(c, p, "at")?;
     let delete = flag(c, p, "delete")?;
+    // Near the line, as Split asks, or the vertex nearest: not a point across the drawing.
+    let off = if delete { l.curve.vertices().iter().map(|v| v.dist(at)).fold(f64::INFINITY, f64::min) } else { l.curve.nearest(at).1 };
+    if off > 100.0 && off.is_finite() {
+        let on = if delete { "a vertex of detail line" } else { "detail line" };
+        return Err(bad(c, format!("[{}, {}] isn't on {on} {id}: it is {} mm from it", at.0, at.1, hundredth(off))));
+    }
     let curve = if delete { l.curve.without_vertex(at) } else { l.curve.with_vertex(at) }.ok_or_else(|| {
         bad(
             c,
@@ -6766,7 +6815,7 @@ fn vertex(s: &mut Session, p: &Value) -> R {
             },
         )
     })?;
-    s.model_mut().elements.insert(id, Element::DetailLine(DetailLine { curve, ..l }));
+    s.model_mut().elements.insert(id, Element::DetailLine(DetailLine { curve: rounded(curve), ..l }));
     Ok(json!({"id": id}))
 }
 
@@ -6775,6 +6824,7 @@ fn convert_spline(s: &mut Session, p: &Value) -> R {
     let (id, l) = line_of(c, &s.model, p)?;
     let curve = l.curve.converted().ok_or_else(|| bad(c, format!("detail line {id} is a {}, not a spline", l.curve.kind())))?;
     let kind = curve.kind();
+    let curve = rounded(curve);
     s.model_mut().elements.insert(id, Element::DetailLine(DetailLine { curve, ..l }));
     Ok(json!({"id": id, "shape": kind}))
 }
@@ -7168,9 +7218,26 @@ fn curve_param(c: &str, p: &Value) -> Result<crate::curves::Curve, String> {
         .unwrap_or_default();
     let f: crate::curves::Fields =
         serde_json::from_value(Value::Object(fields)).map_err(|e| bad(c, format!("{e}: a line is {}", crate::curves::FORMS)))?;
-    let curve = f.curve().map_err(|e| bad(c, e))?;
+    let curve = rounded(f.curve().map_err(|e| bad(c, e))?);
     curve.check("the line").map_err(|e| bad(c, e))?;
     Ok(curve)
+}
+
+/// A curve with its points to the micron and an arc's turn to a billionth of a degree, what was meant to be exact without
+/// float noise (a quarter turn drawn from three clicks is 90, not 90.00000000000001); nothing else of it changes.
+fn rounded(c: crate::curves::Curve) -> crate::curves::Curve {
+    use crate::curves::Curve;
+    match c {
+        Curve::Poly { points, arcs, closed } => {
+            let arcs: Vec<f64> = arcs.into_iter().map(degrees).collect();
+            let arcs = if arcs.iter().all(|a| *a == 0.0) { Vec::new() } else { arcs };
+            Curve::Poly { points: points.into_iter().map(micron).collect(), arcs, closed }
+        }
+        Curve::Circle { centre, radius } => Curve::Circle { centre: micron(centre), radius },
+        Curve::Ellipse { centre, radii, angle, span } => Curve::Ellipse { centre: micron(centre), radii, angle, span },
+        Curve::Spline { control, knots } => Curve::Spline { control: control.into_iter().map(micron).collect(), knots },
+        Curve::Fit { points, tangents } => Curve::Fit { points: points.into_iter().map(micron).collect(), tangents },
+    }
 }
 
 fn detail_line(s: &mut Session, p: &Value) -> R {
@@ -7185,17 +7252,10 @@ fn detail_line(s: &mut Session, p: &Value) -> R {
     let view = view_param(c, m, p, true)?;
     let style = match name_param(c, p, "style")? {
         Some(n) => n,
-        // Thin Lines, in the project's language, or its first style.
-        None => {
-            let thin = m.language.word(crate::lines::THIN);
-            let first = m.line_styles.keys().next();
-            m.line_styles
-                .get_key_value(thin)
-                .map(|(k, _)| k)
-                .or(first)
-                .cloned()
-                .ok_or_else(|| bad(c, "the project has no line style; make one first"))?
-        }
+        // Thin Lines, in the project's language or the English of a file from before them.
+        None => crate::lines::default_style(&m.line_styles, m.language)
+            .cloned()
+            .ok_or_else(|| bad(c, "the project has no line style; make one first"))?,
     };
     let l = DetailLine { view: m.guid(view), curve, style, insulation, centre_mark, cloud, revision };
     let id = s.model_mut().insert(Element::DetailLine(l));
@@ -7595,10 +7655,7 @@ fn filled_region(s: &mut Session, p: &Value) -> R {
     };
     // Thin Lines unless told; null (or "Invisible") draws none.
     let line_style = match p.get("line_style") {
-        None => {
-            let thin = m.language.word(crate::lines::THIN);
-            m.line_styles.get_key_value(thin).map(|(k, _)| k).or(m.line_styles.keys().next()).cloned()
-        }
+        None => crate::lines::default_style(&m.line_styles, m.language).cloned(),
         Some(Value::Null) => None,
         Some(Value::String(n)) if n.trim().eq_ignore_ascii_case("invisible") => None,
         Some(Value::String(n)) => Some(n.trim().to_string()),

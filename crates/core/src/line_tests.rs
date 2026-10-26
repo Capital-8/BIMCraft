@@ -298,8 +298,9 @@ fn points_snap_to_detail_lines_ends_centres_quadrants_tangents_and_their_nearest
     assert_eq!((at(P2(40.0, -30.0), &[], &all).at, at(P2(40.0, -30.0), &[], &all).kind), (P2(0.0, 0.0), Kind::Centre));
     assert_eq!(at(P2(20.0, 1060.0), &[], &all).kind, Kind::Quadrant);
     assert_eq!(at(P2(20.0, 1060.0), &[], &all).at, P2(0.0, 1000.0));
-    assert_eq!((at(P2(3050.0, 20.0), &[], &all).at, at(P2(3050.0, 20.0), &[], &all).kind), (P2(3000.0, 0.0), Kind::Endpoint));
-    assert_eq!(at(P2(1990.0, 2950.0), &[], &all).at, P2(2000.0, 3000.0), "a spline's end");
+    let endpoint = at(P2(3050.0, 20.0), &[], &all);
+    assert!(endpoint.at.dist(P2(3000.0, 0.0)) < 1e-9 && endpoint.kind == Kind::Endpoint, "{endpoint:?}");
+    assert!(at(P2(1990.0, 2950.0), &[], &all).at.dist(P2(2000.0, 3000.0)) < 1e-9, "a spline's end");
     // From (2000, 0), a line touches the circle at 60° either side of the way back to its centre.
     let t = at(P2(500.0, 880.0), &[P2(2000.0, 0.0)], &all);
     assert_eq!(t.kind, Kind::Tangent);
@@ -308,6 +309,26 @@ fn points_snap_to_detail_lines_ends_centres_quadrants_tangents_and_their_nearest
     let n = at(P2(707.0, -700.0), &[], &Snaps::only(Kind::Nearest));
     assert_eq!(n.kind, Kind::Nearest);
     assert!((n.at.dist(P2(0.0, 0.0)) - 1000.0).abs() < 0.01, "on the circle: {:?}", n.at);
+}
+
+#[test]
+fn every_command_is_listed_once_and_every_shortcut_names_one_command_but_the_one_documented() {
+    let mut ids = std::collections::BTreeSet::new();
+    let mut keys: std::collections::BTreeMap<String, &str> = std::collections::BTreeMap::new();
+    for c in crate::engine::commands() {
+        assert!(ids.insert(c.id), "command `{}` is listed twice", c.id);
+        for a in c.aliases {
+            if let Some(other) = keys.insert(a.to_uppercase(), c.id) {
+                // CL is Column's and Structural Column's by the help of both; the desktop's Structure tab takes it for its own.
+                assert_eq!(a.to_uppercase(), "CL", "{a} is both `{other}`'s and `{}`'s", c.id);
+            }
+        }
+    }
+    // Explode Polyline kept clear of the Plumbing Fixture's PX, which the desktop tries first.
+    assert!(!keys.contains_key("PX"));
+    let mut s = Session::new();
+    let pl = line(&mut s, json!({"points": [[0, 0], [1000, 0], [1000, 1000]]}));
+    assert_eq!(run(&mut s, "EX", json!({"id": pl}))["ids"].as_array().map(Vec::len), Some(2));
 }
 
 #[test]
@@ -322,6 +343,169 @@ fn fillet_rounds_two_walls_with_an_arc_wall_of_the_first_ones_type() {
     assert_eq!((wa.start, wa.end), (P2(-4000.0, 0.0), P2(-1500.0, 0.0)));
     assert_eq!((wb.start, wb.end), (P2(0.0, 1500.0), P2(0.0, 4000.0)));
     assert_eq!((wr.start, wr.end, wr.arc.abs(), wr.type_name.clone()), (P2(-1500.0, 0.0), P2(0.0, 1500.0), 90.0, wa.type_name));
+}
+
+#[test]
+fn arcs_that_reach_past_the_model_and_polylines_that_would_take_millions_of_points_are_refused_at_once() {
+    let mut s = Session::new();
+    let before = s.model.clone();
+    let wiggle = |n: usize, turn: f64| -> Value {
+        let points: Vec<Value> = (0..n).map(|i| json!([i as f64 * 1.0e4, if i % 2 == 0 { 0.0 } else { 100.0 }])).collect();
+        json!({"points": points, "arcs": vec![turn; n - 1]})
+    };
+    let hostile = [
+        (json!({"start": [0, 0], "end": [1000, 0], "arc": 359.9999999999}), "an arc"),
+        (json!({"start": [0, 0], "end": [1000, 0], "arc": 359.99999999}), "reaches further"),
+        (json!({"start": [0, 0], "end": [1000, 0], "through": [500, 1e-9]}), ""),
+        (json!({"centre": [1e9, 1e9], "radius": 1e9}), "reaches further"),
+        (json!({"centre": [9e8, 0], "radii": [2e8, 100]}), "reaches further"),
+        (wiggle(10_000, 175.0), "points to draw within"),
+        (wiggle(10_000, 350.0), "points to draw within"),
+    ];
+    for (p, says) in hostile {
+        let t = std::time::Instant::now();
+        let r = s.execute("detail_line", &p);
+        assert!(t.elapsed().as_secs_f64() < 1.0, "{} s", t.elapsed().as_secs_f64());
+        if says.is_empty() {
+            // Near-straight enough to be a line: made, as a line.
+            assert!(r.is_ok(), "{r:?}");
+            continue;
+        }
+        let e = r.unwrap_err();
+        assert!(e.contains(says), "{p}: {e}");
+    }
+    assert_eq!(s.model.elements.len(), before.elements.len() + 1, "only the near-straight one was made");
+}
+
+#[test]
+fn what_is_drawn_is_kept_to_the_micron_and_an_arcs_turn_to_a_billionth_of_a_degree_vertices_too() {
+    let mut s = Session::new();
+    let noisy = 1000.0 + 6.1e-14;
+    let a = line(&mut s, json!({"start": [0.0, 0.0], "end": [2000.0, 0.0], "through": [noisy, 1000.0 + 1.1e-13]}));
+    let Curve::Poly { points, arcs, .. } = curve(&s, a) else { panic!("an arc") };
+    assert_eq!(points, vec![P2(0.0, 0.0), P2(2000.0, 0.0)]);
+    assert!(arcs.iter().all(|t| (t * 1e9).round() / 1e9 == *t), "{arcs:?}");
+    let ring = line(&mut s, json!({"points": [[0.0, 3000.0], [1000.0 + 4e-14, 3000.0], [1000.0, 4000.0 + 3e-14]], "closed": true}));
+    assert!(curve(&s, ring).vertices().iter().all(|p| (p.0 * 1e3).round() / 1e3 == p.0 && (p.1 * 1e3).round() / 1e3 == p.1));
+    // A vertex added and a spline converted come out to the micron too.
+    let v = line(&mut s, json!({"points": [[0, 6000], [3000, 6000], [3000, 9000]]}));
+    run(&mut s, "vertex", json!({"id": v, "at": [1000.0 / 3.0, 6000.0]}));
+    let added = curve(&s, v).vertices();
+    assert_eq!(added.len(), 4);
+    assert!(added.iter().all(|p| (p.0 * 1e3).round() / 1e3 == p.0), "{added:?}");
+    let sp = line(&mut s, json!({"fit": [[0, 12000], [1000, 12700], [2000, 12000], [3100, 12300]]}));
+    run(&mut s, "convert_spline", json!({"id": sp}));
+    assert!(curve(&s, sp).vertices().iter().all(|p| (p.0 * 1e3).round() / 1e3 == p.0 && (p.1 * 1e3).round() / 1e3 == p.1));
+}
+
+#[test]
+fn a_vertex_is_added_or_taken_only_near_the_line_and_fillet_names_a_line_that_is_not_straight() {
+    let mut s = Session::new();
+    let v = line(&mut s, json!({"points": [[0, 0], [3000, 0], [3000, 3000]]}));
+    let before = s.model.clone();
+    let e = s.execute("vertex", &json!({"id": v, "at": [1500, 5000]})).unwrap_err();
+    assert!(e.contains("isn't on detail line") && e.contains("mm from it"), "{e}");
+    let e = s.execute("vertex", &json!({"id": v, "at": [9000, 9000], "delete": true})).unwrap_err();
+    assert!(e.contains("isn't on a vertex of detail line"), "{e}");
+    assert_eq!(*s.model, *before);
+    run(&mut s, "vertex", json!({"id": v, "at": [1500, 50]}));
+    run(&mut s, "vertex", json!({"id": v, "at": [3030, 20], "delete": true}));
+    // Fillet Arc rounds two straight lines: a circle or a spline is named, not told it "isn't straight".
+    let c = line(&mut s, json!({"centre": [0, 5000], "radius": 800}));
+    let l = line(&mut s, json!({"start": [0, 4000], "end": [3000, 4000]}));
+    let e = s.execute("fillet", &json!({"ids": [c, l], "radius": 100})).unwrap_err();
+    assert!(e.contains(&format!("detail line {c} is a circle")) && e.contains("straight lines"), "{e}");
+    let sp = line(&mut s, json!({"control": [[0, 8000], [500, 9000], [1000, 8000]]}));
+    let e = s.execute("fillet", &json!({"ids": [l, sp], "radius": 100})).unwrap_err();
+    assert!(e.contains("is a spline"), "{e}");
+}
+
+#[test]
+fn insert_from_file_brings_the_line_styles_and_patterns_a_detail_line_is_drawn_in() {
+    let mut s = Session::new();
+    run(&mut s, "line_pattern", json!({"name": "Fence", "segments": [{"dash": 4}, {"space": 1}, "dot", {"space": 1}]}));
+    run(&mut s, "line_style", json!({"name": "Fence Line", "pen": 3, "color": [200, 0, 0], "pattern": "Fence"}));
+    let l = line(&mut s, json!({"points": [[0, 0], [1000, 0]], "style": "Fence Line"}));
+    let path = std::env::temp_dir().join(format!("bimcraft-insert-styles-{}.bimcraft", std::process::id()));
+    std::fs::write(&path, s.model.to_json().unwrap_or_default()).unwrap_or_else(|e| panic!("{e}"));
+    let mut t = Session::new();
+    let r = t.execute("insert", &json!({"path": path.to_string_lossy(), "ids": [l]}));
+    std::fs::remove_file(&path).ok();
+    let r = r.unwrap_or_else(|e| panic!("{e}"));
+    assert!(t.model.line_styles.contains_key("Fence Line") && t.model.line_patterns.contains_key("Fence"));
+    assert_eq!(t.model.line_styles["Fence Line"].pattern.as_deref(), Some("Fence"));
+    let here = r["ids"][l.to_string()].as_u64().unwrap_or_default();
+    assert!(matches!(t.model.elements.get(here), Some(Element::DetailLine(d)) if d.style == "Fence Line"), "{r}");
+}
+
+#[test]
+fn fillet_leaves_a_wall_s_doors_where_they_are_in_the_plan_and_refuses_to_cut_one_off() {
+    let mut s = Session::new();
+    // Wall a starts at the corner, so a fillet moves its start along it by 1500.
+    let a = run(&mut s, "wall", json!({"points": [[0, 0], [-6000, 0]]}))["ids"][0].as_u64().unwrap_or_default();
+    let b = run(&mut s, "wall", json!({"points": [[0, 0], [0, 6000]]}))["ids"][0].as_u64().unwrap_or_default();
+    let d = run(&mut s, "door", json!({"wall": a, "offset": 3000}))["id"].as_u64().unwrap_or_default();
+    let near = run(&mut s, "door", json!({"wall": b, "offset": 500}))["id"].as_u64().unwrap_or_default();
+    let before = s.model.clone();
+    let e = s.execute("fillet", &json!({"ids": [a, b], "radius": 1500})).unwrap_err();
+    assert!(e.contains(&format!("door {near}")) && e.contains("cuts away"), "{e}");
+    assert_eq!(*s.model, *before, "refused, nothing changed");
+    run(&mut s, "delete", json!({"ids": [near]}));
+    run(&mut s, "fillet", json!({"ids": [a, b], "radius": 1500}));
+    let (Some(Element::Door(o)), Some(w)) = (s.model.elements.get(d), s.model.wall(a)) else { panic!("the door and its wall") };
+    assert_eq!(w.start, P2(-1500.0, 0.0), "the wall's start moved");
+    let spot = crate::walls::Axis::of(w).at(o.offset, 0.0);
+    assert!(spot.dist(P2(-3000.0, 0.0)) < 1e-6, "the door stands where it stood, not {spot:?}");
+}
+
+#[test]
+fn joining_lines_takes_the_ones_joined_in_as_delete_does_a_dimension_measuring_one_goes_with_it() {
+    let mut s = Session::new();
+    let a = line(&mut s, json!({"start": [0, 0], "end": [1000, 0]}));
+    let b = line(&mut s, json!({"start": [1000, 0], "end": [2000, 0]}));
+    let c = line(&mut s, json!({"start": [0, 3000], "end": [2000, 3000]}));
+    let d = run(&mut s, "dimension", json!({"refs": [{"id": b}, {"id": c}], "at": [1000, 1500]}))["id"].as_u64().unwrap_or_default();
+    let joined = run(&mut s, "join_polyline", json!({"ids": [a, b]}))["id"].as_u64().unwrap_or_default();
+    assert_eq!(joined, a);
+    assert!(s.model.elements.get(b).is_none() && s.model.elements.get(d).is_none(), "the line and its dimension are gone");
+    assert_eq!(curve(&s, a).kind(), "polyline");
+    run(&mut s, "undo", json!({}));
+    assert!(s.model.elements.get(b).is_some() && s.model.elements.get(d).is_some(), "one undo step puts them back");
+}
+
+#[test]
+fn trimming_and_cornering_keep_to_one_view_and_say_what_is_wrong_with_keep() {
+    let mut s = Session::new();
+    run(&mut s, "section", json!({"start": [-1000, 2000], "end": [3000, 2000], "name": "S"}));
+    let wall = run(&mut s, "wall", json!({"points": [[5000, 0], [5000, 4000]]}))["ids"][0].as_u64().unwrap_or_default();
+    let plan = line(&mut s, json!({"start": [0, 0], "end": [2000, 0]}));
+    let cut = line(&mut s, json!({"view": "S", "start": [0, 500], "end": [2000, 500]}));
+    let cut2 = line(&mut s, json!({"view": "S", "start": [3000, 0], "end": [3000, 3000]}));
+    // A line of a section is not extended to a plan's wall at its plan coordinates; the plan's own is.
+    let before = s.model.clone();
+    let e = s.execute("trim_extend", &json!({"boundary": wall, "ids": [cut], "keep": [[100, 500]]})).unwrap_err();
+    assert!(e.contains("another view"), "{e}");
+    assert_eq!(*s.model, *before);
+    run(&mut s, "trim_extend", json!({"boundary": wall, "ids": [plan], "keep": [[100, 0]]}));
+    assert!(curve(&s, plan).end().dist(P2(5000.0, 0.0)) < 1e-6);
+    // Lines of two views are not cornered, and a line of the section is trimmed to a line of the section.
+    let e = s.execute("corner", &json!({"ids": [plan, cut]})).unwrap_err();
+    assert!(e.contains("different views"), "{e}");
+    let e = s.execute("trim_extend", &json!({"boundary": cut2, "ids": [plan], "keep": [[100, 0]]})).unwrap_err();
+    assert!(e.contains("another view"), "{e}");
+    run(&mut s, "trim_extend", json!({"boundary": cut2, "ids": [cut], "keep": [[100, 500]]}));
+    assert!(curve(&s, cut).end().dist(P2(3000.0, 500.0)) < 1e-6);
+    // `keep` given wrong is said, not dropped: nonsense, or three points.
+    let (x, y) = (
+        line(&mut s, json!({"start": [0, 10000], "end": [800, 10000]})),
+        line(&mut s, json!({"start": [1000, 10200], "end": [1000, 11000]})),
+    );
+    for keep in [json!("nonsense"), json!([[0, 0], [1, 1], [2, 2]])] {
+        let e = s.execute("corner", &json!({"ids": [x, y], "keep": keep})).unwrap_err();
+        assert!(e.contains("keep"), "{e}");
+    }
+    run(&mut s, "corner", json!({"ids": [x, y], "keep": [[100, 10000], [1000, 10900]]}));
+    assert!(curve(&s, x).end().dist(P2(1000.0, 10000.0)) < 1e-6);
 }
 
 #[test]

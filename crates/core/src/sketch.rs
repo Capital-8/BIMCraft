@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 use crate::curves::Curve;
 use crate::geom::{self, P2, Region};
 use crate::ids::{Guid, Id};
-use crate::model::{MAX_COORD, MAX_POINTS, TOL};
+use crate::model::{Element, MAX_COORD, MAX_POINTS, Model, TOL};
 
 /// A straight line, from one end to the other.
 pub type Line = [P2; 2];
@@ -126,6 +126,17 @@ impl SketchLine {
 /// The most lines a sketch may hold.
 pub const MAX_LINES: usize = MAX_POINTS;
 
+/// The most straight pieces a sketch's lines may be drawn as: an arc, a circle or a curve is solved as the chords that draw it
+/// ([`Curve::drawn_len`]), up to 8,193 for a circle. Past it a sketch is refused whole, before any of it is worked on.
+pub const MAX_PIECES: usize = 200_000;
+
+/// The most steps [`solve`] takes finding which pieces meet: past it the pieces lie too close together, long and slanted
+/// (ten thousand parallel diagonals), to tell without trying every pair, and the sketch is refused rather than waited for.
+const MAX_WORK: usize = 6_000_000;
+
+/// The most steps [`solve`] takes nesting the loops, each a point of a loop looked at while finding which loops hold which.
+const MAX_NEST: usize = 15_000_000;
+
 /// The most problems [`solve`] names: past that, the first ones are enough to start fixing.
 pub const MAX_PROBLEMS: usize = 100;
 
@@ -135,15 +146,16 @@ pub const MAX_PROBLEMS: usize = 100;
 pub enum Problem {
     /// No lines at all.
     Empty,
-    /// More lines than [`MAX_LINES`].
-    TooMany { count: usize },
+    /// More than a sketch can be solved with: `count` of `what`, which is "lines" (more than [`MAX_LINES`]), "pieces" (more
+    /// than [`MAX_PIECES`]), "steps" (finding which pieces meet takes more than a sketch is given) or "loops" (nesting them does).
+    TooMany { count: usize, what: &'static str },
     /// An end that isn't a number, or is further out than [`MAX_COORD`].
     OutOfRange { line: usize },
     /// A line [`TOL`] long or less.
     TooShort { line: usize },
     /// A line that isn't one: points one on another, a spline's knots out of order, an arc turning a whole circle.
     Malformed { line: usize, why: String },
-    /// Two lines crossing, or one ending part way along the other, at `at`.
+    /// Two lines crossing, or one ending part way along the other, at `at`; a line twice, when it crosses itself.
     Cross { lines: [usize; 2], at: P2 },
     /// Two lines lying along each other for more than [`TOL`].
     Overlap { lines: [usize; 2] },
@@ -165,6 +177,8 @@ impl Problem {
             Problem::OutOfRange { line } | Problem::TooShort { line } | Problem::Malformed { line, .. } | Problem::Open { line, .. } => {
                 vec![*line]
             }
+            // A line crossing or overlapping itself is one line, said once.
+            Problem::Cross { lines, .. } | Problem::Overlap { lines } if lines[0] == lines[1] => vec![lines[0]],
             Problem::Cross { lines, .. } | Problem::Overlap { lines } => lines.to_vec(),
             Problem::Branch { lines, .. } | Problem::NoArea { lines } => lines.clone(),
         }
@@ -208,14 +222,35 @@ impl Problem {
         };
         match self {
             Problem::Empty => "there are no lines: draw the outline".into(),
-            Problem::TooMany { count } => format!("{count} lines, more than {MAX_LINES}"),
-            Problem::OutOfRange { line } => format!("{} has a point that isn't a number within {MAX_COORD} mm", name(*line)),
+            Problem::TooMany { count, what: "lines" } => format!("{count} lines, more than {MAX_LINES}"),
+            Problem::TooMany { count, what: "pieces" } => format!(
+                "its lines are drawn as {count} straight pieces (arcs, circles and curves are cut into chords), more than {MAX_PIECES}: draw fewer, or smaller"
+            ),
+            Problem::TooMany { count, what: "steps" } => format!(
+                "its pieces lie too close together to tell which cross ({count} pairs of them looked at, more than {MAX_WORK}): draw fewer lines, or farther apart"
+            ),
+            Problem::TooMany { count, .. } => {
+                format!("the loops are nested too deeply to solve ({count} steps, more than {MAX_NEST}): draw fewer")
+            }
+            Problem::OutOfRange { line } => {
+                format!("{} has a point that isn't a number within {MAX_COORD} mm, or a curve reaching further", name(*line))
+            }
             Problem::TooShort { line } => format!("{} is {TOL} mm long or less", name(*line)),
             Problem::Malformed { line, why } => format!("{} isn't a line it can draw: {why}", name(*line)),
+            Problem::Cross { lines, at: p } if lines[0] == lines[1] => format!("{} crosses itself at {}", name(lines[0]), at(p)),
+            Problem::Overlap { lines } if lines[0] == lines[1] => format!("{} lies along itself", name(lines[0])),
             Problem::Cross { lines, at: p } => format!("{} intersect at {}", list(lines), at(p)),
             Problem::Overlap { lines } => format!("{} overlap", list(lines)),
             Problem::Open { line, at: p } => format!("{} ends at {} without meeting another: the loop is open", name(*line), at(p)),
-            Problem::Branch { lines, at: p } => format!("{} meet at {}: a loop passes a point once", list(lines), at(p)),
+            Problem::Branch { lines, at: p } => {
+                // One line coming back to a point (a bend within a millimetre of another place on it, a loop in it).
+                let mut once = lines.clone();
+                once.dedup();
+                match once.as_slice() {
+                    [one] => format!("{} passes {} more than once: a loop passes a point once", name(*one), at(p)),
+                    _ => format!("{} meet at {}: a loop passes a point once", list(&once), at(p)),
+                }
+            }
             Problem::NoArea { lines } => format!("the loop of {} encloses no area", list(lines)),
             Problem::Separate { count } => format!("the lines make {count} separate outlines, where one is wanted"),
         }
@@ -266,7 +301,7 @@ pub fn solve(lines: &[SketchLine]) -> Result<Profile, Vec<Problem>> {
         return Err(vec![Problem::Empty]);
     }
     if lines.len() > MAX_LINES {
-        return Err(vec![Problem::TooMany { count: lines.len() }]);
+        return Err(vec![Problem::TooMany { count: lines.len(), what: "lines" }]);
     }
     // Each line on its own first: its points are numbers, its ends apart.
     let mut problems: Vec<Problem> = Vec::new();
@@ -282,58 +317,108 @@ pub fn solve(lines: &[SketchLine]) -> Result<Profile, Vec<Problem>> {
     if !problems.is_empty() {
         return Err(cap(problems));
     }
-    // Lines as straight pieces (an arc as its chords), each knowing its line.
-    let mut pieces: Vec<(Line, usize)> = Vec::new();
-    for (i, l) in lines.iter().enumerate() {
-        pieces.extend(l.points().windows(2).map(|w| ([w[0], w[1]], i)));
+    // Not too many pieces, before any is made: a line is as many as it is drawn through points less one.
+    let count: usize = lines.iter().map(|l| l.curve.drawn_len().saturating_sub(1)).sum();
+    if count > MAX_PIECES {
+        return Err(vec![Problem::TooMany { count, what: "pieces" }]);
     }
-    // Ends within TOL of each other are one point.
-    let mut points: Vec<P2> = Vec::new();
-    let ends: Vec<[usize; 2]> = pieces.iter().map(|(l, _)| l.map(|p| weld(&mut points, p))).collect();
-    // Each pair of pieces of two lines that could touch: sorted by where they start across, a piece is checked against
-    // those starting before it ends.
-    let lo = |l: &Line| l[0].0.min(l[1].0);
-    let hi = |l: &Line| l[0].0.max(l[1].0);
-    let mut order: Vec<usize> = (0..pieces.len()).collect();
-    order.sort_by(|&i, &j| lo(&pieces[i].0).total_cmp(&lo(&pieces[j].0)).then(i.cmp(&j)));
-    let mut seen = std::collections::BTreeSet::new();
-    for (k, &i) in order.iter().enumerate() {
-        for &j in &order[k + 1..] {
-            if lo(&pieces[j].0) > hi(&pieces[i].0) + TOL {
-                break;
+    // Lines as straight pieces (an arc as its chords), each knowing its line and the points at its ends; ends within TOL of
+    // each other are one point.
+    let mut welder = Welder::default();
+    let mut pieces: Vec<(Line, usize)> = Vec::with_capacity(count);
+    let mut ends: Vec<[usize; 2]> = Vec::with_capacity(count);
+    for (i, l) in lines.iter().enumerate() {
+        // Two corners of a polyline a millimetre apart or less: said where they are, to be drawn as one. (The chords of a small
+        // arc or curve that fall that close are only left out.)
+        if let Curve::Poly { points: corners, closed, .. } = &l.curve
+            && let Some((a, _)) = geom::ring_edges(corners)
+                .take(if *closed { corners.len() } else { corners.len().saturating_sub(1) })
+                .find(|(a, b)| a.dist(*b) <= TOL)
+        {
+            let why = format!("it has two points less than {TOL} mm apart, at [{}, {}]: draw them as one", a.0.round(), a.1.round());
+            problems.push(Problem::Malformed { line: i, why });
+            continue;
+        }
+        let pts = l.points();
+        let nodes: Vec<usize> = pts.iter().map(|p| welder.weld(*p)).collect();
+        for (w, n) in pts.windows(2).zip(nodes.windows(2)) {
+            // A chord of a small curve that welds to a point is no piece.
+            if n[0] != n[1] {
+                pieces.push(([w[0], w[1]], i));
+                ends.push([n[0], n[1]]);
             }
-            let (li, lj) = (pieces[i].1, pieces[j].1);
-            if li == lj {
-                continue;
-            }
-            let pair = [li.min(lj), li.max(lj)];
-            let (p, q) = if li < lj { (i, j) } else { (j, i) };
-            if let Some(found) = meet(pieces[p].0, pieces[q].0, ends[p], ends[q], pair)
-                && seen.insert((pair, found.rank()))
-            {
-                problems.push(found);
-                if problems.len() > MAX_PROBLEMS {
-                    return Err(cap(problems));
+        }
+    }
+    if !problems.is_empty() {
+        return Err(cap(problems));
+    }
+    let points = welder.points;
+    // Each pair of pieces that could touch (their boxes, grown by TOL, overlap), and how they do: of one line too, which
+    // can cross itself, the next piece of it meeting this one at a point being right. Of the problems a pair of lines has
+    // of a kind, the one at the pieces first in the sketch is named.
+    let tree = Boxes::new(
+        pieces
+            .iter()
+            .map(|(l, _)| [l[0].0.min(l[1].0) - TOL, l[0].1.min(l[1].1) - TOL, l[0].0.max(l[1].0) + TOL, l[0].1.max(l[1].1) + TOL])
+            .collect(),
+    );
+    let mut found: std::collections::BTreeMap<([usize; 2], u8), (usize, usize, Problem)> = std::collections::BTreeMap::new();
+    let mut work = 0;
+    let walked = tree.pairs(&mut work, |i, j| {
+        let (p, q) = if (pieces[i].1, i) <= (pieces[j].1, j) { (i, j) } else { (j, i) };
+        let pair = [pieces[p].1, pieces[q].1];
+        if let Some(problem) = meet(pieces[p].0, pieces[q].0, ends[p], ends[q], pair) {
+            let key = (pair, problem.rank());
+            match found.get_mut(&key) {
+                Some(was) if (p, q) < (was.0, was.1) => *was = (p, q, problem),
+                Some(_) => {}
+                None => {
+                    found.insert(key, (p, q, problem));
                 }
             }
         }
+        found.len() <= MAX_PROBLEMS
+    });
+    let Ok(walked) = walked else { return Err(vec![Problem::TooMany { count: work, what: "steps" }]) };
+    problems.extend(found.into_values().map(|(_, _, problem)| problem));
+    if !walked {
+        problems.sort_by_key(|p| (p.rank(), p.lines().first().copied().unwrap_or(0)));
+        return Err(cap(problems));
     }
     // Two pieces at every point: one, it's open; three or more, it branches.
-    let mut at: Vec<Vec<usize>> = vec![Vec::new(); points.len()];
+    let mut first = vec![0usize; points.len() + 1];
+    for e in &ends {
+        first[e[0] + 1] += 1;
+        first[e[1] + 1] += 1;
+    }
+    for n in 0..points.len() {
+        first[n + 1] += first[n];
+    }
+    let mut at = vec![0usize; first[points.len()]];
+    let mut put = first.clone();
     for (i, e) in ends.iter().enumerate() {
         for &n in e {
-            at[n].push(i);
+            at[put[n]] = i;
+            put[n] += 1;
         }
     }
-    for (n, ps) in at.iter().enumerate() {
-        match ps.as_slice() {
-            [_, _] => {}
-            &[piece] => problems.push(Problem::Open { line: pieces[piece].1, at: points[n] }),
-            _ => {
+    let at_point = |n: usize| &at[first[n]..first[n + 1]];
+    let (mut opens, mut branches) = (0, 0);
+    for (n, &point) in points.iter().enumerate() {
+        match at_point(n) {
+            [] | [_, _] => {}
+            &[piece] if opens <= MAX_PROBLEMS => {
+                opens += 1;
+                problems.push(Problem::Open { line: pieces[piece].1, at: point });
+            }
+            &[_] => {}
+            ps if branches <= MAX_PROBLEMS => {
+                branches += 1;
                 let mut ls: Vec<usize> = ps.iter().map(|&p| pieces[p].1).collect();
                 ls.sort_unstable();
-                problems.push(Problem::Branch { lines: ls, at: points[n] });
+                problems.push(Problem::Branch { lines: ls, at: point });
             }
+            _ => {}
         }
     }
     if !problems.is_empty() {
@@ -343,12 +428,12 @@ pub fn solve(lines: &[SketchLine]) -> Result<Profile, Vec<Problem>> {
     // Every point has two pieces: each part of the sketch is one loop, walked from its first piece the way it was drawn.
     let mut used = vec![false; pieces.len()];
     let mut loops: Vec<(Vec<P2>, Vec<usize>)> = Vec::new();
-    for first in 0..pieces.len() {
-        if used[first] {
+    for first_piece in 0..pieces.len() {
+        if used[first_piece] {
             continue;
         }
         let (mut ring, mut members) = (Vec::new(), Vec::new());
-        let (mut piece, mut from) = (first, ends[first][0]);
+        let (mut piece, mut from) = (first_piece, ends[first_piece][0]);
         while !used[piece] {
             used[piece] = true;
             if members.last() != Some(&pieces[piece].1) && !members.contains(&pieces[piece].1) {
@@ -357,7 +442,7 @@ pub fn solve(lines: &[SketchLine]) -> Result<Profile, Vec<Problem>> {
             ring.push(points[from]);
             let to = if ends[piece][0] == from { ends[piece][1] } else { ends[piece][0] };
             from = to;
-            piece = at[to].iter().copied().find(|&p| p != piece).unwrap_or(piece);
+            piece = at_point(to).iter().copied().find(|&p| p != piece).unwrap_or(piece);
         }
         if geom::area(&ring).abs() <= TOL * TOL {
             problems.push(Problem::NoArea { lines: members.clone() });
@@ -368,9 +453,31 @@ pub fn solve(lines: &[SketchLine]) -> Result<Profile, Vec<Problem>> {
         return Err(cap(problems));
     }
     // No two loops cross or touch, so a loop is inside another when any of its points is: how many it's inside says
-    // whether it's an outline (none, or an even number) or a hole (odd), in the innermost loop around it.
-    let inside: Vec<Vec<usize>> =
-        (0..loops.len()).map(|i| (0..loops.len()).filter(|&j| j != i && geom::contains(&loops[j].0, loops[i].0[0])).collect()).collect();
+    // whether it's an outline (none, or an even number) or a hole (odd), in the innermost loop around it. Only the loops
+    // whose box holds the point are looked into.
+    let bounds = |ring: &Vec<P2>| {
+        ring.iter().fold([f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY], |b, p| {
+            [b[0].min(p.0), b[1].min(p.1), b[2].max(p.0), b[3].max(p.1)]
+        })
+    };
+    let nest = Boxes::new(loops.iter().map(|(ring, _)| bounds(ring)).collect());
+    let mut inside: Vec<Vec<usize>> = vec![Vec::new(); loops.len()];
+    let mut steps = 0;
+    for (i, (ring, _)) in loops.iter().enumerate() {
+        let p = ring[0];
+        nest.at(p, |j| {
+            if j != i {
+                steps += loops[j].0.len();
+                if steps <= MAX_NEST && geom::contains(&loops[j].0, p) {
+                    inside[i].push(j);
+                }
+            }
+            steps <= MAX_NEST
+        });
+        if steps > MAX_NEST {
+            return Err(vec![Problem::TooMany { count: steps, what: "loops" }]);
+        }
+    }
     let mut regions: Vec<Region> = Vec::new();
     let mut region_of = vec![usize::MAX; loops.len()];
     for (i, (ring, _)) in loops.iter().enumerate() {
@@ -424,7 +531,7 @@ pub fn draws(lines: &[SketchLine], outline: &[P2], holes: &[Vec<P2>]) -> bool {
 }
 
 /// A kept sketch's lines checked as [`crate::model::Model::check`] checks what a file holds: no more than [`MAX_LINES`],
-/// every point a number within range.
+/// every point a number within range, and no more than [`MAX_PIECES`] drawn between them.
 pub fn check(who: &str, lines: &[SketchLine]) -> Result<(), String> {
     if lines.len() > MAX_LINES {
         return Err(format!("{who}: its sketch has {} lines, more than {MAX_LINES}", lines.len()));
@@ -432,46 +539,223 @@ pub fn check(who: &str, lines: &[SketchLine]) -> Result<(), String> {
     if let Some(i) = lines.iter().position(|l| l.curve.count() > MAX_POINTS) {
         return Err(format!("{who}: sketch line {i} has more than {MAX_POINTS} points"));
     }
-    match lines.iter().position(|l| !l.in_range()) {
-        Some(i) => Err(format!("{who}: sketch line {i} has a point that isn't a number within {MAX_COORD} mm")),
-        None => Ok(()),
+    if let Some(i) = lines.iter().position(|l| !l.in_range()) {
+        return Err(format!("{who}: sketch line {i} has a point that isn't a number within {MAX_COORD} mm, or a curve reaching further"));
+    }
+    let pieces: usize = lines.iter().map(|l| l.curve.drawn_len().saturating_sub(1)).sum();
+    if pieces > MAX_PIECES {
+        return Err(format!("{who}: its sketch is drawn as {pieces} straight pieces, more than {MAX_PIECES}"));
+    }
+    Ok(())
+}
+
+/// The rings an element draws its outline with: a floor's, a ceiling's or a roof's boundary and its openings or courtyards
+/// (what to call them), a shaft's boundary.
+fn rings_of(e: &Element) -> Option<Rings<'_>> {
+    let (boundary, holes, what): (&[P2], &[Vec<P2>], &str) = match e {
+        Element::Floor(f) => (&f.boundary, &f.openings, "opening"),
+        Element::Ceiling(c) => (&c.boundary, &c.openings, "opening"),
+        Element::Roof(r) if r.extrusion.is_none() => (&r.boundary, &r.courtyards, "courtyard"),
+        Element::Shaft(s) => (&s.boundary, &[], ""),
+        _ => return None,
+    };
+    Some(Rings { boundary, holes, what })
+}
+
+/// An element's outline and its holes, and what its holes are called.
+#[derive(PartialEq)]
+struct Rings<'a> {
+    boundary: &'a [P2],
+    holes: &'a [Vec<P2>],
+    what: &'static str,
+}
+
+impl Model {
+    /// What a command must leave true of what it made or changed, which [`Model::check`] doesn't ask of the whole project
+    /// because a file from before it (or an IFC or Revit file with a keyhole slab) may break it and still open: a floor's,
+    /// ceiling's or roof's outline and each of its openings or courtyards, and a shaft's outline, that a command made or
+    /// changed is simple, as the sketch of its edges solves: no edge across another or along it, none ending part way along
+    /// one, no spike or keyhole. `before` is the project the command began with. The engine asks it after every command
+    /// that is an undo step, but Insert from File.
+    pub fn check_edits(&self, before: &Model) -> Result<(), String> {
+        for (&id, e) in &self.elements {
+            let Some(now) = rings_of(e) else { continue };
+            if before.elements.get(id).and_then(rings_of).is_some_and(|was| was == now) {
+                continue;
+            }
+            let Rings { boundary, holes, what } = now;
+            let rings = std::iter::once(("boundary".to_string(), boundary))
+                .chain(holes.iter().enumerate().map(|(i, h)| (format!("{what} {i}"), h.as_slice())));
+            for (name, ring) in rings {
+                // A ring of fewer than three points, or too many, or one of points that aren't numbers in range, is
+                // `Model::check`'s to refuse.
+                let numbers = ring.iter().all(|p| p.is_finite() && p.0.abs() <= MAX_COORD && p.1.abs() <= MAX_COORD);
+                if !(3..=MAX_POINTS).contains(&ring.len()) || !numbers {
+                    continue;
+                }
+                if let Err(problems) = solve(&lines_of(ring, &[]))
+                    && !problems.iter().all(|p| matches!(p, Problem::NoArea { .. }))
+                {
+                    return Err(format!(
+                        "{} {id}: its {name} isn't a simple outline: {}; redraw it with `edit_boundary`",
+                        e.category(),
+                        say(&problems, &|i| format!("edge {i}"))
+                    ));
+                }
+            }
+        }
+        Ok(())
     }
 }
 
-/// What of `lines` a point picked near `p` (within `reach`) sticks to, nearest first: their ends, their middles, and where
-/// two of them cross; the sketch's own, which the plan doesn't draw.
-pub fn snaps(lines: &[SketchLine], p: P2, reach: f64) -> Vec<(P2, crate::snap::Kind)> {
-    use crate::snap::Kind;
-    let near: Vec<&SketchLine> = lines.iter().filter(|l| l.dist(p) <= reach).collect();
-    let mut out: Vec<(P2, Kind)> = Vec::new();
-    for l in lines {
-        out.extend([(l.start(), Kind::Endpoint), (l.end(), Kind::Endpoint), (l.middle(), Kind::Midpoint)]);
-        out.extend(crate::snap::rounds(&l.curve));
-    }
-    for (i, a) in near.iter().enumerate() {
-        for b in &near[i + 1..] {
-            let (pa, pb) = (a.points(), b.points());
-            for x in pa.windows(2) {
-                for y in pb.windows(2) {
-                    if let Some(t) = geom::crossing(x[0], x[1], y[0], y[1]) {
-                        out.push((x[0] + (x[1] - x[0]) * t, Kind::Intersection));
+/// Points made one where they lie within [`TOL`] of each other: a grid of cells [`TOL`] across holds them, so a point is
+/// looked for among those in its own cell and the eight round it, not among all.
+#[derive(Default)]
+struct Welder {
+    points: Vec<P2>,
+    cells: std::collections::HashMap<(i64, i64), Vec<usize>>,
+}
+
+impl Welder {
+    /// The first point within [`TOL`] of `p` (by when it was made), or `p` as a new one.
+    fn weld(&mut self, p: P2) -> usize {
+        let cell = |v: f64| (v / TOL).floor() as i64;
+        let (cx, cy) = (cell(p.0), cell(p.1));
+        let mut found: Option<usize> = None;
+        for x in cx - 1..=cx + 1 {
+            for y in cy - 1..=cy + 1 {
+                for &n in self.cells.get(&(x, y)).into_iter().flatten() {
+                    if found.is_none_or(|f| n < f) && self.points[n].dist(p) <= TOL {
+                        found = Some(n);
                     }
                 }
             }
         }
+        found.unwrap_or_else(|| {
+            self.points.push(p);
+            self.cells.entry((cx, cy)).or_default().push(self.points.len() - 1);
+            self.points.len() - 1
+        })
     }
-    out.retain(|(q, _)| q.dist(p) <= reach);
-    out.sort_by(|a, b| a.0.dist(p).total_cmp(&b.0.dist(p)));
-    out
 }
 
-/// The point among `points` within [`TOL`] of `p`, or `p` as a new one.
-fn weld(points: &mut Vec<P2>, p: P2) -> usize {
-    match points.iter().position(|q| q.dist(p) <= TOL) {
-        Some(n) => n,
-        None => {
-            points.push(p);
-            points.len() - 1
+/// Boxes `[x0, y0, x1, y1]` in a tree (halved again and again along their longer side, a few to a leaf), to find which
+/// overlap which, and which hold a point, without trying them all.
+struct Boxes {
+    /// The boxes in the order the leaves hold them, so that looking through a leaf is looking through a stretch of memory.
+    packed: Vec<[f64; 4]>,
+    /// Each packed box's place in the boxes given.
+    order: Vec<usize>,
+    nodes: Vec<Node>,
+}
+
+/// A node of [`Boxes`]: the box round `order[from..to]`, and its two halves unless it is a leaf.
+struct Node {
+    bounds: [f64; 4],
+    from: usize,
+    to: usize,
+    kids: Option<[usize; 2]>,
+}
+
+/// How many boxes a leaf of [`Boxes`] holds, at most.
+const LEAF: usize = 8;
+
+fn overlap(a: &[f64; 4], b: &[f64; 4]) -> bool {
+    a[0] <= b[2] && b[0] <= a[2] && a[1] <= b[3] && b[1] <= a[3]
+}
+
+impl Boxes {
+    fn new(boxes: Vec<[f64; 4]>) -> Boxes {
+        let mut order: Vec<usize> = (0..boxes.len()).collect();
+        let mut nodes = Vec::new();
+        if !boxes.is_empty() {
+            Boxes::build(&boxes, &mut order, 0, &mut nodes);
+        }
+        Boxes { packed: order.iter().map(|&i| boxes[i]).collect(), order, nodes }
+    }
+
+    /// The node for `order[from..from + len]`, which is `slice`, and the ones under it: the index of the first.
+    fn build(boxes: &[[f64; 4]], slice: &mut [usize], from: usize, nodes: &mut Vec<Node>) -> usize {
+        let bounds = slice.iter().fold([f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY], |b, &i| {
+            [b[0].min(boxes[i][0]), b[1].min(boxes[i][1]), b[2].max(boxes[i][2]), b[3].max(boxes[i][3])]
+        });
+        let id = nodes.len();
+        nodes.push(Node { bounds, from, to: from + slice.len(), kids: None });
+        if slice.len() > LEAF {
+            // Halved at the middle one along the longer side.
+            let axis = usize::from(bounds[3] - bounds[1] > bounds[2] - bounds[0]);
+            let centre = |i: usize| boxes[i][axis] + boxes[i][axis + 2];
+            let mid = slice.len() / 2;
+            slice.select_nth_unstable_by(mid, |&a, &b| centre(a).total_cmp(&centre(b)));
+            let (low, high) = slice.split_at_mut(mid);
+            let l = Boxes::build(boxes, low, from, nodes);
+            let r = Boxes::build(boxes, high, from + mid, nodes);
+            nodes[id].kids = Some([l, r]);
+        }
+        id
+    }
+
+    /// Calls `f(i, j)` for each pair of boxes that overlap, once, until it says `false`. Ok(true) when all were looked at,
+    /// Ok(false) when `f` stopped it; Err when it took more than [`MAX_WORK`] steps, `work` counting them.
+    fn pairs(&self, work: &mut usize, mut f: impl FnMut(usize, usize) -> bool) -> Result<bool, ()> {
+        let mut stack = if self.nodes.is_empty() { Vec::new() } else { vec![(0, 0)] };
+        while let Some((a, b)) = stack.pop() {
+            *work += 1;
+            if *work > MAX_WORK {
+                return Err(());
+            }
+            let (na, nb) = (&self.nodes[a], &self.nodes[b]);
+            if a != b && !overlap(&na.bounds, &nb.bounds) {
+                continue;
+            }
+            match (na.kids, nb.kids) {
+                (None, None) => {
+                    for k in na.from..na.to {
+                        // The same leaf: each pair once.
+                        for l in if a == b { k + 1..na.to } else { nb.from..nb.to } {
+                            *work += 1;
+                            if overlap(&self.packed[k], &self.packed[l]) && !f(self.order[k], self.order[l]) {
+                                return Ok(false);
+                            }
+                        }
+                    }
+                }
+                (Some([l, r]), _) if a == b => stack.extend([(l, l), (r, r), (l, r)]),
+                (Some([l, r]), None) => stack.extend([(l, b), (r, b)]),
+                (None, Some([l, r])) => stack.extend([(a, l), (a, r)]),
+                (Some([l, r]), Some([m, n])) => {
+                    // The bigger one halved.
+                    let area = |x: &[f64; 4]| (x[2] - x[0]) * (x[3] - x[1]);
+                    if area(&na.bounds) >= area(&nb.bounds) {
+                        stack.extend([(l, b), (r, b)]);
+                    } else {
+                        stack.extend([(a, m), (a, n)]);
+                    }
+                }
+            }
+        }
+        Ok(true)
+    }
+
+    /// Calls `f(i)` for each box that holds `p`, until it says `false`.
+    fn at(&self, p: P2, mut f: impl FnMut(usize) -> bool) {
+        let holds = |b: &[f64; 4]| b[0] <= p.0 && p.0 <= b[2] && b[1] <= p.1 && p.1 <= b[3];
+        let mut stack = if self.nodes.is_empty() { Vec::new() } else { vec![0] };
+        while let Some(n) = stack.pop() {
+            let node = &self.nodes[n];
+            if !holds(&node.bounds) {
+                continue;
+            }
+            match node.kids {
+                Some(kids) => stack.extend(kids),
+                None => {
+                    for k in node.from..node.to {
+                        if holds(&self.packed[k]) && !f(self.order[k]) {
+                            return;
+                        }
+                    }
+                }
+            }
         }
     }
 }
@@ -630,19 +914,159 @@ mod tests {
         );
         assert_eq!(solve(&[]).unwrap_err(), vec![Problem::Empty]);
         let many = vec![SketchLine::new(P2(0.0, 0.0), P2(10.0, 0.0)); MAX_LINES + 1];
-        assert_eq!(solve(&many).unwrap_err(), vec![Problem::TooMany { count: MAX_LINES + 1 }]);
+        assert_eq!(solve(&many).unwrap_err(), vec![Problem::TooMany { count: MAX_LINES + 1, what: "lines" }]);
     }
 
     #[test]
-    fn a_thin_loop_encloses_no_area() {
-        // Three points almost in a line: the loop is closed but flat.
+    fn a_thin_loop_lies_along_itself_and_a_loop_too_small_to_have_an_area_says_so() {
+        // Three points almost in a line: the loop is closed but flat, its sides along each other.
         let ls = ring(&[(0.0, 0.0), (4000.0, 0.5), (8000.0, 0.0)]);
         let e = solve(&ls).unwrap_err();
-        assert!(
-            matches!(&e[..], [Problem::NoArea { lines }] if *lines == vec![0, 1, 2])
-                || e.iter().any(|p| matches!(p, Problem::Overlap { .. })),
-            "{e:?}"
-        );
+        assert!(e.iter().all(|p| matches!(p, Problem::Overlap { .. })) && !e.is_empty(), "{e:?}");
+        // Lines long enough, ends apart, none along another, but a triangle of 1.5 mm sides is under a square millimetre.
+        let h = 1.5 * 3f64.sqrt() / 2.0;
+        let ls = ring(&[(0.0, 0.0), (1.5, 0.0), (0.75, h)]);
+        assert_eq!(solve(&ls).unwrap_err(), vec![Problem::NoArea { lines: vec![0, 1, 2] }]);
+    }
+
+    #[test]
+    fn a_line_that_crosses_itself_is_named_once_whatever_its_shape() {
+        let poly =
+            |points: &[(f64, f64)], closed| Curve::Poly { points: points.iter().map(|&(x, y)| P2(x, y)).collect(), arcs: vec![], closed };
+        let mut shapes = vec![
+            // Four corners joined bow-tie fashion: the first and third sides cross.
+            poly(&[(0.0, 0.0), (4000.0, 4000.0), (4000.0, 0.0), (0.0, 2000.0)], true),
+            // Open, coming back across its own start.
+            poly(&[(0.0, 0.0), (4000.0, 0.0), (4000.0, 2000.0), (2000.0, -1000.0)], false),
+            // A cubic with a loop in it.
+            Curve::Spline { control: vec![P2(0.0, 0.0), P2(5000.0, 3000.0), P2(-1000.0, 3000.0), P2(4000.0, 0.0)], knots: None },
+            Curve::Fit { points: vec![P2(0.0, 0.0), P2(4000.0, 3000.0), P2(0.0, 3000.0), P2(4000.0, 0.0)], tangents: [None, None] },
+        ];
+        // An arc crossed by the line after it, in one polyline.
+        shapes.push(Curve::Poly {
+            points: vec![P2(0.0, 0.0), P2(4000.0, 0.0), P2(2000.0, 3000.0), P2(2000.0, -1000.0)],
+            arcs: vec![90.0, 0.0, 0.0],
+            closed: false,
+        });
+        for c in shapes {
+            let e = solve(&[c.clone().into()]).unwrap_err();
+            let own: Vec<&Problem> = e.iter().filter(|p| matches!(p, Problem::Cross { lines: [0, 0], .. })).collect();
+            assert_eq!(own.len(), 1, "{c:?}: {e:?}");
+            assert_eq!(own[0].lines(), vec![0]);
+            assert!(own[0].to_string().contains("line 0 crosses itself at"), "{}", own[0]);
+        }
+        // A polyline that only turns, never touching itself, is no problem to the line.
+        let spiral = poly(&[(0.0, 0.0), (4000.0, 0.0), (4000.0, 4000.0), (1000.0, 4000.0), (1000.0, 1000.0)], false);
+        assert!(solve(&[spiral.into()]).unwrap_err().iter().all(|p| !matches!(p, Problem::Cross { .. })));
+        // Doubling back along itself is a line along itself.
+        let back = poly(&[(0.0, 0.0), (4000.0, 0.0), (1000.0, 0.0)], false);
+        assert!(solve(&[back.into()]).unwrap_err().contains(&Problem::Overlap { lines: [0, 0] }));
+    }
+
+    #[test]
+    fn ends_meet_within_a_millimetre_and_no_further_whichever_cell_they_fall_in() {
+        // The last side ends exactly 1 mm from where the first begins: one corner. Another 0.01 mm and the loop is open.
+        for (gap, meets) in [(1.0, true), (0.999, true), (1.01, false)] {
+            let mut ls = square(0.0, 0.0, 4000.0);
+            ls[3] = SketchLine::new(ls[3].start(), P2(-gap, 0.0));
+            assert_eq!(solve(&ls).is_ok(), meets, "{gap} mm apart");
+        }
+        // Across a corner of the grid the weld looks in: 0.28 mm apart, in cells diagonal to each other.
+        let mut ls = square(0.0, 0.0, 4000.0);
+        ls[0] = SketchLine::new(P2(0.9, 0.9), ls[0].end());
+        ls[3] = SketchLine::new(ls[3].start(), P2(1.1, 1.1));
+        assert!(solve(&ls).is_ok());
+    }
+
+    #[test]
+    fn welding_finds_what_a_scan_of_every_point_finds() {
+        let mut seed = 11u64;
+        let mut next = |range: f64| {
+            seed = crate::model::mix(seed);
+            (seed % 100_000) as f64 / 100_000.0 * range
+        };
+        // Clustered so that many are within a millimetre of several, across cells.
+        let given: Vec<P2> = (0..3000).map(|_| P2(next(40.0) - 20.0, next(40.0) - 20.0)).collect();
+        let (mut welder, mut scanned) = (Welder::default(), Vec::<P2>::new());
+        for p in given {
+            let by_scan = scanned.iter().position(|q| q.dist(p) <= TOL).unwrap_or_else(|| {
+                scanned.push(p);
+                scanned.len() - 1
+            });
+            assert_eq!(welder.weld(p), by_scan, "{p:?}");
+        }
+        assert_eq!(welder.points, scanned);
+    }
+
+    #[test]
+    fn the_box_tree_finds_the_pairs_and_the_points_a_scan_finds() {
+        let mut seed = 5u64;
+        let mut next = |range: f64| {
+            seed = crate::model::mix(seed);
+            (seed % 10_000) as f64 / 10_000.0 * range
+        };
+        for n in [0, 1, 7, 9, 300, 1500] {
+            let boxes: Vec<[f64; 4]> = (0..n)
+                .map(|_| {
+                    let (x, y) = (next(1000.0), next(1000.0));
+                    [x, y, x + next(120.0), y + next(120.0)]
+                })
+                .collect();
+            let mut want: Vec<(usize, usize)> = Vec::new();
+            for i in 0..n {
+                for j in i + 1..n {
+                    if overlap(&boxes[i], &boxes[j]) {
+                        want.push((i, j));
+                    }
+                }
+            }
+            let tree = Boxes::new(boxes.clone());
+            let mut got: Vec<(usize, usize)> = Vec::new();
+            let mut work = 0;
+            assert_eq!(
+                tree.pairs(&mut work, |i, j| {
+                    got.push((i.min(j), i.max(j)));
+                    true
+                }),
+                Ok(true)
+            );
+            got.sort_unstable();
+            assert_eq!(got, want, "{n} boxes: each pair once");
+            for _ in 0..50 {
+                let p = P2(next(1100.0), next(1100.0));
+                let mut hit: Vec<usize> = Vec::new();
+                tree.at(p, |i| {
+                    hit.push(i);
+                    true
+                });
+                hit.sort_unstable();
+                let want: Vec<usize> =
+                    (0..n).filter(|&i| boxes[i][0] <= p.0 && p.0 <= boxes[i][2] && boxes[i][1] <= p.1 && p.1 <= boxes[i][3]).collect();
+                assert_eq!(hit, want, "{n} boxes at {p:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn the_chords_of_a_circle_smaller_than_the_tolerance_are_left_out_not_called_a_bend() {
+        // Radius 1.2 mm: eight chords of 0.9 mm, some welded into one point with the next, a loop of what is left.
+        let tiny = SketchLine::from(Curve::Circle { centre: P2(0.0, 0.0), radius: 1.2 });
+        let p = solve(&[tiny]).unwrap_or_else(|e| panic!("{e:?}"));
+        assert!(p.regions.len() == 1 && p.area() > 1.0 && p.area() < 4.6, "{}", p.area());
+    }
+
+    #[test]
+    fn a_bend_under_a_millimetre_is_said_where_it_is_not_as_a_branch() {
+        // A jog of half a millimetre in a polyline, drawn on purpose or by a slip of the mouse.
+        let jog = Curve::Poly {
+            points: vec![P2(0.0, 0.0), P2(4000.0, 0.0), P2(4000.0, 0.5), P2(4000.0, 3000.0), P2(0.0, 3000.0)],
+            arcs: vec![],
+            closed: true,
+        };
+        let e = solve(&[jog.into()]).unwrap_err();
+        assert_eq!(e.len(), 1, "{e:?}");
+        let said = e[0].to_string();
+        assert!(said.contains("less than 1 mm apart, at [4000, 0]") && !said.contains("meet"), "{said}");
     }
 
     #[test]
@@ -823,6 +1247,83 @@ mod command_tests {
         assert_eq!(fl.boundary.len(), 4);
     }
 
+    /// A bow tie with a quarter of its area left: no edge across another but the first and third.
+    const BOW: [[i32; 2]; 4] = [[0, 0], [4000, 4000], [4000, 0], [0, 2000]];
+
+    #[test]
+    fn a_simple_outline_is_asked_of_whatever_a_command_makes_or_changes_and_not_only_of_floor() {
+        let mut s = Session::new();
+        let f = run(&mut s, "floor", json!({"boundary": [[0, 0], [4000, 0], [4000, 4000], [0, 4000]]}))["id"].clone();
+        let c = run(&mut s, "ceiling", json!({"boundary": [[0, 0], [4000, 0], [4000, 4000], [0, 4000]]}))["id"].clone();
+        let r = run(&mut s, "roof", json!({"boundary": [[0, 0], [4000, 0], [4000, 4000], [0, 4000]], "slope": 0}))["id"].clone();
+        let h = run(&mut s, "shaft", json!({"boundary": [[0, 0], [1000, 0], [1000, 1000], [0, 1000]]}))["id"].clone();
+        let before = s.model.clone();
+        // Modify set it too, where only `floor` refused it: the outline, an opening, a courtyard.
+        for (id, key, value) in [
+            (&f, "boundary", json!(BOW)),
+            (&c, "boundary", json!(BOW)),
+            (&r, "boundary", json!(BOW)),
+            (&h, "boundary", json!(BOW)),
+            (&f, "openings", json!([[[1000, 1000], [2000, 2000], [2000, 1000], [1000, 2000]]])),
+            (&r, "courtyards", json!([[[1000, 1000], [2000, 2000], [2000, 1000], [1000, 2000]]])),
+        ] {
+            let e = s.execute("modify", &json!({"id": id, key: value})).unwrap_err();
+            assert!(e.contains("isn't a simple outline") && e.contains("edge"), "{key}: {e}");
+        }
+        assert_eq!(*s.model, *before);
+        // A keyhole slit, a point on another edge and a spike are not simple either.
+        let slit = json!([[0, 0], [4000, 0], [4000, 4000], [2000, 4000], [2000, 2000], [2000, 4000], [0, 4000]]);
+        assert!(s.execute("modify", &json!({"id": h, "boundary": slit})).unwrap_err().contains("simple"));
+        // A simple one is as before.
+        run(&mut s, "modify", json!({"id": f, "boundary": [[0, 0], [5000, 0], [5000, 3000], [0, 3000]]}));
+    }
+
+    #[test]
+    fn a_file_with_an_outline_that_is_not_simple_still_opens_and_what_changes_it_is_asked_to_redraw_it() {
+        let mut s = Session::new();
+        let f = run(&mut s, "floor", json!({"boundary": [[0, 0], [4000, 0], [4000, 4000], [0, 4000]]}))["id"].as_u64().unwrap();
+        // Written as an old file would have it: a boundary the check of the whole project lets by.
+        if let Some(Element::Floor(fl)) = s.model_mut().elements.get_mut(f) {
+            fl.boundary = BOW.iter().map(|p| crate::geom::P2(f64::from(p[0]), f64::from(p[1]))).collect();
+        }
+        assert_eq!(s.model.check(), Ok(()));
+        let path = std::env::temp_dir().join(format!("bimcraft-bow-{}.bimcraft", std::process::id()));
+        std::fs::write(&path, s.model.to_json().unwrap()).unwrap();
+        let mut t = Session::new();
+        let opened = t.execute("open", &json!({"path": path.to_string_lossy()}));
+        let inserted = Session::new().execute("insert", &json!({"path": path.to_string_lossy()}));
+        std::fs::remove_file(&path).ok();
+        opened.unwrap();
+        inserted.unwrap();
+        // What leaves its outline alone goes through; what moves it is asked to redraw it, and a redrawn one is fine.
+        run(&mut t, "modify", json!({"id": f, "offset": 100}));
+        let e = t.execute("move", &json!({"ids": [f], "by": [1000, 0]})).unwrap_err();
+        assert!(e.contains("isn't a simple outline") && e.contains("edit_boundary"), "{e}");
+        run(&mut t, "edit_boundary", json!({"id": f, "sketch": square(0.0, 0.0, 4000.0)}));
+        run(&mut t, "move", json!({"ids": [f], "by": [1000, 0]}));
+        // Or it goes.
+        let g = run(&mut t, "floor", json!({"boundary": [[0, 0], [4000, 0], [4000, 4000], [0, 4000]]}))["id"].clone();
+        run(&mut t, "delete", json!({"ids": [g]}));
+    }
+
+    #[test]
+    fn one_line_crossing_itself_is_refused_as_the_same_points_in_four_lines_are() {
+        let mut s = Session::new();
+        let bow = json!([[0, 0], [4000, 4000], [4000, 0], [0, 2000]]);
+        // A closed polyline is one sketch line: it used to pass, and report the shoelace area, 4 m², where the loop of
+        // the two triangles it makes is not one outline at all.
+        let one = json!([{"points": bow, "closed": true}]);
+        for cmd in ["floor", "ceiling", "shaft", "sketch", "filled_region"] {
+            let p = if cmd == "sketch" { json!({"lines": one}) } else { json!({"sketch": one}) };
+            let e = s.execute(cmd, &p).unwrap_err();
+            assert!(e.contains("line 0 crosses itself at [1333, 1333]"), "{cmd}: {e}");
+        }
+        let four = Value::Array((0..4).map(|i| json!([bow[i], bow[(i + 1) % 4]])).collect());
+        let e = s.execute("floor", &json!({"sketch": four})).unwrap_err();
+        assert!(e.contains("line 0 and line 2 intersect at [1333, 1333]"), "{e}");
+        assert!(s.model.elements.is_empty() || s.model.elements.values().all(|e| !matches!(e, Element::Floor(_))));
+    }
+
     #[test]
     fn edit_boundary_redraws_an_outline_in_one_step_or_leaves_it_as_it_was() {
         let mut s = Session::new();
@@ -935,6 +1436,66 @@ mod command_tests {
     }
 
     #[test]
+    fn a_boundary_line_sent_back_by_its_id_keeps_its_style_and_its_invisibility_unless_given_them_again() {
+        let mut s = Session::new();
+        let sketch = json!([
+            {"start": [0, 0], "end": [4000, 0], "style": "Hidden Lines"},
+            {"start": [4000, 0], "end": [4000, 3000], "invisible": true},
+            [[4000, 3000], [0, 0]]
+        ]);
+        let r = run(&mut s, "filled_region", json!({"sketch": sketch}))["id"].clone();
+        let now = run(&mut s, "edit_boundary", json!({"id": r}))["sketch"].clone();
+        let (a, b, c) = (&now[0], &now[1], &now[2]);
+        // Only where they go, by id.
+        let back = json!([
+            {"id": a["id"], "start": [0, 0], "end": [4000, 0]},
+            {"id": b["id"], "start": [4000, 0], "end": [4000, 3000]},
+            {"id": c["id"], "start": [4000, 3000], "end": [0, 0]}
+        ]);
+        run(&mut s, "edit_boundary", json!({"id": r, "sketch": back}));
+        let after = run(&mut s, "edit_boundary", json!({"id": r}))["sketch"].clone();
+        assert_eq!(after[0]["style"], "Hidden Lines");
+        assert_eq!(after[1]["invisible"], true);
+        assert!(after[2].get("style").is_none() && after[2].get("invisible").is_none());
+        // Given again, it is what it is told: visible, and in another style.
+        let told = json!([
+            {"id": a["id"], "start": [0, 0], "end": [4000, 0], "style": "Wide Lines"},
+            {"id": b["id"], "start": [4000, 0], "end": [4000, 3000], "invisible": false},
+            {"id": c["id"], "start": [4000, 3000], "end": [0, 0]}
+        ]);
+        run(&mut s, "edit_boundary", json!({"id": r, "sketch": told}));
+        let after = run(&mut s, "edit_boundary", json!({"id": r}))["sketch"].clone();
+        assert_eq!(after[0]["style"], "Wide Lines");
+        assert!(after[1].get("invisible").is_none());
+    }
+
+    #[test]
+    fn a_sketch_lines_id_is_not_given_again_while_the_project_is_open_after_the_line_has_gone() {
+        let mut s = Session::new();
+        let f = run(&mut s, "floor", json!({"sketch": square(0.0, 0.0, 4000.0)}))["id"].clone();
+        let first = lines(&mut s, &f);
+        let ids: Vec<u64> = first.iter().filter_map(|l| l["id"].as_u64()).collect();
+        // Down to a triangle on the first three lines' ids: the fourth's goes.
+        let tri = [([0, 0], [4000, 0]), ([4000, 0], [4000, 4000]), ([4000, 4000], [0, 0])];
+        let kept: Vec<Value> = tri.iter().zip(&ids).map(|((a, b), id)| json!({"id": id, "start": a, "end": b})).collect();
+        run(&mut s, "edit_boundary", json!({"id": f, "sketch": kept}));
+        let now: Vec<u64> = lines(&mut s, &f).iter().filter_map(|l| l["id"].as_u64()).collect();
+        assert_eq!(now, ids[..3], "the three keep theirs");
+        // A line added next time: its id is nobody's before, the fourth's included.
+        let mut more: Vec<Value> = kept.clone();
+        more[2] = json!({"id": ids[2], "start": [2000, 2000], "end": [0, 0]});
+        more.push(json!({"start": [4000, 4000], "end": [2000, 2000]}));
+        run(&mut s, "edit_boundary", json!({"id": f, "sketch": more}));
+        let after: Vec<u64> = lines(&mut s, &f).iter().filter_map(|l| l["id"].as_u64()).collect();
+        assert_eq!(after.len(), 4);
+        assert!(!ids[3..].contains(&after[3]) && after[3] < ids[3], "{after:?} against {ids:?}");
+        // A copy's lines are new ones too, lower still.
+        let copy = run(&mut s, "copy", json!({"ids": [f], "by": [0, 9000]}))["ids"][0].clone();
+        let copied: Vec<u64> = lines(&mut s, &copy).iter().filter_map(|l| l["id"].as_u64()).collect();
+        assert!(copied.iter().all(|c| *c < after[3] && !ids.contains(c)), "{copied:?}");
+    }
+
+    #[test]
     fn an_arc_sketched_rounds_the_floor() {
         let mut s = Session::new();
         let half = json!([[[0, 0], [4000, 0]], [[4000, 0], [0, 0], [2000, 2000]]]);
@@ -944,5 +1505,148 @@ mod command_tests {
         // Kept by how far it turns, counter-clockwise as a wall's arc: west from (4000, 0), bulging north to its right.
         let turn = lines(&mut s, &f["id"])[1]["arc"].as_f64().unwrap_or_default();
         assert!((turn - 180.0).abs() < 1e-6, "{turn}");
+    }
+}
+
+/// Hostile and dense sketches: each finishes well under a second.
+#[cfg(test)]
+mod hostile_tests {
+    use std::time::Instant;
+
+    use serde_json::{Value, json};
+
+    use crate::engine::Session;
+
+    /// Runs `id` and says how long it took, seconds.
+    fn timed(s: &mut Session, id: &str, p: &Value) -> (Result<Value, String>, f64) {
+        let t = Instant::now();
+        let r = s.execute(id, p);
+        let took = t.elapsed().as_secs_f64();
+        eprintln!("{id}: {took:.3} s");
+        (r, took)
+    }
+
+    /// `n` concentric circles from radius `r0`, `step` mm apart, as sketch lines.
+    fn circles(n: usize, r0: f64, step: f64) -> Value {
+        Value::Array((0..n).map(|k| json!({"centre": [0, 0], "radius": r0 + step * k as f64})).collect())
+    }
+
+    #[test]
+    fn ten_thousand_parallel_lines_are_named_open_at_once() {
+        let lines: Vec<Value> = (0..10_000).map(|i| json!([[0, i * 5], [1000, i * 5]])).collect();
+        let (r, took) = timed(&mut Session::new(), "sketch", &json!({"lines": lines}));
+        assert!(r.unwrap_err().contains("open"));
+        assert!(took < 1.0, "{took} s");
+    }
+
+    #[test]
+    fn five_rings_of_ten_thousand_points_nest_at_once() {
+        let ring = |r: f64| -> Value {
+            let pts: Vec<Value> = (0..10_000)
+                .map(|i| {
+                    let a = std::f64::consts::TAU * i as f64 / 10_000.0;
+                    json!([(r * a.cos()).round(), (r * a.sin()).round()])
+                })
+                .collect();
+            json!({"points": pts, "closed": true})
+        };
+        let lines: Vec<Value> = (0..5).map(|k| ring(1.0e6 + 2.0e4 * k as f64)).collect();
+        let (r, took) = timed(&mut Session::new(), "sketch", &json!({"lines": lines}));
+        assert!(r.is_ok(), "{r:?}");
+        assert!(took < 1.0, "{took} s");
+    }
+
+    #[test]
+    fn concentric_circles_at_the_cap_solve_at_once_and_past_it_are_refused_at_once() {
+        let mut s = Session::new();
+        let (r, took) = timed(&mut s, "sketch", &json!({"lines": circles(10, 1.0e6, 1000.0)}));
+        assert_eq!(r.map(|v| v["regions"].as_array().map(Vec::len)), Ok(Some(5)));
+        assert!(took < 1.0, "{took} s");
+        let (r, took) = timed(&mut s, "sketch", &json!({"lines": circles(40, 1.0e6, 1000.0)}));
+        assert!(r.is_ok() || r.as_ref().is_err_and(|e| e.contains("pieces")), "{r:?}");
+        assert!(took < 1.0, "{took} s");
+        let (r, took) = timed(&mut s, "sketch", &json!({"lines": circles(100, 1.0e6, 1000.0)}));
+        assert!(r.unwrap_err().contains("pieces"));
+        assert!(took < 1.0, "{took} s");
+    }
+
+    /// `n` rectangles inside one another, 20 mm apart, each a closed polyline of 640 points, as sketch lines.
+    fn nested_rectangles(n: usize) -> Value {
+        Value::Array(
+            (0..n)
+                .map(|k| {
+                    let h = 1000.0 + 20.0 * k as f64;
+                    // 160 points along each side, going round counter-clockwise from the south-west corner.
+                    let side = |from: [f64; 2], to: [f64; 2]| {
+                        (0..160).map(move |i| {
+                            json!([from[0] + (to[0] - from[0]) * f64::from(i) / 160.0, from[1] + (to[1] - from[1]) * f64::from(i) / 160.0])
+                        })
+                    };
+                    let corners = [[-h, -h], [h, -h], [h, h], [-h, h]];
+                    let pts: Vec<Value> = (0..4).flat_map(|c| side(corners[c], corners[(c + 1) % 4])).collect();
+                    json!({"points": pts, "closed": true})
+                })
+                .collect(),
+        )
+    }
+
+    #[test]
+    fn rectangles_of_six_hundred_points_inside_one_another_are_refused_not_waited_for() {
+        // 180,000 pieces, each loop inside every one outside it: 25 million points to ask about.
+        let (r, took) = timed(&mut Session::new(), "sketch", &json!({"lines": nested_rectangles(280)}));
+        let e = r.unwrap_err();
+        assert!(e.contains("nested too deeply"), "{e}");
+        assert!(took < 1.0, "{took} s");
+        // Half as many are a quarter of that: solved, every other one a hole.
+        let (r, took) = timed(&mut Session::new(), "sketch", &json!({"lines": nested_rectangles(140)}));
+        assert_eq!(r.map(|v| v["regions"].as_array().map(Vec::len)), Ok(Some(70)));
+        assert!(took < 1.0, "{took} s");
+    }
+
+    #[test]
+    fn a_hundred_wide_arcs_are_solved_or_refused_at_once() {
+        let arcs: Vec<Value> = (0..100).map(|k| json!([[0, k], [2.0e6, k], [1.0e6, 1.0e6 + k as f64]])).collect();
+        let (r, took) = timed(&mut Session::new(), "sketch", &json!({"lines": arcs}));
+        assert!(r.is_err());
+        assert!(took < 1.0, "{took} s");
+    }
+
+    #[test]
+    fn a_floor_of_ten_thousand_corners_stays_quick() {
+        let pts: Vec<Value> = (0..10_000)
+            .map(|i| {
+                let a = std::f64::consts::TAU * i as f64 / 10_000.0;
+                json!([(1.0e6 * a.cos()).round(), (1.0e6 * a.sin()).round()])
+            })
+            .collect();
+        let (r, took) = timed(&mut Session::new(), "floor", &json!({"boundary": pts}));
+        assert!(r.is_ok(), "{r:?}");
+        assert!(took < 1.0, "{took} s");
+    }
+
+    #[test]
+    fn ten_thousand_parallel_diagonals_are_refused_not_waited_for() {
+        // Every box holds every other: fifty million pairs to look at, none of them crossing.
+        let lines: Vec<Value> = (0..10_000).map(|i| json!([[0, i * 100], [1.0e6, 1.0e6 + i as f64 * 100.0]])).collect();
+        let (r, took) = timed(&mut Session::new(), "sketch", &json!({"lines": lines}));
+        let e = r.unwrap_err();
+        assert!(e.contains("too close together"), "{e}");
+        assert!(took < 1.0, "{took} s");
+    }
+
+    #[test]
+    fn a_sketch_kept_with_too_many_pieces_is_refused_by_the_model_as_the_command_refuses_it() {
+        let mut s = Session::new();
+        let f = s.execute("floor", &json!({"boundary": [[0, 0], [4000, 0], [4000, 4000], [0, 4000]]})).unwrap()["id"].clone();
+        let (r, took) = timed(&mut s, "modify", &json!({"id": f, "sketch": circles(100, 1.0e6, 1000.0)}));
+        assert!(r.unwrap_err().contains("straight pieces"));
+        assert!(took < 1.0, "{took} s");
+    }
+
+    #[test]
+    fn twenty_circles_in_a_filled_region_solve_at_once() {
+        let (r, took) = timed(&mut Session::new(), "filled_region", &json!({"sketch": circles(20, 1.0e6, 1000.0)}));
+        assert!(r.is_ok(), "{r:?}");
+        assert!(took < 1.0, "{took} s");
     }
 }
