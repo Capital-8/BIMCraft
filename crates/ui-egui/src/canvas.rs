@@ -2042,22 +2042,16 @@ impl BimApp {
         self.tool = Tool::Align(None);
     }
 
-    /// Align on a pattern: element `id`'s pattern moved across so its `line` lies on `reference`.
-    // Integrator: this geometry belongs in the core as `Model::align_pattern` (G3 makes it); call that through `modify` here.
+    /// Align on a pattern: element `id`'s pattern moved across so its `line` lies on `reference`. The core says where the
+    /// pattern then starts (`Model::align_pattern`); the window only sends that through `modify`.
     fn align_pattern(&mut self, m: &Model, reference: (P2, P2), id: Id, line: (P2, P2)) {
-        if !geom::parallel(reference.0, reference.1, line.0, line.1) {
-            self.status = Status { text: t("align: the lines aren't parallel").into(), error: true };
-            return;
+        match m.align_pattern(id, reference, line) {
+            Ok(to) => {
+                self.run("modify", json!({"id": id, "pattern_origin": point(to)}));
+                self.tool = Tool::Align(None);
+            }
+            Err(e) => self.status = Status { text: t(&e).into(), error: true },
         }
-        let origin = match m.elements.get(id) {
-            Some(Element::FilledRegion(r)) => r.pattern_origin,
-            Some(Element::Floor(f)) => f.pattern_origin,
-            _ => return,
-        };
-        let n = (reference.1 - reference.0).unit().perp();
-        let to = micron(origin + n * (reference.0 - line.0).dot(n));
-        self.run("modify", json!({"id": id, "pattern_origin": point(to)}));
-        self.tool = Tool::Align(None);
     }
 
     /// Where Offset takes wall `id` for the cursor at `p`: across it, toward `p`, by the Options

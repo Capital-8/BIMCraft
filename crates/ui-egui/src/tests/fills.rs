@@ -161,6 +161,24 @@ fn align_moves_a_regions_model_pattern_onto_the_line_picked_first() {
 }
 
 #[test]
+fn align_on_a_pattern_asks_the_core_where_it_starts_and_says_what_the_core_refuses() {
+    let square = r#"[[[1000,1000],[4000,1000]],[[4000,1000],[4000,4000]],[[4000,4000],[1000,4000]],[[1000,4000],[1000,1000]]]"#;
+    let mut h = app(&format!(
+        "{BOX}\nfilled_region_type {{\"name\": \"Tiles\", \"foreground\": \"Tile 300\"}}\nfilled_region {{\"sketch\": {square}, \"type\": \"Tiles\", \"line_style\": null}}"
+    ));
+    let region = ids(&h, "region")[0];
+    // A reference of no length: only `Model::align_pattern` refuses it, in its own words, and the tool stays on it.
+    let none = (P2(500.0, 3000.0), P2(500.0, 3000.0));
+    h.state_mut().tool = Tool::Align(Some(none));
+    h.run();
+    click(&mut h, P2(2100.0, 2500.0));
+    let s = &h.state().status;
+    assert!(s.error && s.text.contains("no length"), "{s:?}");
+    assert_eq!(field(&h, region, "pattern_origin"), json!([0.0, 0.0]));
+    assert_eq!(h.state().tool, Tool::Align(Some(none)));
+}
+
+#[test]
 fn edit_type_during_a_region_sketch_creates_a_type_with_independent_fill_layers() {
     let mut h = app(BOX);
     shortcut(&mut h, "FR");
