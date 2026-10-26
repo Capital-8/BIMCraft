@@ -85,6 +85,39 @@ fn scan_fill(h: &Harness<BimApp>) -> (Option<[u8; 3]>, bool) {
     g.categories.get("pointcloud").map_or((None, false), |o| (o.projection.fill, o.halftone))
 }
 
+/// Settings > Graphics' High contrast colour, set as a user does: the colour well opened, then each of R, G and B typed into its
+/// field (a field shows `R 220` and, while it is edited, `220`).
+fn pick_colour(h: &mut Harness<BimApp>, to: [u8; 3]) {
+    h.get_by_role_and_label(Role::ColorWell, "High contrast colour").click();
+    h.run();
+    for (k, letter) in ["R", "G", "B"].into_iter().enumerate() {
+        let field = |text: String| move |n: &egui_kittest::kittest::AccessKitNode<'_>| n.role() == Role::SpinButton && n.value().as_deref() == Some(&text);
+        let now = h.state().scan_contrast[k];
+        h.get_by(field(format!("{letter} {now}"))).click();
+        h.run();
+        h.key_press_modifiers(Modifiers::COMMAND, Key::A);
+        h.get_by(field(now.to_string())).type_text(&to[k].to_string());
+        h.run();
+        key(h, Key::Enter);
+    }
+}
+
+/// The tint of each picture the window painted this frame: the plan's scans, the one thing in it drawn as a texture besides text.
+fn picture_tints(h: &Harness<BimApp>) -> Vec<egui::Color32> {
+    fn walk(s: &egui::Shape, out: &mut Vec<egui::Color32>) {
+        match s {
+            egui::Shape::Mesh(m) if m.vertices.len() == 4 && m.texture_id != egui::TextureId::default() => {
+                out.extend(m.vertices.first().map(|v| v.color));
+            }
+            egui::Shape::Vec(v) => v.iter().for_each(|s| walk(s, out)),
+            _ => {}
+        }
+    }
+    let mut out = Vec::new();
+    h.output().shapes.iter().for_each(|c| walk(&c.shape, &mut out));
+    out
+}
+
 #[test]
 fn high_contrast_on_the_view_control_bar_fills_the_views_point_clouds_with_one_colour_and_takes_it_off_again() {
     // With no scan there is nothing to set.
@@ -140,8 +173,9 @@ fn the_high_contrast_colour_is_the_users_kept_in_settings_and_the_toggle_uses_it
     h.state_mut().settings_page = Some(crate::settings::Page::Graphics);
     h.run();
     assert!(h.query_by_label("High contrast colour").is_some());
-    // The picker sets it, as a test does here.
-    h.state_mut().scan_contrast = [0, 90, 255];
+    // The picker sets it: the colour well opened, each of R, G and B typed into its field.
+    pick_colour(&mut h, [0, 90, 255]);
+    assert_eq!(h.state().scan_contrast, [0, 90, 255]);
     press(&mut h, "Close");
     let kept: Value = serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
     assert_eq!(kept["high_contrast"], json!([0, 90, 255]));
@@ -180,4 +214,125 @@ fn visibility_graphics_lists_point_clouds_with_the_model_categories() {
     let m = &h.state().session.model;
     let level = m.levels()[0].0;
     assert!(!bimcraft_core::graphics::Look::of(m, level).shows(scans(&h)[0]), "the plan hides them now");
+}
+
+#[test]
+fn new_and_open_keep_the_users_high_contrast_colour_and_settings_json_keeps_it_too() {
+    let dir = tempfile::tempdir().unwrap();
+    let (file, project) = (dir.path().join("settings.json"), dir.path().join("house.bimcraft"));
+    let blue = [0, 90, 255];
+    std::fs::write(&file, json!({"high_contrast": blue}).to_string()).unwrap();
+    let kept = || serde_json::from_str::<Value>(&std::fs::read_to_string(&file).unwrap()).unwrap()["high_contrast"].clone();
+    let mut h = app(BOX);
+    h.state_mut().use_settings(file.clone());
+    assert!(h.state_mut().save_to(&project), "saved, so New and Open start over without asking");
+    h.run();
+    assert_eq!((h.state().scan_contrast, kept()), (blue, json!(blue)));
+    // File > New (Ctrl+N) starts the window over on an empty project. Its colour is the user's still, and the next frames don't
+    // write crimson over the settings file.
+    h.key_press_modifiers(Modifiers::COMMAND, Key::N);
+    h.run();
+    h.run();
+    assert!(ids(&h, "wall").is_empty(), "the project is a new one");
+    assert_eq!((h.state().scan_contrast, kept()), (blue, json!(blue)), "after New");
+    // Open (what the dialog, Open Recent and the Start page call) does the same.
+    assert!(h.state_mut().open_path(&project));
+    h.run();
+    h.run();
+    assert_eq!(ids(&h, "wall").len(), 4, "the project is the one on file");
+    assert_eq!((h.state().scan_contrast, kept()), (blue, json!(blue)), "after Open");
+}
+
+#[test]
+fn high_contrast_is_greyed_out_in_a_view_following_a_template_that_controls_the_categories_and_says_whose() {
+    let path = face("template", "face.xyz", 0.0);
+    let mut h = app(&format!("point_cloud {}", json!({"path": path})));
+    let run = |h: &mut Harness<BimApp>, p: Value| h.state_mut().session.execute("graphics", &p).unwrap();
+    // A template made from the view holds the colour it had, and the view follows it.
+    run(&mut h, json!({"view": 100000, "categories": {"pointcloud": {"projection": {"fill": [0, 0, 255]}}}}));
+    h.state_mut().session.execute("template", &json!({"name": "Scans", "from": 100000, "controls": ["categories"]})).unwrap();
+    run(&mut h, json!({"view": 100000, "reset": true, "template": "Scans"}));
+    h.run();
+    assert!(lit(&h, "High Contrast Point Clouds"), "the template's colour is the view's");
+    assert!(is_disabled(&h, Role::Button, "High Contrast Point Clouds"));
+    // A click changes nothing: not the view, not the template.
+    let steps = h.state().session.history().len();
+    h.get_by_role_and_label(Role::Button, "High Contrast Point Clouds").click();
+    h.run();
+    assert_eq!(h.state().session.history().len(), steps);
+    assert_eq!(scan_fill(&h).0, Some([0, 0, 255]));
+    // Hovering says whose it is.
+    let at = h.get_by_role_and_label(Role::Button, "High Contrast Point Clouds").rect().center();
+    h.hover_at(at);
+    for _ in 0..4 {
+        h.run();
+    }
+    let note = "Set by view template Scans: change the template, or stop following it.";
+    assert!(painted_text(&h).contains(&note.to_string()), "{:?}", painted_text(&h));
+    // Stopped following, the view's own categories are its own again, and the button works.
+    run(&mut h, json!({"view": 100000, "template": null}));
+    h.run();
+    assert!(!is_disabled(&h, Role::Button, "High Contrast Point Clouds") && !lit(&h, "High Contrast Point Clouds"));
+    press(&mut h, "High Contrast Point Clouds");
+    assert_eq!(scan_fill(&h).0, Some(crate::footer::HIGH_CONTRAST));
+}
+
+#[test]
+fn high_contrast_is_on_the_3d_views_bar_and_a_sections_and_fills_the_scans_of_that_view_alone() {
+    use bimcraft_core::graphics::Look;
+    use bimcraft_core::render::Rgb;
+    let path = face("views", "face.xyz", 0.0);
+    let script = format!("section {{\"start\": [-1000, 3000], \"end\": [9000, 3000]}}\npoint_cloud {}", json!({"path": path}));
+    let mut h = app(&script);
+    let (scan, section, level) = (scans(&h)[0], ids(&h, "section")[0], h.state().session.model.levels()[0].0);
+    let [r, g, b] = crate::footer::HIGH_CONTRAST;
+    let filled = |h: &Harness<BimApp>, view: Option<Id>| {
+        let m = &h.state().session.model;
+        let look = view.map_or_else(|| Look::of_3d(m), |v| Look::of(m, v));
+        look.surface(scan, Rgb(1, 2, 3)) == Rgb(r, g, b) && look.filled(scan)
+    };
+    // The 3D view: the default one, which the project holds only once something sets it.
+    press(&mut h, "Default 3D View");
+    assert_eq!(h.state().sheet, Sheet::View3D);
+    assert!(!lit(&h, "High Contrast Point Clouds"));
+    press(&mut h, "High Contrast Point Clouds");
+    assert_eq!(scan_fill(&h).0, Some(crate::footer::HIGH_CONTRAST));
+    assert!(lit(&h, "High Contrast Point Clouds") && filled(&h, None));
+    // A section keeps its own graphics, and the 3D view's don't reach it.
+    browse(&mut h, "Section 1");
+    assert_eq!(h.state().sheet, Sheet::Section(section));
+    assert!(!lit(&h, "High Contrast Point Clouds") && !filled(&h, Some(section)));
+    press(&mut h, "High Contrast Point Clouds");
+    assert_eq!(scan_fill(&h).0, Some(crate::footer::HIGH_CONTRAST));
+    assert!(lit(&h, "High Contrast Point Clouds") && filled(&h, Some(section)));
+    assert!(!filled(&h, Some(level)), "the plan was never asked");
+    // Again, and each has its own colours back.
+    press(&mut h, "High Contrast Point Clouds");
+    assert_eq!(scan_fill(&h).0, None);
+    assert!(!lit(&h, "High Contrast Point Clouds") && !filled(&h, Some(section)));
+    press(&mut h, "Default 3D View");
+    assert!(lit(&h, "High Contrast Point Clouds"), "the 3D view is as it was left");
+    press(&mut h, "High Contrast Point Clouds");
+    assert!(!lit(&h, "High Contrast Point Clouds") && !filled(&h, None));
+}
+
+#[test]
+fn a_dark_canvas_dims_a_scans_own_colours_but_not_the_colour_high_contrast_gives_it() {
+    let path = face("dark", "face.xyz", 0.0);
+    let mut h = app(&format!("point_cloud {}", json!({"path": path})));
+    press(&mut h, "View");
+    press(&mut h, "Dark Mode");
+    assert!(crate::style::dark());
+    // The scan's own colours are mid-tones: dimmed, so the ink lightened over them still reads.
+    assert_eq!(picture_tints(&h), [egui::Color32::from_gray(120)]);
+    // The colour High Contrast gives it is ink itself, shown as it is.
+    press(&mut h, "High Contrast Point Clouds");
+    assert_eq!(picture_tints(&h), [egui::Color32::WHITE]);
+    // Again, and they are dimmed as before.
+    press(&mut h, "High Contrast Point Clouds");
+    assert_eq!(picture_tints(&h), [egui::Color32::from_gray(120)]);
+    // On the light canvas nothing is dimmed.
+    press(&mut h, "Dark Mode");
+    assert!(!crate::style::dark());
+    assert_eq!(picture_tints(&h), [egui::Color32::WHITE]);
 }
