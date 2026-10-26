@@ -211,6 +211,6 @@ Limits of the annotation stack, left as they are: the desktop has no group type 
 apart with Ungroup and made again with Create Group cannot take its old name (the core refuses a name in use), so what was placed from the old type does not follow;
 detail groups and repeating details are placed in plans only; Properties' Group row is read only. Pick Lines and the polygons are Draw-panel tools that make
 curves, not commands, so an agent draws the curves they would make. A sketch's Trim, Offset, Split, Fillet, Join, Vertex and Convert Spline (`sketch_modify` and its neighbours
-in `draw.rs`) act on the sketch the window holds with the core's `draw` and `curves` functions and are not commands, so the CLI and MCP cannot reach them. The Align tool's
-pattern geometry (`align_pattern` in `canvas.rs`) is the window's until the core has `Model::align_pattern`. The patterns list is not virtualized: rows off the screen paint
+in `draw.rs`) act on the sketch the window holds with the core's `draw` and `curves` functions and are not commands, so the CLI and MCP cannot reach them. The Align tool on a
+pattern asks `Model::align_pattern` where the pattern then starts and sends the answer through `modify`, saying the core's refusal when it gives one. The patterns list is not virtualized: rows off the screen paint
 no swatch, but each still lays out its widgets.
