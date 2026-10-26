@@ -551,14 +551,23 @@ pub fn check(who: &str, lines: &[SketchLine]) -> Result<(), String> {
 
 /// The rings an element draws its outline with: a floor's, a ceiling's or a roof's boundary and its openings or courtyards
 /// (what to call them), a shaft's boundary.
-fn rings_of(e: &Element) -> Option<(&[P2], &[Vec<P2>], &'static str)> {
-    match e {
-        Element::Floor(f) => Some((&f.boundary, &f.openings, "opening")),
-        Element::Ceiling(c) => Some((&c.boundary, &c.openings, "opening")),
-        Element::Roof(r) if r.extrusion.is_none() => Some((&r.boundary, &r.courtyards, "courtyard")),
-        Element::Shaft(s) => Some((&s.boundary, &[], "")),
-        _ => None,
-    }
+fn rings_of(e: &Element) -> Option<Rings<'_>> {
+    let (boundary, holes, what): (&[P2], &[Vec<P2>], &str) = match e {
+        Element::Floor(f) => (&f.boundary, &f.openings, "opening"),
+        Element::Ceiling(c) => (&c.boundary, &c.openings, "opening"),
+        Element::Roof(r) if r.extrusion.is_none() => (&r.boundary, &r.courtyards, "courtyard"),
+        Element::Shaft(s) => (&s.boundary, &[], ""),
+        _ => return None,
+    };
+    Some(Rings { boundary, holes, what })
+}
+
+/// An element's outline and its holes, and what its holes are called.
+#[derive(PartialEq)]
+struct Rings<'a> {
+    boundary: &'a [P2],
+    holes: &'a [Vec<P2>],
+    what: &'static str,
 }
 
 impl Model {
@@ -570,10 +579,11 @@ impl Model {
     /// that is an undo step, but Insert from File.
     pub fn check_edits(&self, before: &Model) -> Result<(), String> {
         for (&id, e) in &self.elements {
-            let Some((boundary, holes, what)) = rings_of(e) else { continue };
-            if before.elements.get(id).and_then(rings_of).is_some_and(|b| b == (boundary, holes, what)) {
+            let Some(now) = rings_of(e) else { continue };
+            if before.elements.get(id).and_then(rings_of).is_some_and(|was| was == now) {
                 continue;
             }
+            let Rings { boundary, holes, what } = now;
             let rings = std::iter::once(("boundary".to_string(), boundary))
                 .chain(holes.iter().enumerate().map(|(i, h)| (format!("{what} {i}"), h.as_slice())));
             for (name, ring) in rings {
