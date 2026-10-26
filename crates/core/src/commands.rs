@@ -995,7 +995,9 @@ pub static ALL: &[Command] = &[
          or a sheet by number (paper mm). It draws in line style `style` (Thin Lines unless told), only in its view, and \
          goes with it; with `insulation`, a width in mm, it draws as batt insulation along its curve, as Revit's Insulation; \
          with `centre_mark` true, a small cross marks the centre of its arcs, circle or ellipse; with `cloud`, an arc length \
-         in mm, it draws as a revision cloud's scallops along it (outward round a loop), of `revision` (any text)",
+         in mm, it draws as a revision cloud's scallops along it (outward round a loop, a scallop ending at each corner), of \
+         `revision` (any text, a label kept with the cloud and listed by `elements`; nothing else reads it); a line is \
+         insulation or a cloud, not both",
         detail_line,
     ),
     edit(

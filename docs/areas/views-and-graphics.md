@@ -98,7 +98,11 @@ along its curve (loops the whole width across, `BULGE` times it apart), so it sp
 line does, and follows arcs and splines, which Revit's doesn't. Annotate > Detail > Insulation draws it, its Width on the
 Options Bar; Properties shows Insulation Width. A revision cloud is the same idea: a detail line with a `cloud` arc length (and
 a `revision`, any text) that `drawn` turns into scallops (`lines::cloud`, arcs of `SCALLOP` degrees bulging out of a loop
-whichever way round it was drawn, to the left of an open line). Annotate > Detail > Revision Cloud draws one, a rectangle by
+whichever way round it was drawn, to the left of an open line). A scallop ends at each corner where the way turns by more
+than about 25 degrees (so a rectangle's scallops never cut a corner) and, past 1,024 scallops or more corners than that
+allows, the scallops are even and fewer, each drawn within its share of `MAX_DRAWN` points. A line is a cloud or insulation
+(`DetailLine::check` refuses both). `revision` is a label: it is kept with the cloud and `elements` lists it, and no
+schedule reads it yet. Annotate > Detail > Revision Cloud draws one, a rectangle by
 default; with it a rectangle or a polygon is one cloud round (`curves::join`), and Line is one cloud through the points
 (`one_line`). `centre_mark` is Revit's Center Mark Visible: a 3 mm cross at each of `Curve::centres`, the Options Bar's Show
 Centre for new arcs and circles.

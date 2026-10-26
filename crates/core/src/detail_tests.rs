@@ -215,6 +215,25 @@ fn a_mirrored_group_turns_its_notes_with_it_and_keeps_them_readable() {
 }
 
 #[test]
+fn a_revision_cloud_stays_within_the_points_a_curve_draws_and_never_cuts_a_corner() {
+    let mut s = Session::new();
+    // A circle half a million metres across, scalloped by arcs 1.5 mm long.
+    let id = id_of(&run(&mut s, "detail_line", json!({"centre": [0, 0], "radius": 5e8, "cloud": 1.5})));
+    let Some(Element::DetailLine(l)) = s.model.elements.get(id) else { panic!("no line") };
+    let n = l.drawn().len();
+    assert!(n <= crate::curves::MAX_DRAWN, "{n} points");
+    // A rectangle whose sides are no whole number of scallops: none of its scallops dips inside it.
+    let id =
+        id_of(&run(&mut s, "detail_line", json!({"points": [[0, 0], [1000, 0], [1000, 700], [0, 700]], "closed": true, "cloud": 300})));
+    let Some(Element::DetailLine(l)) = s.model.elements.get(id) else { panic!("no line") };
+    let inside = l.drawn().iter().filter(|p| p.0 > 1.0 && p.0 < 999.0 && p.1 > 1.0 && p.1 < 699.0).count();
+    assert_eq!(inside, 0, "{inside} points inside the loop");
+    // A cloud and an insulation are two drawings of one line: one is asked for.
+    let e = err(&mut s, "detail_line", json!({"start": [0, 0], "end": [1000, 0], "cloud": 100, "insulation": 100}));
+    assert!(e.contains("cloud") && e.contains("insulation"), "{e}");
+}
+
+#[test]
 fn a_regions_or_floors_pattern_origin_and_angle_show_in_elements_and_align_moves_the_origin() {
     let mut s = Session::new();
     run(&mut s, "wall", json!({"points": [[0, 0], [4000, 0], [4000, 4000], [0, 4000]], "closed": true}));
