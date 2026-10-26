@@ -19,7 +19,9 @@ whose `read` is the sum of their `recordCount`s. Each scan's points are a Compre
 whose bytestreams, one for each field of the `prototype`, are bit-packed and run on from packet to packet; `Pack` decodes
 Float (single or double), Integer and ScaledInteger, and only bit-packing, the one codec E57 writes, is read. Cartesian or
 spherical coordinates both come in, a point marked invalid doesn't, and colour is scaled from `colorLimits` (or its field's
-range) to eight bits. `images2D` is passed over. The tests write E57 files of their own (`e57` in the module's tests), with
+range) to eight bits. `images2D` is passed over. A file is held to `Caps` before anything is unpacked: up to 4096 scans, 100 million
+points in all of them, 32 fields to a point, no two scans on one section, a section with room for the bits its count asks for (a
+field of no bits is legal, so eight points can share a byte), and no stream more than 4 MiB ahead of the others. The tests write E57 files of their own (`e57` in the module's tests), with
 values that cross packets and pages; the reference survey's 177 MB file reads its 6.6 million points in under two seconds.
 
 A project holds each scan once, by name, as a `Cloud` in `Model::clouds` (a library entry of kind `Cloud`, so it has an id and a
@@ -27,7 +29,9 @@ GUID): its points and colours shared behind an `Arc`, the file it came from, and
 it as `CloudFile`, the points as little-endian `f32` and the colours as bytes, each deflated and in base64, packed once and kept
 (`Cloud::file`); coming back, every check `Cloud::new` makes is made again, and what unpacks past `MAX_CLOUD_POINTS` stops there.
 A project holds up to `MAX_CLOUDS` scans and `MAX_CLOUD_POINTS` points among them (`Model::check`), so the `point_cloud` command
-thins a new one to what the others leave.
+thins a new one to what the others leave. A project file is held to the same while it is read, not after: `Model::clouds` reads
+through `cloud::deserialize_scans`, which refuses the entry past the count, and the scan that takes the points past the budget,
+before unpacking the next (unpacking is where the memory goes, and the file is read twice, by the lenient walk and the strict read).
 
 A survey's stations come in as one scan, as ReCap gathers a project's scans and Revit links the project: `path` may be a list of
 up to `MAX_STATIONS` files. Each is read with an even share of what the project leaves, and `cloud::merge` puts them about the

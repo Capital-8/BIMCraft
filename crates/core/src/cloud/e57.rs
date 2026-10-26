@@ -3,6 +3,8 @@
 //! field bit-packed in a stream of its own. Read from the public standard; every scan in a file comes in, placed by
 //! its pose. The checksums aren't checked: a page that lies reads as points that lie, never as a crash.
 
+use std::collections::HashSet;
+
 use super::Raw;
 
 /// Bytes in a page, and of them, the ones that hold data (the last four are its checksum).
@@ -12,8 +14,35 @@ const DATA: u64 = PAGE - 4;
 const MAX_DEPTH: usize = 64;
 const MAX_NODES: usize = 1 << 20;
 
+/// What a file may ask before any of it is unpacked. A bit-packed field can take no bits at all (a constant), so a few
+/// megabytes may declare billions of points, and every point costs a step for each field. shortcut: a survey past these
+/// is thinned where it was made; raise them when a pass over a file streams instead of holding it.
+#[derive(Clone, Copy)]
+struct Caps {
+    /// Scans in a file.
+    scans: usize,
+    /// Points in all of them: five times what a project keeps, twenty.
+    points: u64,
+    /// Fields a point is made of; scanners write a dozen.
+    fields: usize,
+    /// Bytes one stream may hold waiting for the others; a packet is 64 KiB at most.
+    ahead: usize,
+}
+
+const CAPS: Caps = Caps { scans: 4096, points: 100_000_000, fields: 32, ahead: 4 << 20 };
+
+/// What the scans before one have used up: the points left of the file's budget, and the sections they read.
+struct Taken {
+    points: u64,
+    sections: HashSet<u64>,
+}
+
 /// Hands each point of every scan in an E57 file to `f`, in metres where the file put it.
 pub(super) fn read(bytes: &[u8], f: &mut impl FnMut(Raw) -> Result<(), String>) -> Result<(), String> {
+    read_within(bytes, f, CAPS)
+}
+
+fn read_within(bytes: &[u8], f: &mut impl FnMut(Raw) -> Result<(), String>, caps: Caps) -> Result<(), String> {
     if !bytes.starts_with(b"ASTM-E57") {
         return Err("it isn't an E57 file: it doesn't start with ASTM-E57".into());
     }
@@ -35,8 +64,12 @@ pub(super) fn read(bytes: &[u8], f: &mut impl FnMut(Raw) -> Result<(), String>) 
     file.take(file.logical(xml_at)?, xml_len, &mut xml)?;
     let root = parse(&String::from_utf8_lossy(&xml))?;
     let Some(data3d) = root.child("data3D") else { return Err("it holds no scans (no data3D)".into()) };
+    if data3d.children.len() > caps.scans {
+        return Err(format!("it holds {} scans; BIMCraft reads up to {}", data3d.children.len(), caps.scans));
+    }
+    let mut taken = Taken { points: caps.points, sections: HashSet::new() };
     for (i, scan) in data3d.children.iter().enumerate() {
-        scan_points(&file, scan, f).map_err(|e| format!("scan {}: {e}", i + 1))?;
+        scan_points(&file, scan, f, &caps, &mut taken).map_err(|e| format!("scan {}: {e}", i + 1))?;
     }
     Ok(())
 }
@@ -308,11 +341,15 @@ impl Stream {
         Some(self.pack.decode(raw))
     }
 
-    /// Takes a packet's bytes after what's left of the last.
-    fn feed(&mut self, more: &[u8]) {
+    /// Takes a packet's bytes after what's left of the last; a stream that holds more than `ahead` is waiting on the others for good.
+    fn feed(&mut self, more: &[u8], ahead: usize) -> Result<(), String> {
         self.bytes.drain(..self.bit / 8);
         self.bit %= 8;
         self.bytes.extend_from_slice(more);
+        if self.bytes.len() > ahead {
+            return Err(format!("a stream of its points runs {} bytes ahead of the others; up to {ahead}", self.bytes.len()));
+        }
+        Ok(())
     }
 }
 
@@ -326,7 +363,13 @@ struct Fields {
     rgb: Option<[usize; 3]>,
 }
 
-fn scan_points(file: &Paged, scan: &Node, f: &mut impl FnMut(Raw) -> Result<(), String>) -> Result<(), String> {
+fn scan_points(
+    file: &Paged,
+    scan: &Node,
+    f: &mut impl FnMut(Raw) -> Result<(), String>,
+    caps: &Caps,
+    taken: &mut Taken,
+) -> Result<(), String> {
     let points = scan.child("points").ok_or("it has no points")?;
     if points.attr("type") != Some("CompressedVector") {
         return Err("its points aren't a CompressedVector".into());
@@ -337,6 +380,9 @@ fn scan_points(file: &Paged, scan: &Node, f: &mut impl FnMut(Raw) -> Result<(), 
     let count = u64::try_from(points.integer("recordCount", -1)?).map_err(|_| "it doesn't say how many points it has")?;
     let at = u64::try_from(points.integer("fileOffset", -1)?).map_err(|_| "it doesn't say where its points are")?;
     let prototype = points.child("prototype").ok_or("its points have no prototype")?;
+    if prototype.children.len() > caps.fields {
+        return Err(format!("its points have {} fields; BIMCraft reads up to {}", prototype.children.len(), caps.fields));
+    }
     let mut streams = Vec::new();
     let mut names = Vec::new();
     for field in &prototype.children {
@@ -362,6 +408,13 @@ fn scan_points(file: &Paged, scan: &Node, f: &mut impl FnMut(Raw) -> Result<(), 
     if streams.iter().all(|s| s.pack.bits() == 0) {
         return Err("its points hold no data".into());
     }
+    taken.points = taken
+        .points
+        .checked_sub(count)
+        .ok_or_else(|| format!("the scans of a file hold up to {} points together; thin the survey where it was made", caps.points))?;
+    if !taken.sections.insert(at) {
+        return Err(format!("its points at offset {at} are the section another scan reads; each scan keeps its own"));
+    }
     let pose = Pose::of(scan)?;
     let colour = Colour::of(scan, &streams, fields.rgb);
 
@@ -374,6 +427,13 @@ fn scan_points(file: &Paged, scan: &Node, f: &mut impl FnMut(Raw) -> Result<(), 
         return Err(format!("its points at offset {at} aren't a compressed vector section"));
     }
     let end = start.saturating_add(word(8));
+    // The points can't take fewer bits than their fields' widths added: a count the section has no room for is a lie, told
+    // before a packet is unpacked.
+    let bits: u64 = streams.iter().map(|s| u64::from(s.pack.bits())).sum();
+    let (need, room) = (count.saturating_mul(bits), word(8).saturating_sub(32).saturating_mul(8));
+    if need > room {
+        return Err(format!("it's cut short: its {count} points take {} bytes and its section holds {}", need.div_ceil(8), room / 8));
+    }
     let mut next = file.logical(word(16))?;
     let mut left = count;
     let mut packet = Vec::new();
@@ -388,7 +448,7 @@ fn scan_points(file: &Paged, scan: &Node, f: &mut impl FnMut(Raw) -> Result<(), 
         match packet[0] {
             1 => {
                 file.take(next + 4, usize::try_from(length).unwrap_or(0).saturating_sub(4), &mut packet)?;
-                feed(&packet, &mut streams)?;
+                feed(&packet, &mut streams, caps.ahead)?;
                 // Every point whose fields have all come.
                 while left > 0 && pull(&mut streams, &mut values) {
                     left -= 1;
@@ -406,7 +466,7 @@ fn scan_points(file: &Paged, scan: &Node, f: &mut impl FnMut(Raw) -> Result<(), 
 }
 
 /// Hands a data packet's buffers to their streams.
-fn feed(packet: &[u8], streams: &mut [Stream]) -> Result<(), String> {
+fn feed(packet: &[u8], streams: &mut [Stream], ahead: usize) -> Result<(), String> {
     let u16_at = |i: usize| packet.get(i..i + 2).map(|b| usize::from(u16::from_le_bytes([b[0], b[1]])));
     let short = || "a data packet is cut short".to_string();
     let n = u16_at(4).ok_or_else(short)?;
@@ -416,7 +476,7 @@ fn feed(packet: &[u8], streams: &mut [Stream]) -> Result<(), String> {
     let mut at = 6 + 2 * n;
     for (k, s) in streams.iter_mut().enumerate() {
         let len = u16_at(6 + 2 * k).ok_or_else(short)?;
-        s.feed(packet.get(at..at + len).ok_or_else(short)?);
+        s.feed(packet.get(at..at + len).ok_or_else(short)?, ahead)?;
         at += len;
     }
     Ok(())
@@ -770,26 +830,12 @@ mod tests {
         let mut v2 = good.clone();
         v2[8] = 2;
         says(&v2, "version 2");
-        // The XML changed in place, its length in the header with it.
-        let xml_at = u64::from_le_bytes(good[24..32].try_into().unwrap()) as usize;
-        let xml_len = u64::from_le_bytes(good[32..40].try_into().unwrap()) as usize;
-        let with = |from: &str, to: &str| {
-            let start = xml_at as u64 / PAGE * DATA + xml_at as u64 % PAGE;
-            let mut raw = Vec::new();
-            Paged { bytes: &good }.take(start, xml_len, &mut raw).unwrap();
-            let xml = String::from_utf8(raw).unwrap().replace(from, to);
-            let mut b = good[..xml_at].to_vec();
-            b[32..40].copy_from_slice(&(xml.len() as u64).to_le_bytes());
-            for (j, c) in xml.bytes().enumerate() {
-                let at = physical(start + j as u64) as usize;
-                b.resize(b.len().max(at + 1), 0);
-                b[at] = c;
-            }
-            b
-        };
+        let with = |from: &str, to: &str| rewritten(&good, from, to);
         assert!(read(&with("", "")).is_ok());
         says(&with("\"1\"></codecs>", "\"1\"><x/></codecs>"), "codec");
-        says(&with("recordCount=\"300\"", "recordCount=\"900\""), "missing");
+        says(&with("recordCount=\"300\"", "recordCount=\"900\""), "cut short");
+        // A count only a little over what the packets hold is found out as they are unpacked.
+        says(&with("recordCount=\"300\"", "recordCount=\"301\""), "missing");
         says(&with("<data3D", "<data3X"), "broken");
         says(&with("type=\"Float\" precision", "type=\"String\" precision"), "String");
         // Bytes changed all through it: an answer, never a panic.
@@ -800,5 +846,116 @@ mod tests {
                 let _ = read(&b);
             }
         }
+    }
+
+    /// The XML of a file.
+    fn xml_text(file: &[u8]) -> String {
+        let xml_at = u64::from_le_bytes(file[24..32].try_into().unwrap());
+        let xml_len = u64::from_le_bytes(file[32..40].try_into().unwrap()) as usize;
+        let mut raw = Vec::new();
+        Paged { bytes: file }.take(xml_at / PAGE * DATA + xml_at % PAGE, xml_len, &mut raw).unwrap();
+        String::from_utf8(raw).unwrap()
+    }
+
+    /// The file with its XML changed in place (`from` to `to`), its length in the header with it.
+    fn rewritten(file: &[u8], from: &str, to: &str) -> Vec<u8> {
+        let xml_at = u64::from_le_bytes(file[24..32].try_into().unwrap());
+        let start = xml_at / PAGE * DATA + xml_at % PAGE;
+        let xml = xml_text(file).replace(from, to);
+        let mut b = file[..xml_at as usize].to_vec();
+        b[32..40].copy_from_slice(&(xml.len() as u64).to_le_bytes());
+        for (j, c) in xml.bytes().enumerate() {
+            let at = physical(start + j as u64) as usize;
+            b.resize(b.len().max(at + 1), 0);
+            b[at] = c;
+        }
+        b
+    }
+
+    /// Reads every point of a file under these caps, or says why not.
+    fn within(file: &[u8], caps: Caps) -> Result<usize, String> {
+        let mut n = 0;
+        read_within(
+            file,
+            &mut |_| {
+                n += 1;
+                Ok(())
+            },
+            caps,
+        )
+        .map(|()| n)
+    }
+
+    fn plain(n: usize) -> Scan57 {
+        Scan57 { fields: cartesian(&grid(n)), more: String::new() }
+    }
+
+    #[test]
+    fn a_file_holds_no_more_scans_or_points_than_a_project_could_use_and_says_so_before_unpacking() {
+        let two = e57(&[plain(5), plain(5)]);
+        assert_eq!(within(&two, CAPS), Ok(10));
+        assert_eq!(within(&two, Caps { scans: 2, ..CAPS }), Ok(10));
+        let e = within(&two, Caps { scans: 1, ..CAPS }).unwrap_err();
+        assert!(e.contains("2 scans") && e.contains("up to 1"), "{e}");
+        // The budget is the file's, spent by one scan after another.
+        assert_eq!(within(&two, Caps { points: 10, ..CAPS }), Ok(10));
+        let e = within(&two, Caps { points: 9, ..CAPS }).unwrap_err();
+        assert!(e.contains("scan 2") && e.contains("9 points together"), "{e}");
+        // A count far past anything, or past what the section's bytes could hold, is refused with nothing unpacked.
+        let big = e57(&[plain(300)]);
+        for count in ["9000000000000", "9223372036854775807", "100000001"] {
+            let e = read(&rewritten(&big, "recordCount=\"300\"", &format!("recordCount=\"{count}\""))).unwrap_err();
+            assert!(e.contains("together") || e.contains("cut short"), "{count}: {e}");
+        }
+        // More fields than any scanner writes.
+        let mut fields = cartesian(&grid(3));
+        fields.extend((0..CAPS.fields).map(|k| float(&format!("extra{k}"), true, &[0.0, 1.0, 2.0])));
+        let e = read(&e57(&[Scan57 { fields, more: String::new() }])).unwrap_err();
+        assert!(e.contains("fields") && e.contains(&CAPS.fields.to_string()), "{e}");
+    }
+
+    #[test]
+    fn fields_that_take_no_bits_cant_make_a_small_file_ask_for_more_points_than_the_cap() {
+        // Three constants and one bit a point: eight points to the byte.
+        let n = 40;
+        let bit: Vec<f64> = (0..n).map(|i| (i % 2) as f64).collect();
+        let fields = ["cartesianX", "cartesianY", "cartesianZ"].map(|k| integer(k, 5, 5, &vec![5.0; n])).to_vec();
+        let file = e57(&[Scan57 { fields: [fields, vec![integer("intensity", 0, 1, &bit)]].concat(), more: String::new() }]);
+        assert_eq!(within(&file, CAPS), Ok(n));
+        let e = within(&file, Caps { points: 39, ..CAPS }).unwrap_err();
+        assert!(e.contains("together"), "{e}");
+        // Its count raised past what the bytes of its section hold: found out at once, not by unpacking.
+        let lie = rewritten(&file, &format!("recordCount=\"{n}\""), "recordCount=\"4000000\"");
+        let mut handed = 0;
+        let e = read_within(
+            &lie,
+            &mut |_| {
+                handed += 1;
+                Ok(())
+            },
+            CAPS,
+        )
+        .unwrap_err();
+        assert!(e.contains("cut short") && e.contains("4000000"), "{e}");
+        assert_eq!(handed, 0, "points were unpacked before the lie was found");
+    }
+
+    #[test]
+    fn two_scans_cant_read_the_same_section() {
+        let two = e57(&[plain(5), plain(5)]);
+        let xml = xml_text(&two);
+        let offsets: Vec<&str> = xml.split("fileOffset=\"").skip(1).filter_map(|s| s.split('"').next()).collect();
+        assert_eq!(offsets.len(), 2);
+        let same = rewritten(&two, &format!("fileOffset=\"{}\"", offsets[1]), &format!("fileOffset=\"{}\"", offsets[0]));
+        let e = read(&same).unwrap_err();
+        assert!(e.contains("scan 2") && e.contains("another scan"), "{e}");
+    }
+
+    #[test]
+    fn a_stream_may_not_wait_on_the_others_for_more_than_a_few_packets() {
+        let file = e57(&[plain(300)]);
+        assert_eq!(within(&file, CAPS), Ok(300));
+        let e = within(&file, Caps { ahead: 8, ..CAPS }).unwrap_err();
+        assert!(e.contains("ahead of the others") && e.contains("up to 8"), "{e}");
     }
 }

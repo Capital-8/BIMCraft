@@ -4861,6 +4861,37 @@ fn a_file_from_before_guids_opens_with_guids_and_six_digit_ids() {
 }
 
 #[test]
+fn a_project_is_saved_as_format_5_and_one_of_format_4_opens_as_it_is_and_one_of_format_6_is_refused() {
+    use crate::model::Model;
+    // 5 added the scans a project holds and the point clouds that place them; nothing in a file of 4 changes.
+    let mut s = Session::new();
+    let empty = serde_json::to_value(&*s.model).unwrap();
+    house(&mut s);
+    let full = serde_json::to_value(&*s.model).unwrap();
+    for v in [&empty, &full] {
+        assert_eq!(v["format"], 5, "a project is saved as format 5");
+        let mut four = v.clone();
+        four["format"] = json!(4);
+        let (m, left_out) = Model::read(&four.to_string()).unwrap();
+        assert_eq!((m.format, left_out.len(), m.elements.len()), (5, 0, v["elements"].as_object().unwrap().len()));
+    }
+    assert!(full["elements"].as_object().unwrap().len() > 5);
+    // A newer file says what it is and what to do, even when nothing else in it is wrong.
+    let mut six = empty.clone();
+    six["format"] = json!(6);
+    let e = Model::read(&six.to_string()).unwrap_err();
+    assert!(
+        e.contains("newer BIMCraft") && e.contains("file format 6") && e.contains("reads up to 5") && e.contains("update BIMCraft"),
+        "{e}"
+    );
+    // A file of this format with a field it doesn't know is read without it, and says which.
+    let mut odd = full.clone();
+    odd["something_new"] = json!(true);
+    let (m, left_out) = Model::read(&odd.to_string()).unwrap();
+    assert_eq!((m.format, left_out), (5, vec!["/something_new".to_string()]));
+}
+
+#[test]
 fn a_file_with_fields_this_bimcraft_does_not_know_opens_without_them_and_says_which() {
     let mut s = Session::new();
     s.script(crate::sample::SAMPLE).unwrap();
