@@ -324,6 +324,7 @@ fn a_dark_canvas_dims_a_scans_own_colours_but_not_the_colour_high_contrast_gives
     let mut h = app(&format!("point_cloud {}", json!({"path": path})));
     press(&mut h, "View");
     press(&mut h, "Dark Mode");
+    pick(&mut h, Role::RadioButton, "Dark");
     assert!(crate::style::dark());
     // The scan's own colours are mid-tones: dimmed, so the ink lightened over them still reads.
     assert_eq!(picture_tints(&h), [egui::Color32::from_gray(120)]);
@@ -335,8 +336,24 @@ fn a_dark_canvas_dims_a_scans_own_colours_but_not_the_colour_high_contrast_gives
     assert_eq!(picture_tints(&h), [egui::Color32::from_gray(120)]);
     // On the light canvas nothing is dimmed.
     press(&mut h, "Dark Mode");
+    pick(&mut h, Role::RadioButton, "Light");
     assert!(!crate::style::dark());
     assert_eq!(picture_tints(&h), [egui::Color32::WHITE]);
+}
+
+#[test]
+fn a_scan_on_a_light_canvas_in_a_dark_interface_is_not_dimmed() {
+    let path = face("mixed", "face.xyz", 0.0);
+    let mut h = app(&format!("point_cloud {}", json!({"path": path})));
+    press(&mut h, "View");
+    press(&mut h, "Dark Mode");
+    pick(&mut h, Role::RadioButton, "Dark UI, Light Canvas");
+    // The interface is dark, the drawing is not: the dimming is for a dark canvas, which a dark interface does not make.
+    assert!(crate::style::dark() && !crate::style::canvas_dark());
+    assert_eq!(picture_tints(&h), [egui::Color32::WHITE]);
+    press(&mut h, "Dark Mode");
+    pick(&mut h, Role::RadioButton, "Dark");
+    assert_eq!(picture_tints(&h), [egui::Color32::from_gray(120)], "a dark canvas dims it again");
 }
 
 #[test]
