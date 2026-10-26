@@ -279,6 +279,19 @@ fn the_import_and_export_buttons_ask_for_a_file_and_work_on_the_draft_not_the_pr
 }
 
 #[test]
+fn the_count_of_patterns_left_out_is_the_commands_total_not_the_few_it_names() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("bad.pat");
+    // 120 patterns with a line that isn't numbers: the command names 100 of them and counts all 120.
+    std::fs::write(&file, (0..120).map(|i| format!("*Bad{i}\nnot numbers\n")).collect::<String>()).unwrap();
+    let mut h = app(BOX);
+    patterns_tab(&mut h);
+    h.state_mut().import_patterns(&file);
+    h.run();
+    assert!(said(&h, "and 115 more"), "five shown of 120");
+}
+
+#[test]
 fn a_long_list_of_patterns_left_out_is_counted_and_a_file_is_not_written_over_unasked() {
     let dir = tempfile::tempdir().unwrap();
     let file = dir.path().join("all.pat");

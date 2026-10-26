@@ -127,7 +127,9 @@ impl FillPatternsDialog {
             .map(|l| format!("{} ({})", short(l["name"].as_str().unwrap_or_default()), short(l["why"].as_str().unwrap_or_default())))
             .collect();
         let n = names.len().to_string();
-        Ok(match out.len() {
+        // The reply names the first few it left out and counts them all.
+        let left = reply["left_out_count"].as_u64().map_or(0, |c| usize::try_from(c).unwrap_or(usize::MAX)).max(out.len());
+        Ok(match left {
             0 => (tf("{} patterns imported.", &[&n]), false),
             k => {
                 let list = out.iter().take(LEFT_OUT_SHOWN).cloned().collect::<Vec<_>>().join("; ");
