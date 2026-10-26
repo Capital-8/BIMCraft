@@ -15,7 +15,7 @@ use egui_kittest::kittest::Queryable;
 use serde_json::{Value, json};
 use std::sync::Arc;
 
-use crate::{BimApp, Sheet, Tool};
+use crate::{BimApp, Sheet, Tab, Tool};
 
 const BOX: &str = r#"wall {"points": [[0,0],[8000,0],[8000,6000],[0,6000]], "closed": true}"#;
 
@@ -4285,6 +4285,59 @@ fn a_ribbon_tab_wider_than_the_window_folds_its_last_panels_to_buttons_that_list
     press(&mut h, "Design Options ▾");
     press(&mut h, "Design Options");
     assert!(h.query_by_label("Option set:").is_some());
+}
+
+/// A tool that drops a list of choices down opens it from the list of a panel that has handed the tool over to its name (or folded
+/// whole): a click on the row must leave the choices on screen, not close the list and with it the tool's own popup.
+#[test]
+fn a_tool_with_choices_of_its_own_opens_them_from_a_panels_list() {
+    let mut shut = Vec::new();
+    for (tab, panel, tool, choice) in [
+        (Tab::Manage, "Settings", "Project Units", "Feet and inches"),
+        (Tab::Manage, "Settings", "Project Language", "Español"),
+        (Tab::Manage, "Family Editor", "New Family", "Furniture"),
+        (Tab::View, "Create", "Schedules", "Schedule/Quantities…"),
+        (Tab::View, "Create", "Duplicate View", "Duplicate with Detailing"),
+        (Tab::View, "Windows", "User Interface", "Language"),
+        (Tab::View, "Graphics", "Dark Mode", "Dark UI, Light Canvas"),
+        (Tab::View, "Sheet Composition", "Place View", "Floor Plan: Level 1"),
+    ] {
+        let mut h = app(BOX);
+        h.state_mut().tab = tab;
+        h.run();
+        if tool == "Place View" {
+            // It places a view on a sheet that is open.
+            press(&mut h, "Sheet");
+        }
+        from_list(&mut h, panel, tool);
+        if h.query_by_label(choice).is_none() {
+            shut.push(format!("{tool} (in {panel}'s list): `{choice}` is not on screen"));
+        }
+    }
+    assert!(shut.is_empty(), "a click on the row must leave the tool's choices on screen: {shut:#?}");
+    // And a choice picked there is made.
+    let mut h = app(BOX);
+    h.state_mut().tab = Tab::Manage;
+    h.run();
+    from_list(&mut h, "Settings", "Project Units");
+    press(&mut h, "Feet and inches");
+    assert_eq!(h.state().session.model.units, bimcraft_core::units::Units::FeetInches);
+    assert!(!egui::Popup::is_any_open(&h.ctx), "the list and its choices close with it");
+}
+
+/// UN (Project Units) at the least a window can be: the tool is in its panel's list by then, which the shortcut opens, and the
+/// first frame of the tab, which draws every tool, doesn't take the request for a button that is gone the next.
+#[test]
+fn the_units_shortcut_gets_to_the_choices_in_the_smallest_window_too() {
+    let mut h = app(BOX);
+    h.set_size(vec2(crate::window::MIN_SIZE[0], crate::window::MIN_SIZE[1]));
+    h.run();
+    shortcut(&mut h, "UN");
+    assert!(egui::Popup::is_any_open(&h.ctx), "the panel's list is open");
+    let row = h.get_by_label("Project Units").rect().center();
+    click_at(&mut h, row);
+    press(&mut h, "Feet and inches");
+    assert_eq!(h.state().session.model.units, bimcraft_core::units::Units::FeetInches);
 }
 
 #[test]

@@ -43,6 +43,11 @@ thread_local! {
     static TOOLS: Cell<(usize, usize)> = const { Cell::new((0, usize::MAX)) };
     /// Where the last panel drawn ends.
     static END: Cell<f32> = const { Cell::new(0.0) };
+    /// A tool's choices were asked for (a shortcut's) while it has no button, being handed over or folded: its panel opens its list.
+    static OPEN_LIST: Cell<bool> = const { Cell::new(false) };
+    /// Whether the tab being drawn has been drawn before, so its panels' fit (which tools show) is known: its first frame lays out
+    /// every tool, whatever the room.
+    static FITTED: Cell<bool> = const { Cell::new(true) };
 }
 
 /// Whether the tools drawn now go in a panel's list.
@@ -66,6 +71,7 @@ pub(crate) fn handed_over(ui: &mut Ui) -> Option<Response> {
 pub(crate) fn tab(ui: &mut Ui, key: Id, room: f32, add: impl FnOnce(&mut Ui)) {
     // The last frame's panels, and how wide the whole tab would have been with every tool shown.
     let (seen, whole): (Vec<Seen>, f32) = ui.ctx().data(|d| d.get_temp(key)).unwrap_or_default();
+    FITTED.with(|f| f.set(!seen.is_empty()));
     FITS.with(|f| *f.borrow_mut() = fits(&seen, whole, room - SLACK));
     SEEN.with(|s| s.borrow_mut().clear());
     let left = ui.cursor().left();
@@ -76,6 +82,7 @@ pub(crate) fn tab(ui: &mut Ui, key: Id, room: f32, add: impl FnOnce(&mut Ui)) {
     let whole = drawn + seen.iter().map(|p| (p.natural - p.drawn).max(0.0)).sum::<f32>();
     ui.ctx().data_mut(|d| d.insert_temp(key, (seen, whole)));
     FITS.with(|f| f.borrow_mut().clear());
+    FITTED.with(|f| f.set(true));
 }
 
 /// How the panels `seen` fit, for a tab `whole` wide with every tool shown, in `room`: from the last panel back, each hands
@@ -123,6 +130,7 @@ pub(crate) fn panel(ui: &mut Ui, title: &str, mut add: impl FnMut(&mut Ui)) {
             ui.set_invisible();
             add(ui);
         });
+        open_if_asked(ui, &r);
         list(&r, &mut add);
         r.rect.width()
     } else {
@@ -141,6 +149,7 @@ pub(crate) fn panel(ui: &mut Ui, title: &str, mut add: impl FnMut(&mut Ui)) {
             caret(ui, pos2(r.center().x + text / 2.0 + 3.0, r.center().y), pal().muted);
             let label = format!("{name} ▾");
             title_row.widget_info(|| WidgetInfo::labeled(WidgetType::Button, true, &label));
+            open_if_asked(ui, &title_row);
             list(&title_row.on_hover_text(name), &mut add);
         });
         shown.response.rect.width()
@@ -160,6 +169,36 @@ pub(crate) fn panel(ui: &mut Ui, title: &str, mut add: impl FnMut(&mut Ui)) {
     let (rule, _) = ui.allocate_exact_size(vec2(RULE, ui.available_height().max(70.0)), Sense::hover());
     ui.painter().vline(rule.center().x, rule.y_range().shrink(4.0), Stroke::new(1.0, pal().border));
     END.with(|e| e.set(rule.right()));
+}
+
+/// Opens the list under `r`, the name of the panel just drawn, when a tool of it asked for its choices and had no button to show them.
+fn open_if_asked(ui: &Ui, r: &Response) {
+    if OPEN_LIST.with(Cell::take) {
+        Popup::open_id(ui.ctx(), Popup::default_response_id(r));
+    }
+}
+
+/// The choices a tool drops down from its button `r` (a ribbon button or, in a panel's list, its row), `open` asking for them at
+/// once (a shortcut's): true when that is done, or handed to the panel (a tab's first frame lays out every tool, so what shows
+/// is not known until the next). egui keeps one popup open: a popup of the row's own would close the list that holds the row, and
+/// with it itself, so in a list the choices are a submenu of it. A tool the panel has handed over or folded has no button on the
+/// ribbon to hang them from: a request to open them opens the panel's list, where its row is.
+pub(crate) fn choices(ui: &Ui, r: &Response, open: bool, content: impl FnOnce(&mut Ui)) -> bool {
+    if listing() {
+        egui::containers::menu::SubMenu::new().show(ui, r, content);
+        return false;
+    }
+    let drawn = r.rect.is_positive() && ui.is_rect_visible(r.rect);
+    let asked = open && FITTED.with(Cell::get);
+    if drawn {
+        if asked {
+            Popup::open_id(ui.ctx(), Popup::default_response_id(r));
+        }
+        Popup::menu(r).show(content);
+    } else if asked {
+        OPEN_LIST.with(|o| o.set(true));
+    }
+    asked
 }
 
 /// The list of a panel's tools, under `r` while it's open: `add` draws them as rows.

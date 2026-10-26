@@ -12,6 +12,8 @@ startup, tags) is [the desktop](../../docs/areas/desktop.md).
 - **Every label has a row in `WORDS`** (`lang.rs`) with its Portuguese and its Spanish, and should have one in `lang/zh.rs` (Chinese, English key
   and the Chinese: a row it lacks shows in English); `nothing_a_translated_interface_shows_is_left_in_english` fails for a label the
   table knows that the window forgot to translate, in all three. The core's messages stay English, because agents read them.
+- **A ribbon tool that drops choices down** goes through `ribbon::choices(ui, &response, open, content)`, not `Popup::menu`: the
+  tool may be a row in its panel's list, where a popup of its own would close the list (egui keeps one popup open).
 - **A palette or a window** that docks or floats goes through `dock.rs`; settings the user keeps go in `settings.rs`
   (`settings.json`), never in a project.
 - **The 3D view has two painters**: the core's software picture and the card's (`gpu.rs`, `gpu.wgsl`; the design is in

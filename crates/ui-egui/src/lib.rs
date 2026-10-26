@@ -2825,7 +2825,7 @@ impl BimApp {
                 pal().icon,
                 Stroke::NONE,
             ));
-            Popup::menu(&r).show(|ui| self.theme_choices(ui, true));
+            ribbon::choices(ui, &r, false, |ui| self.theme_choices(ui, true));
             // A plan's or a section's crop region: on to what it shows, or off.
             let view = match self.sheet {
                 Sheet::Plan(id) | Sheet::Section(id) => Some(id),
@@ -2849,7 +2849,7 @@ impl BimApp {
             }
             let tip = "Duplicate View (DP): a new plan of this level with its own annotation; with detailing, it starts with this plan's; as a dependent, it follows this plan's range and graphics";
             let r = ui.add_enabled_ui(self.plan_key().is_some(), |ui| big_button(ui, Icon::Copy, "Duplicate View", false, tip)).inner;
-            Popup::menu(&r).show(|ui| {
+            ribbon::choices(ui, &r, false, |ui| {
                 for (label, mode) in
                     [("Duplicate", "duplicate"), ("Duplicate with Detailing", "detailing"), ("Duplicate as Dependent", "dependent")]
                 {
@@ -2867,7 +2867,7 @@ impl BimApp {
                 self.set_tool(Tool::Elevation);
             }
             let r = big_button(ui, Icon::Schedule, "Schedules", false, "Make a schedule, or open one");
-            Popup::menu(&r).show(|ui| {
+            ribbon::choices(ui, &r, false, |ui| {
                 if ui.button(t("Schedule/Quantities…")).clicked() {
                     self.new_schedule = Some(properties::NewSchedule::default());
                 }
@@ -2899,7 +2899,7 @@ impl BimApp {
             let r = ui.add_enabled_ui(sheet.is_some(), |ui| big_button(ui, Icon::PlaceView, "Place View", false, tip)).inner;
             if let Some(sheet) = sheet {
                 let views = self.unplaced_views();
-                Popup::menu(&r).show(|ui| {
+                ribbon::choices(ui, &r, false, |ui| {
                     if views.is_empty() {
                         ui.label(t("Every view is on a sheet."));
                     }
@@ -2924,7 +2924,7 @@ impl BimApp {
             }
             let tip = "Show or hide the palettes, and pick the interface's language";
             let r = big_button(ui, Icon::Interface, "User Interface", false, tip);
-            Popup::menu(&r).show(|ui| {
+            ribbon::choices(ui, &r, false, |ui| {
                 for p in dock::Palette::ALL {
                     let mut on = self.docking.shown(p);
                     if ui.checkbox(&mut on, t(p.name())).changed() {
@@ -2995,21 +2995,20 @@ impl BimApp {
             let now = self.session.model.units;
             let tip = tf("Project Units (UN): how lengths show and read; now {}", &[&t(now.label()).to_lowercase()]);
             let r = big_button(ui, Icon::Units, "Project Units", false, &tip);
-            if std::mem::take(&mut self.open_units) {
-                Popup::open_id(ui.ctx(), Popup::default_response_id(&r));
-            }
-            Popup::menu(&r).show(|ui| {
+            let asked = self.open_units;
+            let opened = ribbon::choices(ui, &r, asked, |ui| {
                 for u in Units::ALL {
                     if ui.selectable_label(u == now, t(u.label())).clicked() {
                         self.run("units", json!({"length": u.name()}));
                     }
                 }
             });
+            self.open_units &= !opened;
             // What the drawings say, and how new things are named.
             let now = self.session.model.language;
             let tip = tf("Project Language: what the drawings say and how new things are named; now {}", &[now.label()]);
             let r = big_button(ui, Icon::Text, "Project Language", false, &tip);
-            Popup::menu(&r).show(|ui| {
+            ribbon::choices(ui, &r, false, |ui| {
                 for l in Language::ALL {
                     if ui.selectable_label(l == now, l.label()).clicked() {
                         self.run("language", json!({"code": l.code()}));
@@ -3026,7 +3025,7 @@ impl BimApp {
         panel(ui, "Family Editor", |ui| {
             let tip = "New Family: start a family of your own, of a category, to edit its parameters, types and forms";
             let r = big_button(ui, Icon::FamilyEditor, "New Family", false, tip);
-            Popup::menu(&r).show(|ui| {
+            ribbon::choices(ui, &r, false, |ui| {
                 for c in editor::CATEGORIES {
                     if ui.button(editor::category_label(c)).clicked() {
                         self.new_family(c);
