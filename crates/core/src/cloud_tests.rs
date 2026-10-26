@@ -537,13 +537,13 @@ fn project_file(n: usize) -> Value {
 }
 
 #[test]
-fn a_file_of_format_4_that_holds_scans_opens_as_5_and_a_file_of_5_is_one_a_4_refuses() {
-    // Builds before 5 saved scans as format 4 (PRs 61 to 72); those files open, and are 5 once read.
+fn a_file_of_format_4_that_holds_scans_opens_as_6_and_a_file_of_5_is_one_a_4_refuses() {
+    // Builds before 5 saved scans as format 4 (PRs 61 to 72); those files open, and are 6 once read.
     let mut file = project_file(2);
-    assert_eq!(file["format"], 5);
+    assert_eq!(file["format"], 6);
     file["format"] = json!(4);
     let (m, left_out) = crate::model::Model::read(&file.to_string()).unwrap();
-    assert_eq!((m.format, m.clouds.len(), left_out.len()), (5, 2, 0));
+    assert_eq!((m.format, m.clouds.len(), left_out.len()), (6, 2, 0));
 }
 
 #[test]

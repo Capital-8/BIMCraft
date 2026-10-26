@@ -163,7 +163,8 @@ pub static ALL: &[Command] = &[
          [[x,y],[x,y]], structural?} a slab (a structural one with `structural`, as Revit's Floor: Structural), its top at the level, or `offset` mm above it, open through `openings` (holes inside it, apart); no boundary = the outline \
          of the level's walls along their centre lines, open over each loop of them standing free inside, joined to none of \
          the outer ones and with no room in it (a courtyard). Sloped: its top rises `slope` degrees (negative, falls) along \
-         the slope arrow, from its tail, where it's at the offset, toward its head",
+         the slope arrow, from its tail, where it's at the offset, toward its head. Its top's model pattern starts at \
+         `pattern_origin` and turns by `pattern_angle` (see modify)",
         floor,
     ),
     edit(
@@ -690,7 +691,10 @@ pub static ALL: &[Command] = &[
         "modify",
         "Modify",
         &[],
-        "{id | ids: [id,…], …fields} change fields as `elements` shows them, of one element or several; `level` and `top_level` may be names",
+        "{id | ids: [id,…], …fields} change fields as `elements` shows them, of one element or several; `level` and `top_level` may be names. \
+         A filled region's or a floor's model pattern is set by `pattern_origin` [x, y], plan mm, where its lines start, and \
+         `pattern_angle`, degrees counter-clockwise (both shown by `elements`); to put a pattern line of one on a reference \
+         line, Model::align_pattern gives the `pattern_origin` that does",
         modify,
     ),
     edit(
@@ -886,8 +890,9 @@ pub static ALL: &[Command] = &[
         &["LW"],
         "{view?, id, at: [x, y], style? | invisible?: true, remove?: true} Revit's Linework: the edge of element `id` that a \
          plan (`view`, a level's or a plan view; the lowest level's by default) draws nearest `at` (within 200 mm), drawn in \
-         that view only in line style `style`, or not at all with `invisible`; `remove` takes it off that edge again. It \
-         returns the edge, `from` and `to`",
+         that view only in line style `style`, or not at all with `invisible`; `remove` takes the Linework nearest `at` off \
+         that edge again (one edge, even where another lies within reach). A view holds at most 2000 edges. It returns the \
+         edge, `from` and `to`, or with `remove` how many were `removed`",
         linework,
     ),
     edit(
@@ -897,8 +902,9 @@ pub static ALL: &[Command] = &[
         "{path | text, replace?: false} the fill patterns of a PAT file (AutoCAD's and Revit's), from the file at `path` or \
          as `text`: each `*Name` and its families of lines, in mm unless the file says `;%UNITS=INCH`, drafting unless a \
          pattern says `;%TYPE=MODEL`. A pattern the project already has is left as it is unless `replace`; one that can't \
-         be a pattern (no lines, an offset of 0, too many families) is left out. It returns those `imported` and those \
-         `left_out`, each with why",
+         be a pattern (no lines, an offset of 0, dashes that are all spaces, too many families) is left out. A file is read \
+         up to its first 2000 patterns. It returns those `imported`, those `left_out` (the first 100, each with why) and \
+         `left_out_count`, all of them",
         import_fill_patterns,
     ),
     other(
@@ -928,7 +934,8 @@ pub static ALL: &[Command] = &[
          elevation or a sheet, in its own terms; the lowest plan by default): the loops its sketch closes into (see \
          `sketch`: any number of outlines, a loop inside one a hole, one inside that an island), filled as type `type` \
          (Solid Black unless told) says, its boundary in line style `line_style` (Thin Lines unless told; null, unseen: a \
-         masking region's way). It draws over the model, under the annotation; edit its sketch with edit_boundary",
+         masking region's way). It draws over the model, under the annotation; edit its sketch with edit_boundary. A model \
+         pattern starts at the region's `pattern_origin` and turns by its `pattern_angle` (see modify)",
         filled_region,
     ),
     edit(
@@ -955,7 +962,8 @@ pub static ALL: &[Command] = &[
         &[],
         "{type, start: [x,y], end: [x,y], spacing, mirrored?, view?} detail group `type` repeated along the line from \
          `start` to `end`, every `spacing` mm from `start` (at most 2000 of them), each turned along the line, as Revit's \
-         Repeating Detail Component: brick coursing, blocking, batt ties. Returns {id, count}",
+         Repeating Detail Component: brick coursing, blocking, batt ties. A view draws up to 10000 group members in all (a \
+         repeat places each member of the type again), so a type of 100 members repeats up to 100 times. Returns {id, count}",
         repeating_detail,
     ),
     edit(
@@ -987,7 +995,9 @@ pub static ALL: &[Command] = &[
          or a sheet by number (paper mm). It draws in line style `style` (Thin Lines unless told), only in its view, and \
          goes with it; with `insulation`, a width in mm, it draws as batt insulation along its curve, as Revit's Insulation; \
          with `centre_mark` true, a small cross marks the centre of its arcs, circle or ellipse; with `cloud`, an arc length \
-         in mm, it draws as a revision cloud's scallops along it (outward round a loop), of `revision` (any text)",
+         in mm, it draws as a revision cloud's scallops along it (outward round a loop, a scallop ending at each corner), of \
+         `revision` (any text, a label kept with the cloud and listed by `elements`; nothing else reads it); a line is \
+         insulation or a cloud, not both",
         detail_line,
     ),
     edit(
@@ -1679,6 +1689,9 @@ pub fn element_json(m: &Model, id: Id) -> Value {
             let (lo, hi) =
                 f.boundary.iter().map(|q| top.at(*q)).fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), z| (lo.min(z), hi.max(z)));
             extra.insert("top".into(), json!([hundredth(lo), hundredth(hi)]));
+            // Where its top's model pattern starts and how far it's turned: shown at their defaults too, to be set by modify.
+            extra.insert("pattern_origin".into(), json!(f.pattern_origin));
+            extra.insert("pattern_angle".into(), json!(f.pattern_angle));
         }
         Element::Ceiling(cl) => {
             let left: f64 = m.ceiling_slabs(cl).iter().map(|(face, rise)| area(&m.less_shafts(face, *rise).0)).sum();
@@ -1723,6 +1736,8 @@ pub fn element_json(m: &Model, id: Id) -> Value {
             let area = sketch::solve(&r.sketch).map_or(0.0, |p| p.area());
             extra.insert("area_m2".into(), json!(m2(area)));
             extra.insert("level".into(), json!(m.level_of(e)));
+            extra.insert("pattern_origin".into(), json!(r.pattern_origin));
+            extra.insert("pattern_angle".into(), json!(r.pattern_angle));
         }
         Element::DetailLine(l) => {
             let length = l.curve.length();
@@ -7071,6 +7086,20 @@ fn line_style(s: &mut Session, p: &Value) -> R {
         if let Some((id, _)) = m.elements.iter().find(|(_, e)| lineworked(e)) {
             return Err(bad(c, format!("view {id} draws an edge in `{name}` with Linework; take it off first")));
         }
+        // What a filled region or a detail group's member is drawn in: the style is kept, and the error says where.
+        let uses = |e: &Element| match e {
+            Element::DetailLine(l) => l.style == name,
+            Element::FilledRegion(r) => {
+                r.line_style.as_deref() == Some(name.as_str()) || r.sketch.iter().any(|l| l.style.as_deref() == Some(name.as_str()))
+            }
+            _ => false,
+        };
+        if let Some((id, _)) = m.elements.iter().find(|(_, e)| matches!(e, Element::FilledRegion(_)) && uses(e)) {
+            return Err(bad(c, format!("filled region {id} is bounded in `{name}`; give it another line style first")));
+        }
+        if let Some((group, _)) = m.detail_groups.iter().find(|(_, g)| g.members.iter().any(|x| uses(&x.element))) {
+            return Err(bad(c, format!("detail group `{group}` has a member drawn in `{name}`; ungroup it and change that member first")));
+        }
         return Ok(json!({"deleted": name}));
     }
     let mut style = match (m.line_styles.get(&name), p.get("pen")) {
@@ -7199,8 +7228,13 @@ fn linework(s: &mut Session, p: &Value) -> R {
     if remove {
         let g =
             s.model_mut().elements.get_mut(source).and_then(graphics::graphics_mut).ok_or_else(|| bad(c, "that view has no graphics"))?;
+        // The edge nearest `at`, and no other: both faces of a thin wall lie within reach of one pick.
+        let dist = |l: &graphics::Linework| geom::dist_to_segment(at, l.from, l.to);
+        let nearest = g.linework.iter().filter(|l| l.element == guid).map(dist).fold(f64::INFINITY, f64::min);
         let before = g.linework.len();
-        g.linework.retain(|l| l.element != guid || geom::dist_to_segment(at, l.from, l.to) > LINEWORK_REACH);
+        if nearest <= LINEWORK_REACH {
+            g.linework.retain(|l| l.element != guid || dist(l) > nearest + 1e-3);
+        }
         return Ok(json!({"removed": before - g.linework.len()}));
     }
     let (from, to) = render::edge_at(m, key, id, at, LINEWORK_REACH).ok_or_else(|| {
@@ -7220,24 +7254,35 @@ fn import_fill_patterns(s: &mut Session, p: &Value) -> R {
     let c = "import_fill_patterns";
     only(c, p, &["path", "text", "replace"])?;
     let replace = flag(c, p, "replace")?;
-    let read = match (string(c, p, "path")?, string(c, p, "text")?) {
+    // A PAT file's text is far longer than a name: `text` takes as much as a file does (`pat::read` refuses more).
+    let text = match p.get("text") {
+        Some(Value::String(t)) => Some(t.as_str()),
+        Some(v) if !v.is_null() => return Err(bad(c, "`text` must be the text of a PAT file")),
+        _ => None,
+    };
+    let read = match (string(c, p, "path")?, text) {
         (Some(path), None) => crate::pat::read_file(&PathBuf::from(path)),
-        (None, Some(text)) => crate::pat::read(&text),
+        (None, Some(text)) => crate::pat::read(text),
         _ => return Err(bad(c, "give `path`, a PAT file, or its `text`")),
     }
     .map_err(|e| bad(c, e))?;
     let m = s.model_mut();
-    let (mut imported, mut left_out) = (Vec::new(), Vec::new());
+    // A hostile file may leave out thousands: the reply names the first few and counts them all.
+    let (mut imported, mut left_out, mut count) = (Vec::new(), Vec::new(), read.left_out_count);
     for (name, pattern) in read.patterns {
         if m.fill_patterns.contains_key(&name) && !replace {
-            left_out.push(json!({"name": name, "why": "the project has a pattern of that name"}));
+            count += 1;
+            if left_out.len() < crate::pat::MAX_LEFT_OUT {
+                left_out.push(json!({"name": name, "why": "the project has a pattern of that name"}));
+            }
             continue;
         }
         m.fill_patterns.insert(name.clone(), pattern);
         imported.push(name);
     }
-    left_out.extend(read.left_out.into_iter().map(|(name, why)| json!({"name": name, "why": why})));
-    Ok(json!({"imported": imported, "left_out": left_out}))
+    let room = crate::pat::MAX_LEFT_OUT.saturating_sub(left_out.len());
+    left_out.extend(read.left_out.into_iter().take(room).map(|(name, why)| json!({"name": name, "why": why})));
+    Ok(json!({"imported": imported, "left_out": left_out, "left_out_count": count}))
 }
 
 fn export_fill_patterns(s: &mut Session, p: &Value) -> R {

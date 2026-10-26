@@ -64,6 +64,8 @@ pub const MAX_ENTRIES: usize = 100_000;
 pub const MAX_APPLIED: usize = 32;
 pub const MAX_FILTERS: usize = 64;
 pub const MAX_TEMPLATES: usize = 64;
+/// The most edges of Linework a view holds: each is split out of its element's lines when the view is drawn.
+pub const MAX_LINEWORK: usize = 2000;
 
 /// How much a view draws of what it cuts. Coarse: the cut in one poché, an opening only its gap and jambs. Medium: a
 /// compound element's layers, each a fill with a line between, and an opening's leaf, swing and glass. Fine: the layers'
@@ -440,6 +442,23 @@ impl Graphics {
         }
         for (id, o) in &self.elements {
             o.check(&format!("element {id}"))?;
+        }
+        if self.linework.len() > MAX_LINEWORK {
+            return Err(format!(
+                "it has {} edges of Linework; a view holds up to {MAX_LINEWORK}, so take some off (linework with remove)",
+                self.linework.len()
+            ));
+        }
+        for (i, l) in self.linework.iter().enumerate() {
+            let ends = [l.from, l.to];
+            if !ends.iter().all(|p| p.is_finite() && p.0.abs() <= crate::model::MAX_COORD && p.1.abs() <= crate::model::MAX_COORD) {
+                return Err(format!("Linework edge {i}: its ends are numbers within {} mm", crate::model::MAX_COORD));
+            }
+            if let Some(st) = &l.style
+                && !m.line_styles.contains_key(st)
+            {
+                return Err(format!("Linework edge {i}: there's no line style `{st}`{}", known(m.line_styles.keys())));
+            }
         }
         let mut seen = BTreeSet::new();
         for a in &self.filters {

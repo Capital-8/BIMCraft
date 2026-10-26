@@ -254,6 +254,8 @@ impl DetailLine {
             Some(a) if !(a.is_finite() && a > crate::model::TOL && a <= MAX_INSULATION) => {
                 Err(format!("{who}: its cloud's arcs are {a} mm long; they're more than 1 mm and at most {MAX_INSULATION}"))
             }
+            // Two ways to draw one line: the insulation would win and the cloud go unseen.
+            Some(_) if self.insulation.is_some() => Err(format!("{who}: it is insulation or a revision cloud, not both")),
             _ => Ok(()),
         }?;
         match &self.revision {
@@ -293,15 +295,43 @@ pub fn cloud(c: &Curve, arc: f64) -> Vec<crate::geom::P2> {
         true => SCALLOP,
         false => -SCALLOP,
     };
-    let n = (walk.total / arc).round().clamp(if closed { 3.0 } else { 1.0 }, (crate::curves::MAX_DRAWN / 8) as f64) as usize;
+    // Where its way turns sharply (a rectangle's corners) a scallop ends, so none cuts across a corner; a curve with more
+    // corners than the cap below allows is scalloped evenly instead.
+    let (min, most) = (if closed { 3 } else { 1 }, crate::curves::MAX_DRAWN / SCALLOP_POINTS);
+    let mut stops = vec![0.0];
+    for (i, w) in walk.pts.windows(3).enumerate() {
+        if (w[1] - w[0]).unit().dot((w[2] - w[1]).unit()) < 0.9 {
+            stops.push(walk.along[i + 1]);
+        }
+    }
+    stops.push(walk.total);
+    let mut cuts = Vec::new();
+    for span in stops.windows(2).filter(|s| s[1] - s[0] > 1e-9) {
+        let n = ((span[1] - span[0]) / arc).round().max(1.0) as usize;
+        cuts.extend((0..n).map(|k| span[0] + (span[1] - span[0]) * k as f64 / n as f64));
+    }
+    cuts.push(walk.total);
+    if cuts.len() - 1 < min || cuts.len() - 1 > most {
+        let n = ((walk.total / arc).round() as usize).clamp(min, most);
+        cuts = (0..=n).map(|k| walk.total * k as f64 / n as f64).collect();
+    }
+    // Each scallop draws within its share of the points a curve may draw.
+    let share = (crate::curves::MAX_DRAWN / (cuts.len() - 1)).max(2);
     let mut out = Vec::new();
-    for k in 0..n {
-        let (a, b) = (walk.at(walk.total * k as f64 / n as f64).0, walk.at(walk.total * (k + 1) as f64 / n as f64).0);
-        let pts = Curve::arc(a, b, sweep).points();
+    for (k, w) in cuts.windows(2).enumerate() {
+        let (a, b) = (walk.at(w[0]).0, walk.at(w[1]).0);
+        let mut pts = Curve::arc(a, b, sweep).points();
+        if pts.len() > share {
+            let last = pts.len() - 1;
+            pts = (0..share).map(|i| pts[i * last / (share - 1)]).collect();
+        }
         out.extend(pts.into_iter().skip(usize::from(k > 0)));
     }
     out
 }
+
+/// The points a scallop gets at least, so a cloud of more scallops than the points allow is made of fewer, larger ones.
+const SCALLOP_POINTS: usize = 8;
 
 /// A curve's drawn points with how far along it each lies, to find a point and its way at any distance.
 struct Walk {
@@ -325,7 +355,8 @@ impl Walk {
     /// The point `s` along, and the way it runs there.
     fn at(&self, s: f64) -> (crate::geom::P2, crate::geom::P2) {
         let s = s.clamp(0.0, self.total);
-        let i = self.along.iter().position(|a| *a >= s).unwrap_or(self.along.len() - 1).max(1);
+        // `along` only grows: the first stretch that reaches `s`.
+        let i = self.along.partition_point(|a| *a < s).min(self.along.len() - 1).max(1);
         let (a, b) = (self.pts[i - 1], self.pts[i]);
         let span = (self.along[i] - self.along[i - 1]).max(f64::MIN_POSITIVE);
         let k = ((s - self.along[i - 1]) / span).clamp(0.0, 1.0);

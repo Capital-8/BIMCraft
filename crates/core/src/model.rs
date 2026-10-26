@@ -63,7 +63,11 @@ pub const CEILING_CUT: f64 = 2300.0;
 pub const CEILING_HEIGHT: f64 = 2600.0;
 /// The steepest slope a floor or a roof may have, degrees.
 pub const MAX_SLOPE: f64 = 75.0;
-/// The version of the project file this build writes, and the newest it reads. 5: a project holds scans (`clouds`, library
+/// The version of the project file this build writes, and the newest it reads. 6: a project holds detailing (library kinds
+/// `line-pattern`, `line-style`, `fill-pattern`, `filled-region-type` and `detail-group`; the elements `line`, `region`,
+/// `detailgroup` and `repeatingdetail`; sketch parts; the model keys `line_styles`, `fill_patterns` and `region_types`);
+/// nothing in a file of 5 changes, but a build that reads up to 5 would answer one of 6 with a serde error ("isn't a kind of
+/// library entry", "unknown variant"), not "saved by a newer BIMCraft". 5: a project holds scans (`clouds`, library
 /// entries of kind `Cloud`) and point clouds place them; nothing in a file of 4 changes, but a build that reads up to 4 would
 /// answer one of 5 with a serde error, not "saved by a newer BIMCraft". 4: a line weight is a pen (0 to 16), not
 /// pixels of a sheet's drawing. 3: a type's layers and a family's forms and
@@ -71,7 +75,7 @@ pub const MAX_SLOPE: f64 = 75.0;
 /// 2: the library has ids and GUIDs too
 /// (`library`), and what names a library entry holds its GUID. 1: elements have GUIDs, ids six digits, and what points at
 /// an element holds its GUID. None (0): a file from before.
-pub const FORMAT: u32 = 5;
+pub const FORMAT: u32 = 6;
 /// How far past the model a level reaches without an extent of its own, mm.
 pub const LEVEL_PAST: f64 = 1000.0;
 
@@ -2162,6 +2166,21 @@ impl Model {
                 }
             }
         }
+        // A detail group's members are elements too, held by their type, and are looked into the same way.
+        if let Some(Value::Object(groups)) = v.get_mut("detail_groups") {
+            for (name, group) in groups.iter_mut() {
+                let Some(Value::Array(members)) = group.get_mut("members") else { continue };
+                for (i, member) in members.iter_mut().enumerate() {
+                    let Some(e) = member.get_mut("element") else { continue };
+                    let mut bare = e.clone();
+                    let category = bare.as_object_mut().and_then(|o| o.remove("category"));
+                    for p in lenient::element(category.as_ref().and_then(Value::as_str).unwrap_or(""), &bare) {
+                        lenient::remove(e, &p);
+                        left_out.push(format!("/detail_groups/{}/members/{i}/element{p}", lenient::escaped(name)));
+                    }
+                }
+            }
+        }
         if v.is_object() {
             v["elements"] = Value::Object(serde_json::Map::new());
             let found = lenient::unknown::<Model>(&v);
@@ -2206,6 +2225,8 @@ impl Model {
         }
         self.next_id = self.next_id.max(FIRST_ID);
         // 4 to 5 (scans, and the point clouds that place them) has no step: a file of 4 holds none of it, or holds it as 5 does.
+        // 5 to 6 (detailing: lines, regions, groups, repeating details, line and fill styles) has none either: a file of 5 holds
+        // none of it, so reading it as 6 changes nothing.
         self.format = FORMAT;
     }
 
@@ -2234,6 +2255,27 @@ impl Model {
         }
         self.next_id = id + 1;
         id
+    }
+
+    /// Where element `id`'s model pattern starts (its `pattern_origin`) once its pattern line `line` lies on `reference`:
+    /// the origin moved across by the gap between the two, which must run the same way (plan mm, a line by its two ends).
+    /// What Align on a pattern asks of the model; set the answer with `modify`. A filled region or a floor has a pattern to
+    /// align; the error says what else is wrong.
+    pub fn align_pattern(&self, id: Id, reference: (P2, P2), line: (P2, P2)) -> Result<P2, String> {
+        let origin = match self.elements.get(id) {
+            Some(Element::FilledRegion(r)) => r.pattern_origin,
+            Some(Element::Floor(f)) => f.pattern_origin,
+            Some(e) => return Err(format!("{} {id} has no model pattern to align; a filled region or a floor has", e.category())),
+            None => return Err(format!("no element {id}")),
+        };
+        if [reference, line].iter().any(|(a, b)| !(a.is_finite() && b.is_finite()) || a.dist(*b) < TOL) {
+            return Err("align: a line of no length, or no number, can't be aligned to".into());
+        }
+        if !crate::geom::parallel(reference.0, reference.1, line.0, line.1) {
+            return Err("align: the lines aren't parallel".into());
+        }
+        let across = (reference.1 - reference.0).unit().perp();
+        Ok(crate::commands::micron(origin + across * (reference.0 - line.0).dot(across)))
     }
 
     /// Element `k` as messages name it: its id, or, when the project hasn't it, what `k` is.
@@ -3722,6 +3764,8 @@ impl Model {
         let mut placed: BTreeMap<Guid, Guid> = BTreeMap::new();
         // Openings by host wall: (start, end, id) along it.
         let mut spans: BTreeMap<Guid, Vec<(f64, f64, Id)>> = BTreeMap::new();
+        // The members each view's detail groups and repeating details place.
+        let mut members_placed: BTreeMap<Guid, usize> = BTreeMap::new();
         for (&id, e) in &self.elements {
             let who = format!("{} {id}", e.category());
             let level_ok = |l: Guid| self.level(l).map(|_| ()).ok_or(format!("{who}: level {} doesn't exist", self.shown(l)));
@@ -3985,10 +4029,11 @@ impl Model {
                     view_ok(g.view, true)?;
                     point(&who, g.at)?;
                     coord(&format!("{who} angle"), g.angle)?;
-                    if !self.detail_groups.contains_key(&g.type_name) {
+                    let Some(t) = self.detail_groups.get(&g.type_name) else {
                         let there: Vec<&str> = self.detail_groups.keys().map(String::as_str).collect();
                         return Err(format!("{who}: there's no detail group `{}` (there are: {})", g.type_name, there.join(", ")));
-                    }
+                    };
+                    placing(&who, &mut members_placed, g.view, t.members.len())?;
                 }
                 Element::RepeatingDetail(r) => {
                     view_ok(r.view, true)?;
@@ -4003,10 +4048,11 @@ impl Model {
                             crate::groups::MAX_REPEATS
                         ));
                     }
-                    if !self.detail_groups.contains_key(&r.type_name) {
+                    let Some(t) = self.detail_groups.get(&r.type_name) else {
                         let there: Vec<&str> = self.detail_groups.keys().map(String::as_str).collect();
                         return Err(format!("{who}: there's no detail group `{}` (there are: {})", r.type_name, there.join(", ")));
-                    }
+                    };
+                    placing(&who, &mut members_placed, r.view, t.members.len().saturating_mul(r.count()))?;
                 }
                 Element::PointCloud(pc) => {
                     if !self.clouds.contains_key(&pc.cloud) {
@@ -4419,6 +4465,21 @@ fn size(what: &str, v: f64) -> Result<(), String> {
 fn point(who: &str, p: P2) -> Result<(), String> {
     coord(&format!("{who} x"), p.0)?;
     coord(&format!("{who} y"), p.1)
+}
+
+/// `n` more members placed in `view` (by a detail group or a repeating detail), of the `placed` already: an error naming
+/// `who` when the view would draw more than [`crate::groups::MAX_PLACED`] of them.
+fn placing(who: &str, placed: &mut BTreeMap<Guid, usize>, view: Guid, n: usize) -> Result<(), String> {
+    let total = placed.entry(view).or_default();
+    *total = total.saturating_add(n);
+    match *total > crate::groups::MAX_PLACED {
+        true => Err(format!(
+            "{who}: its view would draw {total} group members (a group places each of its type's members, a repeating detail \
+             once for each repeat); a view draws up to {}, so use fewer repeats or a smaller group",
+            crate::groups::MAX_PLACED
+        )),
+        false => Ok(()),
+    }
 }
 
 /// A crop region from its corner `a` to `b`: finite, and `a` south-west of `b` (in a section, below

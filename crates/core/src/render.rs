@@ -2440,9 +2440,11 @@ fn segments(pts: &[(f32, f32)], closed: bool) -> Vec<((f32, f32), (f32, f32))> {
 }
 
 /// The view's Linework: each edge it lists drawn in its line style, or not at all, where its element draws a line along it
-/// (within a pixel of it, as far as the two overlap); the rest of the element's lines as they were.
+/// (within a pixel of it, as far as the two overlap); the rest of the element's lines as they were. One pass over the
+/// drawing: an element's lines are split along its edges one after another, in the order the view lists them.
 fn linework(d: &mut Drawing, m: &Model, items: &[crate::graphics::Linework]) {
     let px_per_mm = sheet::DENSITY as f32 * d.paper;
+    let mut edges: std::collections::HashMap<Id, Vec<Edge>> = std::collections::HashMap::new();
     for l in items {
         let Some(id) = m.elements.id(l.element) else { continue };
         let style = l.style.as_ref().and_then(|n| m.line_styles.get(n)).map(|st| {
@@ -2457,61 +2459,82 @@ fn linework(d: &mut Drawing, m: &Model, items: &[crate::graphics::Linework]) {
         if len < 1e-3 {
             continue;
         }
-        let u = (b - a) * (1.0 / len);
-        let prims = std::mem::take(&mut d.prims);
-        let (owners, parts, pens) = (std::mem::take(&mut d.owners), std::mem::take(&mut d.parts), std::mem::take(&mut d.pens));
-        for (((prim, owner), part), pen) in prims.into_iter().zip(owners).zip(parts).zip(pens) {
-            let mine = owner == Some(id) && !matches!(part, Part::Text | Part::Pattern);
-            let Prim::Line { pts, width, color, dash, closed } = &prim else {
-                keep(d, prim, owner, part, pen);
-                continue;
-            };
-            // Each piece of the line, split where the edge begins and ends along it, marked when it lies on the edge.
-            let mut runs: Vec<(bool, Vec<(f32, f32)>)> = Vec::new();
-            let mut put = |on: bool, p: P2, q: P2| {
-                let (p, q) = ((p.0 as f32, p.1 as f32), (q.0 as f32, q.1 as f32));
-                match runs.last_mut() {
-                    Some((was, run)) if *was == on && run.last() == Some(&p) => run.push(q),
-                    _ => runs.push((on, vec![p, q])),
-                }
-            };
-            for (p, q) in segments(pts, *closed) {
-                let (p, q) = (pt(p), pt(q));
-                let across = |r: P2| (r - a).cross(u).abs();
-                let (sp, sq) = ((p - a).dot(u), (q - a).dot(u));
-                let (lo, hi) = (sp.min(sq).max(0.0), sp.max(sq).min(len));
-                if !mine || across(p) > 1.0 || across(q) > 1.0 || hi - lo < 0.5 {
-                    put(false, p, q);
-                    continue;
-                }
-                // Along from p: before the edge, on it, after it.
-                let at = |s: f64| p + (q - p) * ((s - sp) / (sq - sp));
-                let (s0, s1) = if sp <= sq { (lo, hi) } else { (hi, lo) };
-                let (x0, x1) = (at(s0), at(s1));
-                if p.dist(x0) > 0.01 {
-                    put(false, p, x0);
-                }
-                put(true, x0, x1);
-                if x1.dist(q) > 0.01 {
-                    put(false, x1, q);
-                }
-            }
-            if !runs.iter().any(|(on, _)| *on) {
-                keep(d, prim, owner, part, pen);
-                continue;
-            }
-            for (on, run) in runs {
-                let line = match (on, &style) {
-                    (false, _) => (Prim::Line { pts: run, width: *width, color: *color, dash: dash.clone(), closed: false }, pen),
-                    (true, Some((p, c, k))) => {
-                        (Prim::Line { pts: run, width: *width, color: *c, dash: k.clone(), closed: false }, Some(*p))
-                    }
-                    (true, None) => continue,
-                };
-                keep(d, line.0, owner, part, line.1);
-            }
+        edges.entry(id).or_default().push(Edge { a, u: (b - a) * (1.0 / len), len, style });
+    }
+    if edges.is_empty() {
+        return;
+    }
+    let prims = std::mem::take(&mut d.prims);
+    let (owners, parts, pens) = (std::mem::take(&mut d.owners), std::mem::take(&mut d.parts), std::mem::take(&mut d.pens));
+    for (((prim, owner), part), pen) in prims.into_iter().zip(owners).zip(parts).zip(pens) {
+        let mine = owner.and_then(|id| edges.get(&id)).filter(|_| !matches!(part, Part::Text | Part::Pattern));
+        let (Some(mine), Prim::Line { .. }) = (mine, &prim) else {
+            keep(d, prim, owner, part, pen);
+            continue;
+        };
+        let mut pieces = vec![(prim, pen)];
+        for edge in mine {
+            pieces = pieces.into_iter().flat_map(|(prim, pen)| along(prim, pen, edge)).collect();
+        }
+        for (prim, pen) in pieces {
+            keep(d, prim, owner, part, pen);
         }
     }
+}
+
+/// An edge of Linework in pixels: its start `a`, the way it runs `u` for `len`, and the style it takes (none, unseen).
+struct Edge {
+    a: P2,
+    u: P2,
+    len: f64,
+    style: Option<(Pen, Rgb, Option<Vec<f32>>)>,
+}
+
+/// The line `prim`, split where `edge` begins and ends along it: the pieces on the edge in its style (gone, when it is
+/// unseen), the rest as they were. A line off the edge comes back whole.
+fn along(prim: Prim, pen: Option<Pen>, edge: &Edge) -> Vec<(Prim, Option<Pen>)> {
+    let Prim::Line { pts, width, color, dash, closed } = &prim else { return vec![(prim, pen)] };
+    let Edge { a, u, len, style } = edge;
+    // Each piece of the line, marked when it lies on the edge.
+    let mut runs: Vec<(bool, Vec<(f32, f32)>)> = Vec::new();
+    let mut put = |on: bool, p: P2, q: P2| {
+        let (p, q) = ((p.0 as f32, p.1 as f32), (q.0 as f32, q.1 as f32));
+        match runs.last_mut() {
+            Some((was, run)) if *was == on && run.last() == Some(&p) => run.push(q),
+            _ => runs.push((on, vec![p, q])),
+        }
+    };
+    for (p, q) in segments(pts, *closed) {
+        let (p, q) = (pt(p), pt(q));
+        let across = |r: P2| (r - *a).cross(*u).abs();
+        let (sp, sq) = ((p - *a).dot(*u), (q - *a).dot(*u));
+        let (lo, hi) = (sp.min(sq).max(0.0), sp.max(sq).min(*len));
+        if across(p) > 1.0 || across(q) > 1.0 || hi - lo < 0.5 {
+            put(false, p, q);
+            continue;
+        }
+        // Along from p: before the edge, on it, after it.
+        let at = |s: f64| p + (q - p) * ((s - sp) / (sq - sp));
+        let (s0, s1) = if sp <= sq { (lo, hi) } else { (hi, lo) };
+        let (x0, x1) = (at(s0), at(s1));
+        if p.dist(x0) > 0.01 {
+            put(false, p, x0);
+        }
+        put(true, x0, x1);
+        if x1.dist(q) > 0.01 {
+            put(false, x1, q);
+        }
+    }
+    if !runs.iter().any(|(on, _)| *on) {
+        return vec![(prim, pen)];
+    }
+    runs.into_iter()
+        .filter_map(|(on, run)| match (on, style) {
+            (false, _) => Some((Prim::Line { pts: run, width: *width, color: *color, dash: dash.clone(), closed: false }, pen)),
+            (true, Some((p, c, k))) => Some((Prim::Line { pts: run, width: *width, color: *c, dash: k.clone(), closed: false }, Some(*p))),
+            (true, None) => None,
+        })
+        .collect()
 }
 
 /// `prim` back in the drawing, with its owner, part and pen.

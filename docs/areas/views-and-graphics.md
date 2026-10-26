@@ -98,7 +98,11 @@ along its curve (loops the whole width across, `BULGE` times it apart), so it sp
 line does, and follows arcs and splines, which Revit's doesn't. Annotate > Detail > Insulation draws it, its Width on the
 Options Bar; Properties shows Insulation Width. A revision cloud is the same idea: a detail line with a `cloud` arc length (and
 a `revision`, any text) that `drawn` turns into scallops (`lines::cloud`, arcs of `SCALLOP` degrees bulging out of a loop
-whichever way round it was drawn, to the left of an open line). Annotate > Detail > Revision Cloud draws one, a rectangle by
+whichever way round it was drawn, to the left of an open line). A scallop ends at each corner where the way turns by more
+than about 25 degrees (so a rectangle's scallops never cut a corner) and, past 1,024 scallops or more corners than that
+allows, the scallops are even and fewer, each drawn within its share of `MAX_DRAWN` points. A line is a cloud or insulation
+(`DetailLine::check` refuses both). `revision` is a label: it is kept with the cloud and `elements` lists it, and no
+schedule reads it yet. Annotate > Detail > Revision Cloud draws one, a rectangle by
 default; with it a rectangle or a polygon is one cloud round (`curves::join`), and Line is one cloud through the points
 (`one_line`). `centre_mark` is Revit's Center Mark Visible: a 3 mm cross at each of `Curve::centres`, the Options Bar's Show
 Centre for new arcs and circles.
@@ -108,8 +112,11 @@ plan's `Graphics::linework` holds each as the element's GUID, the edge's two end
 `render::edge_at` finds the edge picked: the plan drawn again around the point without its linework, the nearest
 segment of the element's lines within `LINEWORK_REACH`. `render::linework` restyles, after `Look::dress`, the parts of the
 element's lines that lie along that edge (collinear within a pixel, over its length), so one face of a wall changes and the
-rest of its outline doesn't. Picked again, an edge's entry is replaced; `remove` takes it out (the desktop's `<By Category>`).
-A line style a view's linework uses can't be deleted, and an element's entries go with it.
+rest of its outline doesn't. Picked again, an edge's entry is replaced; `remove` takes out the one nearest the point (the desktop's
+`<By Category>`), not every edge within reach: both faces of a thin wall are. A view's linework is checked (`Graphics::check`):
+at most `MAX_LINEWORK` (2,000) edges, ends within `MAX_COORD`, and a line style the project has. The drawing splits an element's
+lines along all its edges in one pass (`render::linework`: the cost is the prims plus the edges, not a pass over every prim for
+each edge). A line style a view's linework uses can't be deleted, and an element's entries go with it.
 
 Detail groups (`groups.rs`) are Revit's: `create_group` (GP) makes the detail lines, filled regions and text notes given,
 all of one view, into a group type (`Model::detail_groups`) holding them as `Member`s about the middle of them, in no
@@ -121,8 +128,19 @@ origin, an angle and `mirrored`; `groups::placed` gives its members as elements 
 all owned by the group, so it picks, moves, rotates and mirrors as one. `ungroup` (UG) puts those elements back in the view;
 `group_type` renames a type (its groups follow) or deletes it while nothing is of it. A `RepeatingDetail` places a group
 along a line every `spacing` from its start, each turned along it (at most `MAX_REPEATS`), as Revit's Repeating Detail
-Component does with a detail component. On the desktop, Annotate > Detail has Detail Group, Repeating Detail and Create
-Group, and the right-click menu has Create Group and Ungroup.
+Component does with a detail component. A view draws every member of every group and repeat in it each time, so
+`Model::check` caps what one view places: a group counts its type's members, a repeating detail its members once for each
+repeat, and `MAX_PLACED` (10,000) is the most in a view (of big hatched regions it takes about half a second to draw in a debug
+build; the 200,000 it once allowed took 6 s and 30 million primitives). A member note keeps its own angle under a pure mirror
+(it still reads the right way round) and turns with the group's angle. The file holds a group's members as elements, and
+`Model::read` leaves out of them what this build doesn't know, as it does for any element
+(`/detail_groups/<name>/members/<i>/element/...`). Deleting a line style that a filled region or a group's member is drawn in
+is refused with the region's or the group's name. On the desktop, Annotate > Detail has Detail Group, Repeating Detail and
+Create Group, and the right-click menu has Create Group and Ungroup.
+
+A project with any of this (line styles and patterns, fill patterns, region types, detail lines, regions, groups, repeating
+details, sketches) is file format 6. A build that reads up to 5 would fail on it with a serde error, so 6 makes it say that the
+file is from a newer BIMCraft. Nothing in a file of 5 changes, so `Model::migrate` has no step for 5 to 6.
 
 The Options Bar's Offset puts a line, an arc or a polyline beside the points clicked; a rectangle, a polygon or a circle grows
 by it as a whole (`grown`, its corners joined), and a spline or an ellipse takes none (`Shape::offsets`). Modify's Offset takes
@@ -203,7 +221,13 @@ in the Options Bar), Properties (the Type Selector above the instance fields, Li
 region types and patterns as one draft, a simple pattern edited as an angle, a spacing and crosshatched or not, any pattern's
 families one by one with Edit Lines, and Import and Export of PAT files). `pat.rs` reads and writes PAT files (`;%UNITS`,
 `;%TYPE`, a negative offset stepping the other way; a pattern that can't be one left out with why) for the dialog and for the
-`import_fill_patterns` and `export_fill_patterns` commands.
+`import_fill_patterns` and `export_fill_patterns` commands. A PAT file is hostile input: `read` stops after `MAX_PATTERNS`
+(2,000) patterns and counts the rest, `Read::left_out` names the first `MAX_LEFT_OUT` (100) with `left_out_count` for all, a line
+is cut at 22 fields and a bad one is echoed to 40 letters, a family whose dashes are all spaces is left out, and a file over
+`MAX_TEXT` (16 MiB) is refused unread. A byte that isn't UTF-8 is read as the Latin-1 letter with its number, which is right
+for accents and not for Windows-1252's punctuation at 0x80 to 0x9F. The description after a pattern's name isn't kept. The
+`import_fill_patterns` command takes the file's `text` up to that size too (a name is limited to 256 letters, a file isn't) and
+replies with the first 100 `left_out` and `left_out_count`.
 
 Edit Type opens a region's Type Properties from either a selected region or an active sketch: select a type, create a
 new one, duplicate one with its settings, or rename it. Foreground and background each have their own pattern (including
@@ -241,7 +265,11 @@ pattern a material shows can't be deleted, and is renamed with it. `render::fill
 region, a cut layer (its courses along the layer) and a floor's or a ceiling's surface. A model pattern is aligned and
 rotated as Revit's: a filled region and a floor hold `pattern_origin` and `pattern_angle` (`fills::strokes_placed`), which
 Move, Rotate and Mirror carry with the element; Align with a pattern line picked second (`render::pattern_line_at`) moves the
-origin so that line lies on the reference, and Properties shows Pattern Angle.
+origin so that line lies on the reference, and Properties shows Pattern Angle. `Model::align_pattern(id, reference, line)` is
+that arithmetic (the origin moved across by the gap between the two parallel lines, to the micron; the error says when the
+element has no model pattern, or the lines aren't parallel or have no length), so every front end gets the same answer and
+sets it with `modify`. `pattern_origin` and `pattern_angle` are in the `modify`, `filled_region` and `floor` command docs, and
+`elements` shows them for a region and a floor even at their defaults.
 
 ## Linked models
 
