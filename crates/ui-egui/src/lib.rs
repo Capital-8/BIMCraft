@@ -34,6 +34,7 @@ mod phasing;
 mod properties;
 mod purge;
 pub mod recent;
+mod renames;
 pub mod revit;
 mod ribbon;
 mod section;

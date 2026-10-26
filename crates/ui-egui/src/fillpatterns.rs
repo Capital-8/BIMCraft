@@ -4,10 +4,14 @@
 //! edited as Revit's simple pattern: its angle, its spacing, crosshatched or not; any pattern's families, one by one, with
 //! Edit Lines (Revit's custom patterns, which it only imports). Patterns come in from a PAT file and go out to one.
 
+use std::collections::{BTreeMap, BTreeSet};
+use std::path::Path;
+
 use bimcraft_core::engine::Session;
 use bimcraft_core::fills::{self, FillPattern, FilledRegionType, HatchLine, MAX_SPACING, MIN_SPACING, Target};
 use bimcraft_core::geom::P2;
-use bimcraft_core::model::Model;
+use bimcraft_core::model::{Id, Model};
+use bimcraft_core::render::{PAPER, Rgb};
 use egui::{
     Align, Button, Checkbox, Color32, ComboBox, Context, DragValue, Grid, Id as UiId, Layout, Modal, RichText, ScrollArea, Sense, Stroke,
     TextEdit, Ui, WidgetInfo, WidgetType, pos2, vec2,
@@ -15,6 +19,8 @@ use egui::{
 use serde_json::{Value, json};
 
 use crate::lang::{t, tf};
+use crate::renames::{self, Row};
+use crate::style::{canvas_pal, pal};
 use crate::{BimApp, Status};
 
 /// The dialog's tabs.
@@ -49,8 +55,14 @@ pub(crate) struct FillPatternsDialog {
     /// The pattern whose families Edit Lines shows, and each family's dashes as typed.
     editing: Option<(usize, Vec<String>)>,
     /// Edit Type's current row and the instances to assign it to; None opens Manage's table.
-    subject: Option<(usize, Vec<bimcraft_core::model::Id>)>,
+    subject: Option<(usize, Vec<Id>)>,
     error: Option<String>,
+    /// What the last import or export said, and whether something went wrong or was left out.
+    note: Option<(String, bool)>,
+    /// Whether the patterns of a file replace those of the same name in the draft; else they are left out.
+    replace: bool,
+    /// The patterns and types the project held when this opened: a draft is not applied over a project that has changed since.
+    held: (BTreeMap<String, FillPattern>, BTreeMap<String, FilledRegionType>),
 }
 
 /// What the Patterns tab's buttons ask of the app: a file to import from, or to export to.
@@ -78,13 +90,13 @@ impl FillPatternsDialog {
             })
             .collect();
         let gone = vec![false; patterns.len()];
-        FillPatternsDialog { tab: 0, types, patterns, gone, editing: None, subject: None, error: None }
+        let held = (m.fill_patterns.clone(), m.region_types.clone());
+        FillPatternsDialog { tab: 0, types, patterns, gone, editing: None, subject: None, error: None, note: None, replace: false, held }
     }
 
-    /// The patterns a PAT file held, added to the draft (one of a name it has already takes its place): how many came.
-    pub(crate) fn import(&mut self, read: bimcraft_core::pat::Read) -> usize {
-        let n = read.patterns.len();
-        for (name, pattern) in read.patterns {
+    /// The patterns a PAT file held, added to the draft (one of a name it has already takes its place).
+    fn import(&mut self, patterns: Vec<(String, FillPattern)>) {
+        for (name, pattern) in patterns {
             match self.patterns.iter().enumerate().position(|(i, r)| !self.gone[i] && r.name == name) {
                 Some(i) => self.patterns[i].pattern = pattern,
                 None => {
@@ -93,7 +105,36 @@ impl FillPatternsDialog {
                 }
             }
         }
-        n
+    }
+
+    /// The PAT file at `path`, read by the `import_fill_patterns` command, so that one code path reads, caps and keeps or
+    /// replaces; it runs on a scratch project that holds the names of the draft's patterns, whose own keep what it brings.
+    /// What came into the draft and what was left out, said.
+    fn read(&mut self, path: &Path) -> Result<(String, bool), String> {
+        let mut scratch = Session::new();
+        let m = scratch.model_mut();
+        m.fill_patterns =
+            self.live().map(|(_, r)| r.name.trim()).filter(|n| !n.is_empty()).map(|n| (n.to_string(), FillPattern::default())).collect();
+        m.region_types.clear();
+        for x in m.materials.values_mut() {
+            (x.cut_pattern, x.surface_pattern) = (None, None);
+        }
+        let reply = scratch.execute("import_fill_patterns", &json!({"path": path.to_string_lossy(), "replace": self.replace}))?;
+        let names: Vec<&str> = reply["imported"].as_array().into_iter().flatten().filter_map(Value::as_str).collect();
+        let brought = names.iter().filter_map(|n| scratch.model.fill_patterns.get(*n).map(|p| (n.to_string(), p.clone()))).collect();
+        self.import(brought);
+        let out: Vec<String> = (reply["left_out"].as_array().into_iter().flatten())
+            .map(|l| format!("{} ({})", short(l["name"].as_str().unwrap_or_default()), short(l["why"].as_str().unwrap_or_default())))
+            .collect();
+        let n = names.len().to_string();
+        Ok(match out.len() {
+            0 => (tf("{} patterns imported.", &[&n]), false),
+            k => {
+                let list = out.iter().take(LEFT_OUT_SHOWN).cloned().collect::<Vec<_>>().join("; ");
+                let list = if k > LEFT_OUT_SHOWN { tf("{}; and {} more", &[&list, &(k - LEFT_OUT_SHOWN).to_string()]) } else { list };
+                (tf("{} patterns imported; left out: {}", &[&n, &list]), true)
+            }
+        })
     }
 
     /// The patterns as they are in the draft, for a PAT file.
@@ -102,11 +143,20 @@ impl FillPatternsDialog {
     }
 
     /// Open Edit Type for a region being placed or selected.
-    pub(crate) fn edit(m: &Model, name: &str, elements: Vec<bimcraft_core::model::Id>) -> Self {
+    pub(crate) fn edit(m: &Model, name: &str, elements: Vec<Id>) -> Self {
         let mut d = Self::new(m);
         let row = d.types.iter().position(|r| r.name == name).unwrap_or(0);
         d.subject = Some((row, elements));
         d
+    }
+
+    /// What stops the draft being applied: a project that changed since it was opened (an agent's command, say), whose
+    /// patterns and types the draft would undo or delete unseen; or a name left blank or used twice.
+    fn check(&self, m: &Model) -> Result<(), String> {
+        if self.held.0 != m.fill_patterns || self.held.1 != m.region_types {
+            return Err(t("The project changed while this window was open: Cancel, and open it again.").to_string());
+        }
+        self.validate_names()
     }
 
     /// Refuse name collisions before commands can accidentally update an existing definition.
@@ -130,6 +180,21 @@ impl FillPatternsDialog {
         self.patterns.iter().enumerate().filter(|(i, _)| !self.gone[*i])
     }
 
+    /// A type for New Type, in either view of the dialog: a name not in use, filled solid black as Revit's new types are.
+    fn new_type(&self) -> TypeRow {
+        let taken: Vec<&str> = self.types.iter().map(|s| s.name.as_str()).collect();
+        let solid = self.live().find(|(_, p)| p.name.as_str() == t(fills::SOLID_FILL) || p.name == fills::SOLID_FILL).map(|(i, _)| i);
+        TypeRow {
+            was: None,
+            name: fresh(t("Region Type"), &taken),
+            foreground: solid,
+            foreground_color: [0, 0, 0],
+            background: None,
+            background_color: [255, 255, 255],
+            masking: false,
+        }
+    }
+
     /// A type as the project would hold it, its patterns by their names in the draft.
     fn region_type(&self, r: &TypeRow) -> FilledRegionType {
         let name = |i: Option<usize>| i.and_then(|i| self.patterns.get(i)).map(|p| p.name.clone());
@@ -140,6 +205,17 @@ impl FillPatternsDialog {
             background_color: r.background_color,
             masking: r.masking,
         }
+    }
+}
+
+/// How many of the patterns a file left out the dialog names; the rest it counts.
+const LEFT_OUT_SHOWN: usize = 5;
+
+/// `text` cut to 40 characters, as a name or a reason is told in a message.
+fn short(text: &str) -> String {
+    match text.char_indices().nth(40) {
+        Some((i, _)) => format!("{}…", &text[..i]),
+        None => text.to_string(),
     }
 }
 
@@ -161,12 +237,10 @@ fn named_button(ui: &mut Ui, text: &str, name: String) -> bool {
     r.clicked()
 }
 
-/// A colour button named `name`.
+/// A colour button named `name`: red, green and blue only, since the alpha slider of an RGBA button premultiplies them.
 fn colour_field(ui: &mut Ui, rgb: &mut [u8; 3], name: String) {
-    let mut c = Color32::from_rgb(rgb[0], rgb[1], rgb[2]);
-    let r = ui.color_edit_button_srgba(&mut c);
+    let r = ui.color_edit_button_srgb(rgb);
     r.widget_info(|| WidgetInfo::labeled(WidgetType::ColorButton, true, name.clone()));
-    *rgb = [c.r(), c.g(), c.b()];
 }
 
 /// A swatch of `p`, `width` x 22 px, in `colour`: a drafting pattern at 5 px to its mm, a model one at a tenth of a px.
@@ -177,6 +251,10 @@ pub(crate) fn swatch(ui: &mut Ui, p: Option<&FillPattern>, width: f32, colour: C
 }
 
 fn paint_pattern(ui: &Ui, rect: egui::Rect, p: Option<&FillPattern>, colour: Color32) {
+    // Off the screen (a scroll area's rows past its edge) there is nothing to paint, and a long list is not worked out each frame.
+    if !ui.is_rect_visible(rect) {
+        return;
+    }
     let painter = ui.painter_at(rect);
     let Some(p) = p else { return };
     if p.is_solid() {
@@ -247,18 +325,7 @@ fn types_tab(ui: &mut Ui, d: &mut FillPatternsDialog) {
         d.types.remove(i);
     }
     if ui.button(t("New Type")).clicked() {
-        let taken: Vec<&str> = d.types.iter().map(|s| s.name.as_str()).collect();
-        let name = fresh(t("Region Type"), &taken);
-        let solid = names.iter().find(|(_, n)| n.as_str() == t(fills::SOLID_FILL) || n == fills::SOLID_FILL).map(|(i, _)| *i);
-        d.types.push(TypeRow {
-            was: None,
-            name,
-            foreground: solid,
-            foreground_color: [0, 0, 0],
-            background: None,
-            background_color: [255, 255, 255],
-            masking: false,
-        });
+        d.types.push(d.new_type());
     }
 }
 
@@ -332,7 +399,7 @@ fn families(ui: &mut Ui, d: &mut FillPatternsDialog) {
 
 /// Edit one region type, as in Revit's Type Properties; all edits stay in the draft until Apply or OK.
 fn edit_type(ui: &mut Ui, d: &mut FillPatternsDialog) {
-    let Some((mut picked, _)) = d.subject.clone() else { return };
+    let Some(mut picked) = d.subject.as_ref().map(|(row, _)| *row) else { return };
     ui.horizontal(|ui| {
         ui.label(t("Type:"));
         let c = ComboBox::from_id_salt("region-edit-type")
@@ -344,7 +411,7 @@ fn edit_type(ui: &mut Ui, d: &mut FillPatternsDialog) {
                 }
             });
         c.response.widget_info(|| WidgetInfo::labeled(WidgetType::ComboBox, true, t("Region Type")));
-        if ui.button(t("Duplicate…")).clicked()
+        if ui.button(t("Duplicate")).clicked()
             && let Some(r) = d.types.get(picked)
         {
             let mut copy = r.clone();
@@ -354,17 +421,8 @@ fn edit_type(ui: &mut Ui, d: &mut FillPatternsDialog) {
             d.types.push(copy);
         }
         if ui.button(t("New Type")).clicked() {
-            let name = fresh(t("Region Type"), &d.types.iter().map(|r| r.name.as_str()).collect::<Vec<_>>());
             picked = d.types.len();
-            d.types.push(TypeRow {
-                was: None,
-                name,
-                foreground: None,
-                foreground_color: [0, 0, 0],
-                background: None,
-                background_color: [255, 255, 255],
-                masking: false,
-            });
+            d.types.push(d.new_type());
         }
     });
     if let Some((row, _)) = &mut d.subject {
@@ -394,20 +452,33 @@ fn edit_type(ui: &mut Ui, d: &mut FillPatternsDialog) {
     });
     ui.add_space(8.0);
     ui.label(t("Preview"));
+    if let Some(r) = d.types.get(picked) {
+        preview(ui, r, &d.patterns);
+    }
+    ui.label(t("Changes to a type affect every filled region of that type."));
+}
+
+/// A type's sample as the plan draws a region of it, in the canvas's colours: a model line across the paper, which the
+/// region's fills lie under (ink is kept above a region that doesn't mask) unless it masks, when the paper hides the line.
+fn preview(ui: &mut Ui, r: &TypeRow, patterns: &[PatternRow]) {
     let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 100.0), Sense::hover());
-    ui.painter().rect_filled(rect, 0.0, Color32::WHITE);
-    // A sample model line makes the masking setting visible as well as the two fill layers.
+    let (paper, ink) = (crate::canvas::color(PAPER), crate::canvas::color(Rgb(0, 0, 0)));
     let inner = rect.shrink(12.0);
-    ui.painter().line_segment([rect.left_center(), rect.right_center()], Stroke::new(2.0, Color32::LIGHT_GRAY));
+    let painter = ui.painter_at(rect);
+    painter.rect_filled(rect, 0.0, paper);
+    let line = || painter.line_segment([rect.left_center(), rect.right_center()], Stroke::new(2.0, ink));
     if r.masking {
-        ui.painter().rect_filled(inner, 0.0, Color32::WHITE);
+        line();
+        painter.rect_filled(inner, 0.0, paper);
     }
     for (row, rgb) in [(r.background, r.background_color), (r.foreground, r.foreground_color)] {
-        let p = row.and_then(|i| d.patterns.get(i));
-        paint_pattern(ui, inner, p.map(|p| &p.pattern), Color32::from_rgb(rgb[0], rgb[1], rgb[2]));
+        let p = row.and_then(|i| patterns.get(i));
+        paint_pattern(ui, inner, p.map(|p| &p.pattern), crate::canvas::color(Rgb(rgb[0], rgb[1], rgb[2])));
     }
-    ui.painter().rect_stroke(inner, 0.0, Stroke::new(1.0, Color32::GRAY), egui::StrokeKind::Inside);
-    ui.label(t("Changes to a type affect every filled region of that type."));
+    if !r.masking {
+        line();
+    }
+    painter.rect_stroke(inner, 0.0, Stroke::new(1.0, canvas_pal().border), egui::StrokeKind::Inside);
 }
 
 /// The patterns: a row each, its name, drafting or model, a swatch, and (a simple one) its angle, spacing and crosshatch,
@@ -435,18 +506,22 @@ fn patterns_tab(ui: &mut Ui, d: &mut FillPatternsDialog) -> Option<FileAsk> {
                 c.response.widget_info(|| WidgetInfo::labeled(WidgetType::ComboBox, true, label.clone()));
                 swatch(ui, Some(&r.pattern), 80.0, ink);
                 match r.pattern.simple() {
-                    Some((mut angle, mut spacing, mut cross)) => {
+                    Some(was) => {
+                        let (mut angle, mut spacing, mut cross) = was;
                         let a = ui.add(DragValue::new(&mut angle).range(-360.0..=360.0).speed(1.0).suffix("°"));
                         a.widget_info(|| WidgetInfo::labeled(WidgetType::DragValue, true, tf("{}: Angle", &[&who])));
                         let s = ui.add(DragValue::new(&mut spacing).range(MIN_SPACING..=MAX_SPACING).speed(0.05).suffix(" mm"));
                         s.widget_info(|| WidgetInfo::labeled(WidgetType::DragValue, true, tf("{}: Spacing", &[&who])));
                         let c = ui.add(Checkbox::without_text(&mut cross));
                         c.widget_info(|| WidgetInfo::selected(WidgetType::Checkbox, true, cross, tf("{}: Crosshatch", &[&who])));
-                        let mut lines = vec![HatchLine::simple(angle, spacing)];
-                        if cross {
-                            lines.push(HatchLine::simple(angle + 90.0, spacing));
+                        // Only a control touched rewrites the families: a crosshatch at 90° and 0° is a simple pattern
+                        // too, but not the one `angle + 90` would make of it.
+                        if (angle, spacing, cross) != was {
+                            r.pattern.lines = vec![HatchLine::simple(angle, spacing)];
+                            if cross {
+                                r.pattern.lines.push(HatchLine::simple(angle + 90.0, spacing));
+                            }
                         }
-                        r.pattern.lines = lines;
                     }
                     None if r.pattern.is_solid() => {
                         ui.label(t("Solid"));
@@ -499,31 +574,36 @@ fn patterns_tab(ui: &mut Ui, d: &mut FillPatternsDialog) -> Option<FileAsk> {
         if ui.button(t("Export...")).on_hover_text(t("These patterns to a PAT file, but the solid ones")).clicked() {
             ask = Some(FileAsk::Export);
         }
+        ui.checkbox(&mut d.replace, t("Replace Same Name"))
+            .on_hover_text(t("A pattern of the file replaces the one of its name in this list; else it is left out"));
     });
     ask
 }
 
 impl FillPatternsDialog {
-    /// What the draft asks of the project, in an order each can be done in: patterns made and changed (renamed, which
-    /// renames them in the types), types made and changed, then what's deleted, types before patterns.
+    /// What the draft asks of the project, in an order each can be done in: patterns renamed (so a chain or a swap goes
+    /// through, [`renames`]), patterns made and changed, types renamed, made and changed, then what's deleted, types before
+    /// patterns. A pattern or a type deleted and made again under its name is changed in place.
     fn commands(&self, m: &Model) -> Vec<(&'static str, Value)> {
-        let mut out = Vec::new();
+        let mut out: Vec<(&'static str, Value)> = Vec::new();
+        let rows: Vec<Row> =
+            (self.patterns.iter().zip(&self.gone)).map(|(r, g)| Row { was: r.was.as_deref(), name: &r.name, gone: *g }).collect();
+        let patterns = renames::plan(&m.fill_patterns.keys().cloned().collect(), &rows);
+        out.extend(patterns.renames.iter().map(|(from, to)| ("fill_pattern", json!({"name": from, "rename": to}))));
         for (_, r) in self.live() {
-            let body = json!({"target": r.pattern.target, "lines": r.pattern.lines});
-            match &r.was {
-                Some(was) if *was == r.name && m.fill_patterns.get(was) == Some(&r.pattern) => {}
-                Some(was) => out.push(("fill_pattern", with(body, json!({"name": was, "rename": r.name})))),
-                None => out.push(("fill_pattern", with(body, json!({"name": r.name})))),
+            if r.was.as_ref().and_then(|w| m.fill_patterns.get(w)) != Some(&r.pattern) {
+                out.push(("fill_pattern", json!({"name": r.name, "target": r.pattern.target, "lines": r.pattern.lines})));
             }
         }
         // A pattern renamed renames it in the types already: compare what the type holds read through the renames.
         let renamed = |n: &String| self.patterns.iter().find(|r| r.was.as_ref() == Some(n)).map_or_else(|| n.clone(), |r| r.name.clone());
+        let kept: BTreeSet<&str> = self.types.iter().filter_map(|r| r.was.as_deref()).collect();
+        let mut rows: Vec<Row> = self.types.iter().map(|r| Row { was: r.was.as_deref(), name: &r.name, gone: false }).collect();
+        rows.extend(m.region_types.keys().filter(|n| !kept.contains(n.as_str())).map(|n| Row { was: Some(n), name: n, gone: true }));
+        let types = renames::plan(&m.region_types.keys().cloned().collect(), &rows);
+        out.extend(types.renames.iter().map(|(from, to)| ("filled_region_type", json!({"name": from, "rename": to}))));
         for r in &self.types {
             let mine = self.region_type(r);
-            let body = json!({
-                "foreground": mine.foreground, "foreground_color": mine.foreground_color,
-                "background": mine.background, "background_color": mine.background_color, "masking": mine.masking,
-            });
             let same = |x: &FilledRegionType| {
                 FilledRegionType {
                     foreground: x.foreground.as_ref().map(renamed),
@@ -531,30 +611,20 @@ impl FillPatternsDialog {
                     ..x.clone()
                 } == mine
             };
-            match &r.was {
-                Some(was) if *was == r.name && m.region_types.get(was).is_some_and(same) => {}
-                Some(was) => out.push(("filled_region_type", with(body, json!({"name": was, "rename": r.name})))),
-                None => out.push(("filled_region_type", with(body, json!({"name": r.name})))),
+            if !r.was.as_ref().and_then(|w| m.region_types.get(w)).is_some_and(same) {
+                out.push((
+                    "filled_region_type",
+                    json!({
+                        "name": r.name, "foreground": mine.foreground, "foreground_color": mine.foreground_color,
+                        "background": mine.background, "background_color": mine.background_color, "masking": mine.masking,
+                    }),
+                ));
             }
         }
-        for was in m.region_types.keys().filter(|n| !self.types.iter().any(|r| r.was.as_ref() == Some(n))) {
-            out.push(("filled_region_type", json!({"name": was, "delete": true})));
-        }
-        for r in self.patterns.iter().zip(&self.gone).filter(|(_, g)| **g).map(|(r, _)| r) {
-            if let Some(was) = &r.was {
-                out.push(("fill_pattern", json!({"name": was, "delete": true})));
-            }
-        }
+        out.extend(types.deletes.iter().map(|n| ("filled_region_type", json!({"name": n, "delete": true}))));
+        out.extend(patterns.deletes.iter().map(|n| ("fill_pattern", json!({"name": n, "delete": true}))));
         out
     }
-}
-
-/// `a` with `b`'s keys added.
-fn with(mut a: Value, b: Value) -> Value {
-    if let (Some(a), Value::Object(b)) = (a.as_object_mut(), b) {
-        a.extend(b);
-    }
-    a
 }
 
 impl BimApp {
@@ -564,7 +634,8 @@ impl BimApp {
         let editing = d.subject.is_some();
         let (mut ok, mut apply, mut cancel, mut ask) = (false, false, false, None);
         let r = Modal::new(UiId::new("fill-patterns")).show(ctx, |ui| {
-            ui.set_width(if editing && d.tab == 0 { 520.0 } else { 860.0 });
+            // One width for both tabs and both ways in, so the dialog doesn't jump as they change.
+            ui.set_width(860.0);
             ui.label(RichText::new(t(if editing { "Type Properties" } else { "Fill Patterns" })).heading());
             ui.add_space(6.0);
             ui.horizontal(|ui| {
@@ -582,9 +653,7 @@ impl BimApp {
             } else {
                 types_tab(ui, &mut d);
             }
-            if let Some(error) = &d.error {
-                ui.colored_label(crate::style::pal().error, error);
-            }
+            messages(ui, &d);
             ui.add_space(8.0);
             ui.with_layout(Layout::right_to_left(Align::Min), |ui| {
                 apply = ui.button(t("Apply")).clicked();
@@ -592,105 +661,115 @@ impl BimApp {
                 ok = ui.button(t("OK")).clicked();
             });
         });
-        let mut failed = false;
-        if ok || apply {
-            // Normalize names before validation and assignment, as the commands do.
-            for r in &mut d.types {
-                r.name = r.name.trim().to_string();
+        let failed = (ok || apply) && !self.apply_fill_patterns(&mut d, apply);
+        // The draft is read only for the file it is exported to.
+        let drafted = matches!(ask, Some(FileAsk::Export)).then(|| d.drafted());
+        if failed || !(ok || cancel || r.should_close()) {
+            self.fill_patterns_dialog = Some(d);
+        }
+        match (ask, drafted) {
+            (Some(FileAsk::Import), _) => {
+                let dialog = rfd::AsyncFileDialog::new().add_filter(t("Fill patterns"), &["pat", "PAT"]);
+                self.ask_file(ctx, dialog, false, |app, path| app.import_patterns(&path));
             }
-            for r in &mut d.patterns {
-                r.name = r.name.trim().to_string();
+            (Some(FileAsk::Export), Some(drafted)) => {
+                let dialog = rfd::AsyncFileDialog::new().add_filter(t("Fill patterns"), &["pat"]).set_file_name("patterns.pat");
+                self.ask_file(ctx, dialog, true, move |app, path| app.export_patterns(&path, &drafted));
             }
+            _ => {}
+        }
+    }
+
+    /// OK and Apply: the draft done as one undo step, all or nothing, or refused (a project that changed since it opened, a
+    /// name blank or used twice, the core's reasons) with the dialog saying why. Whether it was done.
+    fn apply_fill_patterns(&mut self, d: &mut FillPatternsDialog, apply: bool) -> bool {
+        let editing = d.subject.is_some();
+        d.error = None;
+        // Normalize names before validation and assignment, as the commands do.
+        d.types.iter_mut().for_each(|r| r.name = r.name.trim().to_string());
+        d.patterns.iter_mut().for_each(|r| r.name = r.name.trim().to_string());
+        let selected = d.subject.as_ref().and_then(|(i, ids)| d.types.get(*i).map(|r| (r.name.clone(), ids.clone())));
+        let done = d.check(&self.session.model).and_then(|()| {
             let mut commands = d.commands(&self.session.model);
-            let selected = d.subject.as_ref().and_then(|(i, ids)| d.types.get(*i).map(|r| (r.name.clone(), ids.clone())));
             if let Some((name, ids)) = &selected
                 && !ids.is_empty()
             {
                 commands.push(("modify", json!({"ids": ids, "type": name})));
             }
-            let done = d.validate_names().and_then(|()| {
-                if commands.is_empty() {
-                    return Ok(());
-                }
-                self.session.transaction(if editing { "Type Properties" } else { "Fill Patterns" }, |s: &mut Session| {
-                    commands.iter().try_for_each(|(c, p)| s.execute(c, p).map(|_| ()))
-                })
-            });
-            match done {
-                Ok(()) => {
-                    self.status = Status::default();
-                    // The sketch is a draft too: keep its type reference in step with applied renames.
-                    if let Some(sk) = &mut self.sketch {
-                        if let Some(row) = d.types.iter().find(|r| r.was.as_ref() == Some(&sk.region.0)) {
-                            sk.region.0 = row.name.clone();
-                        }
-                        if let Some((name, ids)) = &selected
-                            && ids.is_empty()
-                        {
-                            sk.region.0 = name.clone();
-                        }
-                    }
-                    if let Some((name, _)) = &selected {
-                        self.types.insert("region", name.clone());
-                    }
-                    if apply {
-                        let tab = d.tab;
-                        d = match selected {
-                            Some((name, ids)) => FillPatternsDialog::edit(&self.session.model, &name, ids),
-                            None => FillPatternsDialog::new(&self.session.model),
-                        };
-                        d.tab = tab;
-                    }
-                }
-                Err(e) => {
-                    d.error = Some(e.clone());
-                    self.status = Status { text: e, error: true };
-                    failed = true;
-                }
+            if commands.is_empty() {
+                return Ok(());
+            }
+            self.session.transaction(if editing { "Type Properties" } else { "Fill Patterns" }, |s: &mut Session| {
+                commands.iter().try_for_each(|(c, p)| s.execute(c, p).map(|_| ()))
+            })
+        });
+        if let Err(e) = done {
+            d.error = Some(e.clone());
+            self.status = Status { text: e, error: true };
+            return false;
+        }
+        self.status = Status::default();
+        // The sketch is a draft too: keep its type reference in step with applied renames.
+        if let Some(sk) = &mut self.sketch {
+            if let Some(row) = d.types.iter().find(|r| r.was.as_ref() == Some(&sk.region.0)) {
+                sk.region.0 = row.name.clone();
+            }
+            if let Some((name, ids)) = &selected
+                && ids.is_empty()
+            {
+                sk.region.0 = name.clone();
             }
         }
-        let drafted = d.drafted();
-        if failed || !(ok || cancel || r.should_close()) {
-            self.fill_patterns_dialog = Some(d);
+        if let Some((name, _)) = &selected {
+            self.types.insert("region", name.clone());
         }
-        match ask {
-            Some(FileAsk::Import) => {
-                let dialog = rfd::AsyncFileDialog::new().add_filter(t("Fill patterns"), &["pat", "PAT"]);
-                self.ask_file(ctx, dialog, false, |app, path| app.import_patterns(&path));
-            }
-            Some(FileAsk::Export) => {
-                let dialog = rfd::AsyncFileDialog::new().add_filter(t("Fill patterns"), &["pat"]).set_file_name("patterns.pat");
-                self.ask_file(ctx, dialog, true, move |app, path| app.export_patterns(&path, &drafted));
-            }
-            None => {}
+        if apply {
+            let tab = d.tab;
+            *d = match selected {
+                Some((name, ids)) => FillPatternsDialog::edit(&self.session.model, &name, ids),
+                None => FillPatternsDialog::new(&self.session.model),
+            };
+            d.tab = tab;
         }
+        true
     }
 
-    /// The patterns of the PAT file at `path`, into the Fill Patterns dialog's draft; what came and what didn't, said.
-    pub(crate) fn import_patterns(&mut self, path: &std::path::Path) {
+    /// The patterns of the PAT file at `path`, into the Fill Patterns dialog's draft; what came and what didn't, said in it.
+    pub(crate) fn import_patterns(&mut self, path: &Path) {
         let Some(d) = &mut self.fill_patterns_dialog else { return };
-        match bimcraft_core::pat::read_file(path) {
-            Ok(read) => {
-                let out: Vec<String> = read.left_out.iter().map(|(n, why)| format!("{n} ({why})")).collect();
-                let n = d.import(read).to_string();
-                let text = match out.is_empty() {
-                    true => tf("{} patterns imported.", &[&n]),
-                    false => tf("{} patterns imported; left out: {}", &[&n, &out.join("; ")]),
-                };
-                self.status = Status { text, error: !out.is_empty() };
-            }
-            Err(e) => self.status = Status { text: e, error: true },
-        }
+        d.note = Some(d.read(path).unwrap_or_else(|e| (e, true)));
     }
 
-    /// `patterns` written to the PAT file at `path`, ending in `.pat`.
-    pub(crate) fn export_patterns(&mut self, path: &std::path::Path, patterns: &[(String, FillPattern)]) {
-        let path =
-            if path.extension().is_some_and(|e| e.eq_ignore_ascii_case("pat")) { path.to_path_buf() } else { path.with_extension("pat") };
-        let text = bimcraft_core::pat::write(patterns.iter().map(|(n, p)| (n, p)));
-        self.status = match bimcraft_core::autosave::atomic_write(&path, &text) {
-            Ok(()) => Status { text: tf("Fill patterns exported to {}", &[&path.display().to_string()]), error: false },
-            Err(e) => Status { text: e, error: true },
+    /// `patterns` written to the PAT file at `path`, ending in `.pat`: a file by that name that the system's Save didn't ask
+    /// about is not written over.
+    pub(crate) fn export_patterns(&mut self, path: &Path, patterns: &[(String, FillPattern)]) {
+        let named = path.extension().is_some_and(|e| e.eq_ignore_ascii_case("pat"));
+        let target = if named { path.to_path_buf() } else { path.with_extension("pat") };
+        let (text, error) = if !named && target.exists() {
+            (tf("{} already exists: save under a name ending in .pat to replace it.", &[&target.display().to_string()]), true)
+        } else {
+            let text = bimcraft_core::pat::write(patterns.iter().map(|(n, p)| (n, p)));
+            match bimcraft_core::autosave::atomic_write(&target, &text) {
+                Ok(()) => (tf("Fill patterns exported to {}", &[&target.display().to_string()]), false),
+                Err(e) => (e, true),
+            }
         };
+        match &mut self.fill_patterns_dialog {
+            Some(d) => d.note = Some((text, error)),
+            None => self.status = Status { text, error },
+        }
+    }
+}
+
+/// What the dialog says in itself, under its tab: the last import or export (a long list of what was left out scrolls), and
+/// what stopped Apply.
+fn messages(ui: &mut Ui, d: &FillPatternsDialog) {
+    if let Some((text, bad)) = &d.note {
+        ScrollArea::vertical().id_salt("fill-patterns-note").max_height(60.0).show(ui, |ui| {
+            ui.colored_label(if *bad { pal().error } else { ui.visuals().text_color() }, text);
+        });
+    }
+    if let Some(error) = &d.error {
+        ui.colored_label(pal().error, error);
     }
 }

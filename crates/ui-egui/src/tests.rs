@@ -5092,6 +5092,7 @@ mod links;
 mod look;
 mod mep;
 mod objectstyles;
+mod patterns;
 mod planviews;
 mod purge;
 mod revit;

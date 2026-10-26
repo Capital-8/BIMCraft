@@ -120,7 +120,7 @@ fn patterns_come_in_from_a_pat_file_go_out_to_one_and_any_patterns_lines_are_edi
     press(&mut h, "Patterns");
     h.state_mut().import_patterns(&file);
     h.run();
-    assert!(h.state().status.text.contains("Flat"), "what was left out is said: {}", h.state().status.text);
+    assert!(h.query_by_label_contains("Flat").is_some(), "what was left out is said in the dialog");
     // Its families, edited: the second's dashes typed anew, a third added.
     press(&mut h, "Herringbone: Edit Lines");
     type_into(&mut h, "Herringbone family 2: Dashes", "300, -100");
@@ -163,7 +163,7 @@ fn edit_type_during_a_region_sketch_creates_a_type_with_independent_fill_layers(
     shortcut(&mut h, "FR");
     press(&mut h, "Edit Type");
     assert!(h.query_by_label("Type Properties").is_some());
-    press(&mut h, "Duplicate…");
+    press(&mut h, "Duplicate");
     type_into(&mut h, "Type Name", "Earth on gray");
     choose(&mut h, "Foreground Pattern", "Diagonal Up");
     choose(&mut h, "Background Pattern", "Solid fill");
@@ -203,7 +203,7 @@ filled_region {{"sketch": [[[4000,1000],[5000,1000]],[[5000,1000],[5000,2000]],[
     }
     assert_eq!(h.state().session.model.region_types["Shared fill"].background.as_deref(), Some("Crosshatch"));
     let before = h.state().session.model.to_json().unwrap();
-    press(&mut h, "Duplicate…");
+    press(&mut h, "Duplicate");
     type_into(&mut h, "Type Name", "Discard me");
     press(&mut h, "Cancel");
     assert_eq!(h.state().session.model.to_json().unwrap(), before);
@@ -269,7 +269,7 @@ fn edit_type_keeps_annotation_boundary_styles_and_pattern_placement_and_imports_
     assert!(before.sketch.iter().any(|l| l.invisible));
     assert!(before.sketch.iter().any(|l| l.style.as_deref() == Some("Wide Lines")));
     press(&mut h, "Edit Type");
-    press(&mut h, "Duplicate…");
+    press(&mut h, "Duplicate");
     type_into(&mut h, "Type Name", "Annotation Hatch");
     press(&mut h, "Patterns");
     let dir = tempfile::tempdir().unwrap();
