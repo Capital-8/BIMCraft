@@ -203,7 +203,13 @@ in the Options Bar), Properties (the Type Selector above the instance fields, Li
 region types and patterns as one draft, a simple pattern edited as an angle, a spacing and crosshatched or not, any pattern's
 families one by one with Edit Lines, and Import and Export of PAT files). `pat.rs` reads and writes PAT files (`;%UNITS`,
 `;%TYPE`, a negative offset stepping the other way; a pattern that can't be one left out with why) for the dialog and for the
-`import_fill_patterns` and `export_fill_patterns` commands.
+`import_fill_patterns` and `export_fill_patterns` commands. A PAT file is hostile input: `read` stops after `MAX_PATTERNS`
+(2,000) patterns and counts the rest, `Read::left_out` names the first `MAX_LEFT_OUT` (100) with `left_out_count` for all, a line
+is cut at 22 fields and a bad one is echoed to 40 letters, a family whose dashes are all spaces is left out, and a file over
+`MAX_TEXT` (16 MiB) is refused unread. A byte that isn't UTF-8 is read as the Latin-1 letter with its number, which is right
+for accents and not for Windows-1252's punctuation at 0x80 to 0x9F. The description after a pattern's name isn't kept. The
+`import_fill_patterns` command takes the file's `text` up to that size too (a name is limited to 256 letters, a file isn't) and
+replies with the first 100 `left_out` and `left_out_count`.
 
 Edit Type opens a region's Type Properties from either a selected region or an active sketch: select a type, create a
 new one, duplicate one with its settings, or rename it. Foreground and background each have their own pattern (including

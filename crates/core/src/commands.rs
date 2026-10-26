@@ -897,8 +897,9 @@ pub static ALL: &[Command] = &[
         "{path | text, replace?: false} the fill patterns of a PAT file (AutoCAD's and Revit's), from the file at `path` or \
          as `text`: each `*Name` and its families of lines, in mm unless the file says `;%UNITS=INCH`, drafting unless a \
          pattern says `;%TYPE=MODEL`. A pattern the project already has is left as it is unless `replace`; one that can't \
-         be a pattern (no lines, an offset of 0, too many families) is left out. It returns those `imported` and those \
-         `left_out`, each with why",
+         be a pattern (no lines, an offset of 0, dashes that are all spaces, too many families) is left out. A file is read \
+         up to its first 2000 patterns. It returns those `imported`, those `left_out` (the first 100, each with why) and \
+         `left_out_count`, all of them",
         import_fill_patterns,
     ),
     other(
@@ -7220,24 +7221,35 @@ fn import_fill_patterns(s: &mut Session, p: &Value) -> R {
     let c = "import_fill_patterns";
     only(c, p, &["path", "text", "replace"])?;
     let replace = flag(c, p, "replace")?;
-    let read = match (string(c, p, "path")?, string(c, p, "text")?) {
+    // A PAT file's text is far longer than a name: `text` takes as much as a file does (`pat::read` refuses more).
+    let text = match p.get("text") {
+        Some(Value::String(t)) => Some(t.as_str()),
+        Some(v) if !v.is_null() => return Err(bad(c, "`text` must be the text of a PAT file")),
+        _ => None,
+    };
+    let read = match (string(c, p, "path")?, text) {
         (Some(path), None) => crate::pat::read_file(&PathBuf::from(path)),
-        (None, Some(text)) => crate::pat::read(&text),
+        (None, Some(text)) => crate::pat::read(text),
         _ => return Err(bad(c, "give `path`, a PAT file, or its `text`")),
     }
     .map_err(|e| bad(c, e))?;
     let m = s.model_mut();
-    let (mut imported, mut left_out) = (Vec::new(), Vec::new());
+    // A hostile file may leave out thousands: the reply names the first few and counts them all.
+    let (mut imported, mut left_out, mut count) = (Vec::new(), Vec::new(), read.left_out_count);
     for (name, pattern) in read.patterns {
         if m.fill_patterns.contains_key(&name) && !replace {
-            left_out.push(json!({"name": name, "why": "the project has a pattern of that name"}));
+            count += 1;
+            if left_out.len() < crate::pat::MAX_LEFT_OUT {
+                left_out.push(json!({"name": name, "why": "the project has a pattern of that name"}));
+            }
             continue;
         }
         m.fill_patterns.insert(name.clone(), pattern);
         imported.push(name);
     }
-    left_out.extend(read.left_out.into_iter().map(|(name, why)| json!({"name": name, "why": why})));
-    Ok(json!({"imported": imported, "left_out": left_out}))
+    let room = crate::pat::MAX_LEFT_OUT.saturating_sub(left_out.len());
+    left_out.extend(read.left_out.into_iter().take(room).map(|(name, why)| json!({"name": name, "why": why})));
+    Ok(json!({"imported": imported, "left_out": left_out, "left_out_count": count}))
 }
 
 fn export_fill_patterns(s: &mut Session, p: &Value) -> R {
