@@ -110,3 +110,12 @@ or Delete Door (else the label). A click runs `undo` or `redo` with `count`.
 
 Tabs. The open ribbon tab and the open view tab mould out of what they open: `rule_under_tabs` draws the rule under a row of tabs
 but for the open one, whose sides run down into the surface below. A view's × is part of its tab (`tab_button_with`'s `room`).
+
+Keyboard Shortcuts. Manage > Shortcuts (or KS) opens `shortcuts_window` (`shortcuts.rs`): every shortcut by what it does, from `shortcuts()`
+(`SHORTCUTS`, the fixtures' letters, the commands' aliases), with Add, Edit and Load File. A shortcut is two letters or digits, all that `typed` holds,
+and a custom one is tried before the defaults. Each name in `ACTIONS` is a tool or command the window runs (`execute_shortcut_action`), and a key never
+carries Revit's name for a tool BIMCraft lacks (Sun Settings, Detail and Model Line, Split Face, Brace, Beam System, Reference Plane, the duct tools): it waits
+for the tool. Load File reads JSON (`{"WA": "Wall"}`), Revit's `<Shortcut CommandName=… Shortcuts="WA#W1">` lines, or `KEY - Name` lines, up to 64 KiB;
+a description is an action only by its whole name in one of the interface's languages (`resolve_action`), and a key that is not two characters, names no action or
+is another action's is skipped and counted in the message. Custom shortcuts last while the window is open. Match Properties (MA) is the `match_properties`
+command; with one element selected the window remembers its type for the next one drawn, with several it gives the others of the first's category its type.

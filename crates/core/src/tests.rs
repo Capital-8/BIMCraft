@@ -493,6 +493,31 @@ fn modify_edits_many_elements_in_one_undo_step() {
 }
 
 #[test]
+fn match_properties_gives_the_walls_one_wall_type_and_leaves_other_categories_alone() {
+    let mut s = Session::new();
+    let ids = house(&mut s);
+    let door = run(&mut s, "door", json!({"at": [2000, 30]}))["id"].as_u64().unwrap();
+    run(&mut s, "modify", json!({"id": ids[0], "type": "Exterior - 300mm"}));
+    let thick = |s: &mut Session| [ids[0], ids[1], ids[2]].map(|id| element(s, id)["thickness"].as_f64().unwrap());
+    assert_eq!(thick(&mut s), [300.0, 200.0, 200.0]);
+    // MA is its alias; the door is a different category, so it's skipped and named.
+    let r = run(&mut s, "MA", json!({"from": ids[0], "ids": [ids[1], ids[2], door, ids[0]]}));
+    assert_eq!((&r["modified"], &r["skipped"]), (&json!([ids[1], ids[2]]), &json!([door])));
+    assert_eq!(thick(&mut s), [300.0, 300.0, 300.0]);
+    assert_eq!(s.history().last(), Some(&"Match Properties"));
+    run(&mut s, "undo", json!({}));
+    assert_eq!(thick(&mut s), [300.0, 200.0, 200.0], "one undo step");
+    // Nothing to match: the model stays as it was.
+    let before = s.model.clone();
+    for p in
+        [json!({"ids": [ids[1]]}), json!({"from": 9_999_999, "ids": [ids[1]]}), json!({"from": ids[0]}), json!({"from": ids[0], "ids": []})]
+    {
+        assert!(s.execute("match_properties", &p).is_err(), "{p}");
+    }
+    assert_eq!(*s.model, *before);
+}
+
+#[test]
 fn move_and_copy_refuse_levels_and_what_breaks_the_model() {
     let mut s = Session::new();
     let ids = house(&mut s);
@@ -1469,6 +1494,8 @@ fn hostile_params_never_panic_or_break_the_model() {
         json!({"ids": [100002, 100003], "keep": [[0, 0]]}),
         json!({"id": 100002, "at": [1e300, 0]}),
         json!({"id": 100002, "at": [0, 0]}),
+        json!({"from": 100002, "ids": [100003, 100004, 100002]}),
+        json!({"from": u64::MAX, "ids": [100002]}),
         json!({"refs": "x", "at": [0, 0]}),
         json!({"refs": [[0, 0], [8000, 0]], "at": [1e300, 0]}),
         json!({"refs": [{"id": 100002}, {"id": 100002}], "at": [0, 0]}),

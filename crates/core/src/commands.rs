@@ -668,6 +668,14 @@ pub static ALL: &[Command] = &[
         modify,
     ),
     edit(
+        "match_properties",
+        "Match Properties",
+        &["MA"],
+        "{from: id, ids: [id,…]} gives the elements in `ids` the type of `from` (and, for components, its family), as Revit's Match \
+         Properties does; only elements of `from`'s category take it, the rest come back in `skipped`. Returns {modified, skipped}",
+        match_properties,
+    ),
+    edit(
         "move",
         "Move",
         &["MV"],
@@ -5442,6 +5450,30 @@ fn modify(s: &mut Session, p: &Value) -> R {
         (None, [one]) => Ok(element_json(&s.model, *one)),
         _ => Ok(json!({"modified": ids})),
     }
+}
+
+fn match_properties(s: &mut Session, p: &Value) -> R {
+    let c = "match_properties";
+    let m = &s.model;
+    let from = element_id(c, m, p.get("from").ok_or_else(|| bad(c, "`from` (an element id or GUID) is required"))?)?;
+    let source = m.elements.get(from).ok_or_else(|| bad(c, format!("no element {from}")))?;
+    let v = serde_json::to_value(source).map_err(|e| bad(c, e))?;
+    let typ =
+        v.get("type").and_then(Value::as_str).filter(|t| !t.is_empty()).ok_or_else(|| bad(c, format!("element {from} has no type")))?;
+    let mut fields = json!({"type": typ});
+    if let Some(family) = v.get("family").and_then(Value::as_str) {
+        fields["family"] = json!(family);
+    }
+    let (matched, skipped): (Vec<Id>, Vec<Id>) = ids_param(c, m, p)?
+        .into_iter()
+        .filter(|id| *id != from)
+        .partition(|id| m.elements.get(*id).is_some_and(|e| e.category() == source.category()));
+    if matched.is_empty() {
+        return Err(bad(c, format!("none of the elements is in the category of element {from} ({})", source.category())));
+    }
+    fields["ids"] = json!(matched);
+    modify(s, &fields)?;
+    Ok(json!({"modified": matched, "skipped": skipped}))
 }
 
 /// `patch` merged into `into`, as JSON Merge Patch (RFC 7386) does: objects merge key by key, a
