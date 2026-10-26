@@ -68,6 +68,10 @@ enum Kind {
     Values,
     /// A wall's location line: a drop-down.
     LocationLine,
+    /// A detail line's line style: a drop-down of the project's.
+    LineStyle,
+    /// A filled region's boundary: a line style, or invisible lines (none).
+    RegionLines,
     /// Which line of a run's section its heights are: a drop-down.
     Justification,
     /// Whether a roof or a floor is there (a wall's attachment); read only.
@@ -142,6 +146,7 @@ fn rows(category: &str) -> &'static [Row] {
             ("Dimensions", "area_m2", "Area", AreaShown),
             ("Dimensions", "thickness", "Thickness", LengthShown),
             ("Structural", "structural", "Structural", Flag),
+            ("Graphics", "pattern_angle", "Pattern Angle (°)", Number),
         ],
         "ceiling" => &[
             ("Constraints", "level", "Level", Level),
@@ -177,6 +182,33 @@ fn rows(category: &str) -> &'static [Row] {
             ("Graphics", "size", "Text Size (mm)", Number),
             ("Other", "angle", "Rotation (°)", Number),
             ("Other", "at", "Location", Point),
+        ],
+        "line" => &[
+            ("Graphics", "style", "Line Style", LineStyle),
+            ("Dimensions", "length", "Length", LengthShown),
+            ("Graphics", "centre_mark", "Center Mark Visible", Flag),
+            ("Dimensions", "insulation", "Insulation Width", LengthIf),
+            ("Dimensions", "cloud", "Arc Length", LengthIf),
+            ("Identity Data", "revision", "Revision", Text),
+            ("Other", "shape", "Shape", Shown),
+        ],
+        "region" => &[
+            ("Graphics", "line_style", "Line Style", RegionLines),
+            ("Graphics", "pattern_angle", "Pattern Angle (°)", Number),
+            ("Dimensions", "area_m2", "Area", AreaShown),
+        ],
+        "detailgroup" => &[
+            ("Identity Data", "type", "Group", Shown),
+            ("Other", "angle", "Rotation (°)", Number),
+            ("Other", "mirrored", "Mirrored", Flag),
+            ("Other", "at", "Origin", Point),
+        ],
+        "repeatingdetail" => &[
+            ("Identity Data", "type", "Group", Shown),
+            ("Dimensions", "spacing", "Spacing", Length),
+            ("Dimensions", "count", "Number", Shown),
+            ("Other", "start", "Start", Point),
+            ("Other", "end", "End", Point),
         ],
         "spot" => {
             &[("Dimensions", "elevation", "Elevation", LengthShown), ("Other", "host", "Host", Shown), ("Other", "at", "Location", Point)]
@@ -390,6 +422,8 @@ fn icon(category: &str) -> Icon {
         "ramp" => Icon::Ramp,
         "railing" => Icon::Railing,
         "text" => Icon::Text,
+        "line" => Icon::Line,
+        "region" => Icon::FilledRegion,
         "spot" => Icon::Spot,
         "view3d" => Icon::View3D,
         "pointcloud" => Icon::PointCloud,
@@ -660,6 +694,9 @@ impl TypeDialog {
 impl BimApp {
     fn subject(&self) -> Subject {
         let m = &self.session.model;
+        if matches!(self.sketch.as_ref().map(|sk| sk.of), Some(crate::sketch::Of::Region { .. })) {
+            return Subject::New("region");
+        }
         match (self.selection.as_slice(), &self.tool, self.sheet) {
             (&[id], _, _) => Subject::Element(id),
             ([_, _, ..], _, _) => {
@@ -678,6 +715,7 @@ impl BimApp {
             ([], Tool::Grid(_), _) => Subject::New("grid"),
             ([], Tool::Dimension(_) | Tool::Angular(_) | Tool::Radial(_), _) => Subject::New("dimension"),
             ([], Tool::Text, _) => Subject::New("text"),
+            ([], Tool::DetailLine(_), _) => Subject::New("line"),
             ([], Tool::Spot, _) => Subject::New("spot"),
             ([], Tool::Tag, _) => Subject::New("tag"),
             ([], Tool::Section(_), _) => Subject::New("section"),
@@ -732,6 +770,17 @@ impl BimApp {
     /// The type Edit Type opens: its category, its name, and the selected elements on it.
     pub(crate) fn type_subject(&self) -> Option<(&'static str, String, Vec<Id>)> {
         let m = &self.session.model;
+        if let Some(sk) = &self.sketch {
+            match sk.of {
+                crate::sketch::Of::Region { .. } => return Some(("region", sk.region.0.clone(), Vec::new())),
+                crate::sketch::Of::Edit(id) => {
+                    if let Some(Element::FilledRegion(r)) = m.elements.get(id) {
+                        return Some(("region", r.type_name.clone(), vec![id]));
+                    }
+                }
+                _ => {}
+            }
+        }
         let category = match self.subject() {
             Subject::Element(id) => m.elements.get(id)?.category(),
             Subject::Elements(category) | Subject::New(category) => category,
@@ -790,6 +839,10 @@ impl BimApp {
 
     pub(crate) fn edit_type(&mut self) {
         if let Some((category, name, elements)) = self.type_subject() {
+            if category == "region" {
+                self.fill_patterns_dialog = Some(crate::fillpatterns::FillPatternsDialog::edit(&self.session.model, &name, elements));
+                return;
+            }
             let pair = if category == "component" {
                 self.component_type()
             } else {
@@ -868,7 +921,7 @@ impl BimApp {
     /// The Type Selector: the category and the type of what the palette shows, a drop-down of
     /// the category's types.
     fn type_selector(&mut self, ui: &mut Ui, model: &Model, subject: Subject) {
-        let (category, current) = match subject {
+        let (category, mut current) = match subject {
             Subject::Element(id) => match model.elements.get(id) {
                 Some(e) => (e.category(), element_json(model, id)["type"].as_str().map(String::from)),
                 None => return,
@@ -883,6 +936,11 @@ impl BimApp {
             Subject::View3D => ("3d view", None),
             Subject::Schedule => ("schedule", None),
         };
+        if category == "region"
+            && let Some(sk) = &self.sketch
+        {
+            current = Some(sk.region.0.clone());
+        }
         // A component's: its family over its type; every family's types to pick from. A door's or a window's: the project's own
         // types, then those of its families, each as `Family: Type`.
         let hosted = match category {
@@ -987,6 +1045,12 @@ impl BimApp {
                 }
                 self.run("modify", p);
             }
+            (Some(n), Subject::New("region")) => {
+                if let Some(sk) = &mut self.sketch {
+                    sk.region.0 = n.clone();
+                }
+                self.types.insert("region", n);
+            }
             (Some(n), Subject::New(category)) => {
                 self.opening_families.remove(category);
                 self.types.insert(category, n);
@@ -1056,7 +1120,8 @@ impl BimApp {
                         let name = ui.label(label);
                         match kind {
                             Shown => {
-                                ui.label(RichText::new(text(val)).color(pal().muted));
+                                let said = text(val);
+                                ui.label(RichText::new(t(&said)).color(pal().muted));
                             }
                             // An angle's degrees; else lengths.
                             Values if v["kind"] == "angular" => {
@@ -1110,6 +1175,22 @@ impl BimApp {
                                     && let Some(loc) = Location::ALL.iter().find(|loc| t(loc.label()) == l)
                                 {
                                     change = Some((key, Ok(json!(loc.name()))));
+                                }
+                            }
+                            LineStyle => {
+                                let options: Vec<String> = model.line_styles.keys().cloned().collect();
+                                if let Some(s) = combo(ui, (id, key), name.id, val.as_str().unwrap_or_default(), &options) {
+                                    change = Some((key, Ok(json!(s))));
+                                }
+                            }
+                            // Invisible lines first, then the styles; picked, none is null.
+                            RegionLines => {
+                                let invisible = t("<Invisible lines>").to_string();
+                                let options: Vec<String> =
+                                    std::iter::once(invisible.clone()).chain(model.line_styles.keys().cloned()).collect();
+                                let now = val.as_str().map_or(invisible.clone(), str::to_string);
+                                if let Some(s) = combo(ui, (id, key), name.id, &now, &options) {
+                                    change = Some((key, Ok(if s == invisible { Value::Null } else { json!(s) })));
                                 }
                             }
                             Justification => {
@@ -1595,18 +1676,25 @@ impl BimApp {
                         run = Some(json!({"name": d.picked, "color": *colour}));
                     }
                     ui.end_row();
-                    for (key, label, now) in [("cut", "Cut Pattern", m.cut), ("surface", "Surface Pattern", m.surface)] {
+                    // The patterns drawn in code, then the project's fill patterns.
+                    let cut =
+                        [("cut", "Cut Pattern", m.cut, &m.cut_pattern), ("surface", "Surface Pattern", m.surface, &m.surface_pattern)];
+                    for (key, label, now, fill) in cut {
                         let l = ui.label(t(label));
-                        let c = ComboBox::from_id_salt(("material-pattern", key)).selected_text(t(pattern_name(now))).width(160.0).show_ui(
-                            ui,
-                            |ui| {
-                                for (p, name) in PATTERNS {
-                                    if ui.selectable_label(p == now, t(name)).clicked() {
-                                        run = Some(json!({"name": d.picked, key: p}));
-                                    }
+                        let shown = fill.clone().unwrap_or_else(|| t(pattern_name(now)).to_string());
+                        let c = ComboBox::from_id_salt(("material-pattern", key)).selected_text(shown).width(160.0).show_ui(ui, |ui| {
+                            for (p, name) in PATTERNS {
+                                if ui.selectable_label(fill.is_none() && p == now, t(name)).clicked() {
+                                    run = Some(json!({"name": d.picked, key: p}));
                                 }
-                            },
-                        );
+                            }
+                            ui.separator();
+                            for n in model.fill_patterns.keys() {
+                                if ui.selectable_label(fill.as_ref() == Some(n), n).clicked() {
+                                    run = Some(json!({"name": d.picked, key: n}));
+                                }
+                            }
+                        });
                         c.response.labelled_by(l.id);
                         ui.end_row();
                     }
@@ -1986,12 +2074,14 @@ impl BimApp {
             ui.add_space(6.0);
             ui.label(RichText::new(t("Object Snaps")).strong());
             let s = &mut self.snaps;
-            let kinds: [(&mut bool, Snap, &str); 7] = [
+            let kinds: [(&mut bool, Snap, &str); 9] = [
                 (&mut s.endpoint, Snap::Endpoint, "The ends of walls, grids and what else is drawn, and the points picked so far"),
                 (&mut s.midpoint, Snap::Midpoint, "The middle of a wall, along its arc"),
                 (&mut s.intersection, Snap::Intersection, "Where two walls or grids cross"),
                 (&mut s.centre, Snap::Centre, "The centre of a curved wall, a column or a component"),
                 (&mut s.perpendicular, Snap::Perpendicular, "The foot of the perpendicular from the last point to a wall or grid"),
+                (&mut s.quadrant, Snap::Quadrant, "A circle's, an ellipse's or an arc's points along its axes: east, north, west and south"),
+                (&mut s.tangent, Snap::Tangent, "Where a line from the last point touches a circle or an arc"),
                 (&mut s.nearest, Snap::Nearest, "A wall's centre line, so a wall drawn on it meets it"),
                 (&mut s.cloud, Snap::Point, "A scan's points where the plan's cut plane cuts it, to trace what was measured"),
             ];

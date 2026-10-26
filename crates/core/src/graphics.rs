@@ -45,7 +45,7 @@ pub const MODEL: [&str; 25] = [
     "railing",
     "roof",
 ];
-pub const ANNOTATION: [&str; 8] = ["dimension", "tag", "text", "spot", "grid", "level", "section", "elevation"];
+pub const ANNOTATION: [&str; 10] = ["dimension", "tag", "text", "line", "region", "spot", "grid", "level", "section", "elevation"];
 /// The point clouds, which views hide and override as Revit's Visibility/Graphics does on a tab of their own: not a model
 /// category, so Object Styles has no row for them.
 pub const SCANS: [&str; 1] = ["pointcloud"];
@@ -139,11 +139,11 @@ pub enum Dash {
 
 impl Dash {
     /// The on and off lengths a line is drawn with, px.
-    fn pattern(self) -> Option<[f32; 2]> {
+    fn pattern(self) -> Option<Vec<f32>> {
         match self {
             Dash::Solid => None,
-            Dash::Dashed => Some([10.0, 5.0]),
-            Dash::Dotted => Some([2.0, 4.0]),
+            Dash::Dashed => Some(vec![10.0, 5.0]),
+            Dash::Dotted => Some(vec![2.0, 4.0]),
         }
     }
 }
@@ -342,6 +342,21 @@ pub struct Graphics {
     /// How a 3D view draws its surfaces.
     #[serde(skip_serializing_if = "is_shaded")]
     pub style: VisualStyle,
+    /// Revit's Linework: an edge of an element drawn in a line style of the view's own, or not at all.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub linework: Vec<Linework>,
+}
+
+/// An edge of `element` as the view draws it, from `from` to `to` (mm in the view's terms), in line style `style` instead
+/// of its own; none, it isn't drawn (Revit's `<Invisible lines>`).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Linework {
+    pub element: Guid,
+    pub from: crate::geom::P2,
+    pub to: crate::geom::P2,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub style: Option<String>,
 }
 
 impl Graphics {
@@ -873,10 +888,10 @@ pub(crate) mod testing {
     }
 
     /// Pen, colour and dash of the lines `id` owns: `u8::MAX` for a line no pen draws (lettering's).
-    pub(crate) fn lines(d: &Drawing, id: u64) -> Vec<(u8, Rgb, Option<[f32; 2]>)> {
+    pub(crate) fn lines(d: &Drawing, id: u64) -> Vec<(u8, Rgb, Option<Vec<f32>>)> {
         (d.prims.iter().zip(&d.owners).zip(&d.pens))
             .filter_map(|((p, o), pen)| match p {
-                Prim::Line { color, dash, .. } if *o == Some(id) => Some((pen.map_or(u8::MAX, |p| p.0), *color, *dash)),
+                Prim::Line { color, dash, .. } if *o == Some(id) => Some((pen.map_or(u8::MAX, |p| p.0), *color, dash.clone())),
                 _ => None,
             })
             .collect()
@@ -991,7 +1006,7 @@ mod tests {
         );
         let d = plan(&s, 100000);
         assert!(lines(&d, walls[0]).contains(&(6, RED, None)), "{:?}", lines(&d, walls[0]));
-        assert!(lines(&d, low).contains(&(3, Rgb(0, 0, 200), Some([10.0, 5.0]))), "{:?}", lines(&d, low));
+        assert!(lines(&d, low).contains(&(3, Rgb(0, 0, 200), Some(vec![10.0, 5.0]))), "{:?}", lines(&d, low));
         // Another view keeps its own look.
         assert!(lines(&plan(&s, 100001), up).contains(&(10, Rgb(25, 25, 25), None)));
         // An override merges into the last, and null takes a field back.
@@ -1250,7 +1265,7 @@ mod tests {
         run(&mut s, "graphics", json!({"view": section, "categories": {"walls": {"cut": {"weight": 8}}}}));
         let thin = (4, Rgb(25, 25, 25), None);
         let d = plan(&s, 100000);
-        assert!(lines(&d, walls[0]).contains(&(8, Rgb(25, 25, 25), Some([10.0, 5.0]))), "the outline");
+        assert!(lines(&d, walls[0]).contains(&(8, Rgb(25, 25, 25), Some(vec![10.0, 5.0]))), "the outline");
         assert!(lines(&d, walls[0]).contains(&thin), "the layers' lines");
         let view = render::section_fit(&s.model, section, 800, 600);
         let d = render::section(&s.model, section, view);
@@ -1677,7 +1692,7 @@ mod tests {
         // The category's override is the weakest, and a filter that hides hides, whatever the others do.
         run(&mut s, "graphics", json!({"view": 100000, "categories": {"walls": {"cut": {"color": [9, 9, 9], "dash": "dotted"}}}}));
         let lines = lines(&plan(&s, 100000), walls[1]);
-        assert!(lines.contains(&(3, Rgb(0, 200, 0), Some([2.0, 4.0]))), "{lines:?}");
+        assert!(lines.contains(&(3, Rgb(0, 200, 0), Some(vec![2.0, 4.0]))), "{lines:?}");
         run(&mut s, "graphics", json!({"view": 100000, "filters": [first, {"filter": "B", "hidden": true}]}));
         assert!(owned(&plan(&s, 100000), walls[1]).is_empty());
         // A filter applies once, and in a section as in a plan.

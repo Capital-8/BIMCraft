@@ -12,14 +12,18 @@ mod context;
 pub mod control;
 mod dialog;
 mod dock;
+mod draw;
 mod editor;
 mod favorites;
+mod fillpatterns;
 mod footer;
 mod gpu;
 mod graphics;
+mod groups;
 pub mod icons;
 mod inquiry;
 pub mod lang;
+mod linestyles;
 mod lineweights;
 mod links;
 mod mep;
@@ -35,6 +39,7 @@ mod ribbon;
 mod section;
 pub mod settings;
 pub mod shortcuts;
+mod sketch;
 mod start;
 mod structure;
 mod style;
@@ -123,12 +128,28 @@ pub enum Tool {
     Align(Option<(P2, P2)>),
     /// Trim or extend two walls to a corner: the first wall, and where it was picked.
     Trim(Option<(Id, P2)>),
+    /// Trim/Extend Single or Multiple Elements: the boundary, once picked; then each line clicked goes to it (with `many`,
+    /// until Esc; else one, and the boundary is picked again).
+    TrimTo {
+        boundary: Option<Id>,
+        many: bool,
+    },
+    /// Add Vertex, or with `delete` Delete Vertex: on each line clicked, where it was clicked.
+    Vertex {
+        delete: bool,
+    },
     /// Split the wall picked.
     Split,
     /// Copy (or move) the wall picked to the cursor's side, by the Options Bar's distance.
     Offset,
     /// Take the element picked down in the phase of the view on screen, or, if it comes down in it already, back up.
     Demolish,
+    /// Draw the edge clicked in the Options Bar's line style, in this view only, as Revit's Linework does.
+    Linework,
+    /// Place Detail Group: the Options Bar's group type where clicked.
+    DetailGroup,
+    /// Repeating Detail: the Options Bar's group along a line, its start once clicked.
+    RepeatingDetail(Option<P2>),
     /// Lay the material in the Options Bar over the face clicked in the 3D view, as Revit's Paint does.
     Paint,
     /// Take the paint off the face clicked in the 3D view.
@@ -191,8 +212,14 @@ pub enum Tool {
     Shaft(Option<P2>),
     /// A mass: the corners of its footprint, as clicked so far.
     Mass(Vec<P2>),
+    /// A detail line in the Options Bar's line style: its points, as clicked so far.
+    DetailLine(Vec<P2>),
     /// The selected floor's slope arrow: its tail, once clicked.
     SlopeArrow(Option<P2>),
+    /// Sketch mode's Draw panel: the points clicked so far of the shape it draws (Line: since the last loop closed).
+    SketchLine(Vec<P2>),
+    /// Sketch mode's Pick Walls: a line along each wall clicked.
+    SketchPick,
 }
 
 /// Why the last command failed, shown in a box over the view.
@@ -261,7 +288,7 @@ type Buttons<'a> = &'a [(Icon, &'a str, &'a str, Option<Tool>, bool)];
 
 /// The desktop's own two-letter shortcuts, which [`BimApp::shortcut`] takes before the commands'
 /// aliases, and what Keyboard Shortcuts (KS) calls them.
-const SHORTCUTS: [(&str, &str); 47] = [
+const SHORTCUTS: [(&str, &str); 49] = [
     ("3D", "3D View"),
     ("MD", "Modify"),
     ("SB", "Floor: Structural"),
@@ -284,6 +311,8 @@ const SHORTCUTS: [(&str, &str); 47] = [
     ("SI", "Snap to Intersections"),
     ("SC", "Snap to Centres"),
     ("SP", "Snap to Perpendiculars"),
+    ("SQ", "Snap to Quadrants"),
+    ("ST", "Snap to Tangents"),
     ("SN", "Snap to Nearest"),
     ("SO", "Snaps Off"),
     ("SS", "Turn Snap Override Off"),
@@ -458,8 +487,7 @@ pub struct BimApp {
     mass_height: String,
     /// Each click ends a wall and starts the next; off, two clicks make one wall.
     chain: bool,
-    /// The Wall tool draws arcs, by their ends and a point on them; the line its walls stand on.
-    wall_arc: bool,
+    /// The line the Wall tool's walls stand on.
     wall_location: Location,
     /// Attach Top/Base attaches bases.
     attach_base: bool,
@@ -481,10 +509,22 @@ pub struct BimApp {
     tag_label: String,
     /// What the Text tool writes.
     note_text: String,
+    /// The line style the Detail Line tool draws in; blank for the project's Thin Lines.
+    line_style: String,
+    /// The Linework tool's line style: a style's name, or `<Invisible lines>` or `<By Category>` (in English).
+    linework_style: String,
+    /// The detail group type Place Detail Group places.
+    group_type: String,
+    /// The Repeating Detail tool's spacing, as typed.
+    repeat_spacing: String,
+    /// The Detail Line tool's Chain: each click ends a line and starts the next; off, two clicks make one line.
+    line_chain: bool,
+    /// The shape each Draw panel draws, and the Options Bar's Sides, Radius and Offset.
+    pub(crate) drawing: draw::Drawing,
     /// The project units the Options Bar's lengths were last written in.
     units: Units,
     /// A length typed while picking points: the listening dimension.
-    typed_length: String,
+    pub(crate) typed_length: String,
     /// What each view hides or reveals for now (not the project's), and the model it is drawn from.
     temporary: HashMap<Sheet, footer::Temp>,
     shadow: Option<footer::Shadow>,
@@ -563,6 +603,13 @@ pub struct BimApp {
     line_weights_dialog: Option<lineweights::LineWeightsDialog>,
     /// Manage > Object Styles, while open.
     object_styles_dialog: Option<objectstyles::ObjectStylesDialog>,
+    /// Manage > Line Styles, while open.
+    line_styles_dialog: Option<linestyles::LineStylesDialog>,
+    fill_patterns_dialog: Option<fillpatterns::FillPatternsDialog>,
+    /// Sketch mode: the lines of an outline being drawn, until Finish or Cancel.
+    pub sketch: Option<sketch::Sketch>,
+    /// How wide the ribbon's Mode panel was last drawn, to stand it at the ribbon's right end.
+    mode_width: f32,
     options_dialog: Option<phasing::OptionsDialog>,
     purge_dialog: Option<purge::PurgeDialog>,
     /// Manage > Select by ID and IDs of Selection, while open.
@@ -731,6 +778,46 @@ fn list_row(ui: &mut Ui, icon: Icon, label: &str, active: bool, tip: &str) -> Re
     r.on_hover_text(tip)
 }
 
+/// Buttons stacked three high in a panel, as Revit's Settings panel stacks them; in the panel's list they are rows like any other.
+pub(crate) fn stacked(ui: &mut Ui, add: impl FnOnce(&mut Ui)) {
+    ui.vertical(|ui| {
+        if !ribbon::listing() {
+            ui.spacing_mut().item_spacing.y = 2.0;
+        }
+        add(ui);
+    });
+}
+
+/// A button stacked three high in a panel (see [`stacked`]): its icon and its name in a row.
+pub(crate) fn stacked_button(ui: &mut Ui, icon: Icon, label: &str, active: bool, tip: &str) -> Response {
+    if ribbon::listing() {
+        return list_row(ui, icon, label, active, tip);
+    }
+    if let Some(r) = ribbon::handed_over(ui) {
+        return r;
+    }
+    let (label, tip) = (t(label), t(tip));
+    let font = FontId::proportional(12.0);
+    let width = ui.painter().layout_no_wrap(label.to_string(), font.clone(), pal().text).size().x + 28.0;
+    let (rect, r) = ui.allocate_exact_size(vec2(width, 16.0), Sense::click());
+    let enabled = ui.is_enabled();
+    r.widget_info(|| WidgetInfo::selected(WidgetType::Button, enabled, active, label));
+    let fill = match (active, r.hovered() && enabled) {
+        (true, _) => pal().select_fill,
+        (false, true) => pal().hover_fill,
+        (false, false) => Color32::TRANSPARENT,
+    };
+    let dim = |c: Color32| if enabled { c } else { c.gamma_multiply(0.4) };
+    let (ink, text) = if active { (pal().accent_ink, pal().accent_ink) } else { (pal().icon, pal().text) };
+    ui.painter().rect_filled(rect, 3.0, fill);
+    if r.has_focus() {
+        ui.painter().rect_stroke(rect, 3.0, style::focus_ring(), StrokeKind::Inside);
+    }
+    icons::paint(ui.painter(), icon, Rect::from_center_size(rect.left_center() + vec2(10.0, 0.0), vec2(14.0, 14.0)), dim(ink));
+    ui.painter().text(rect.left_center() + vec2(22.0, 0.0), Align2::LEFT_CENTER, label, font, dim(text));
+    r.on_hover_text(tip)
+}
+
 /// A small icon button, named for screen readers and tests.
 fn icon_button(ui: &mut Ui, icon: Icon, label: &str) -> Response {
     let label = t(label);
@@ -865,7 +952,6 @@ impl BimApp {
             mass_top: None,
             mass_height: units.length(3000.0),
             chain: true,
-            wall_arc: false,
             wall_location: Location::Centre,
             attach_base: false,
             thin: false,
@@ -879,6 +965,12 @@ impl BimApp {
             tag_leader: false,
             tag_label: String::new(),
             note_text: String::new(),
+            line_style: String::new(),
+            linework_style: String::new(),
+            group_type: String::new(),
+            repeat_spacing: "200".into(),
+            line_chain: true,
+            drawing: draw::Drawing::default(),
             units,
             lang: Lang::English,
             font_finder: lang::chinese_font,
@@ -929,6 +1021,10 @@ impl BimApp {
             phasing_dialog: None,
             line_weights_dialog: None,
             object_styles_dialog: None,
+            line_styles_dialog: None,
+            fill_patterns_dialog: None,
+            sketch: None,
+            mode_width: 0.0,
             options_dialog: None,
             purge_dialog: None,
             select_by_id: None,
@@ -985,6 +1081,9 @@ impl BimApp {
 
     /// The contextual tab's name while a tool is on or something is selected.
     fn context(&self) -> Option<String> {
+        if let Some(sk) = &self.sketch {
+            return Some(format!("{} | {}", t("Modify"), t(sk.title())));
+        }
         let place = match self.tool {
             Tool::Modify
             | Tool::Move(_)
@@ -993,12 +1092,17 @@ impl BimApp {
             | Tool::Mirror { .. }
             | Tool::Align(_)
             | Tool::Trim(_)
+            | Tool::TrimTo { .. }
+            | Tool::Vertex { .. }
             | Tool::Split
             | Tool::Offset
             | Tool::Demolish
+            | Tool::Linework
             | Tool::Attach
             | Tool::GableEdge
-            | Tool::SlopeArrow(_) => None,
+            | Tool::SlopeArrow(_)
+            | Tool::SketchLine(_)
+            | Tool::SketchPick => None,
             Tool::Wall(_) => Some("Place Wall"),
             Tool::Paint => Some("Paint"),
             Tool::Unpaint => Some("Remove Paint"),
@@ -1009,6 +1113,11 @@ impl BimApp {
             Tool::Grid(_) => Some("Place Grid"),
             Tool::Dimension(_) | Tool::Angular(_) | Tool::Radial(_) => Some("Place Dimensions"),
             Tool::Text => Some("Place Text"),
+            Tool::DetailGroup => Some("Place Detail Group"),
+            Tool::RepeatingDetail(_) => Some("Place Repeating Detail"),
+            Tool::DetailLine(_) if self.drawing.insulation.is_some() => Some("Place Insulation"),
+            Tool::DetailLine(_) if self.drawing.cloud.is_some() => Some("Place Revision Cloud"),
+            Tool::DetailLine(_) => Some("Place Detail Lines"),
             Tool::Spot => Some("Spot Elevation"),
             Tool::Measure(_) => Some("Measure"),
             Tool::Tag => Some("Tag"),
@@ -1317,6 +1426,8 @@ impl BimApp {
             || self.phasing_dialog.is_some()
             || self.line_weights_dialog.is_some()
             || self.object_styles_dialog.is_some()
+            || self.line_styles_dialog.is_some()
+            || self.fill_patterns_dialog.is_some()
             || self.options_dialog.is_some()
             || self.purge_dialog.is_some()
             || self.select_by_id.is_some()
@@ -1363,7 +1474,12 @@ impl BimApp {
         if pressed(Modifiers::COMMAND, Key::D) {
             self.toggle_home();
         }
-        if pressed(Modifiers::COMMAND | Modifiers::SHIFT, Key::Z) || pressed(Modifiers::COMMAND, Key::Y) {
+        if self.sketch.is_some() {
+            // While sketching, Ctrl+Z takes back a line; the model's steps wait until Finish or Cancel.
+            if pressed(Modifiers::COMMAND, Key::Z) {
+                self.unsketch();
+            }
+        } else if pressed(Modifiers::COMMAND | Modifiers::SHIFT, Key::Z) || pressed(Modifiers::COMMAND, Key::Y) {
             self.run("redo", json!({}));
         } else if pressed(Modifiers::COMMAND, Key::Z) {
             self.run("undo", json!({}));
@@ -1375,9 +1491,11 @@ impl BimApp {
         if pressed(Modifiers::NONE, Key::Enter)
             && let Some(level) = self.plan_level()
         {
-            match (&self.tool, self.typed_length.is_empty()) {
+            match (&self.tool, self.typed_length.is_empty() && self.drawing.other.is_empty()) {
                 (Tool::Railing(_), true) => self.finish_railing(level),
                 (Tool::Mass(_), true) => self.finish_mass(level),
+                (Tool::DetailLine(_), true) => self.finish_detail_line(level),
+                (Tool::SketchLine(_), true) if self.shape().open_ended() => self.finish_open_shape(),
                 (_, true) => self.finish_wall(),
                 (_, false) => self.place_typed(level),
             }
@@ -1410,7 +1528,8 @@ impl BimApp {
         // one are shortcuts.
         let mut shortcut = String::new();
         for ch in typed.chars() {
-            if self.base().is_some() && (ch.is_ascii_digit() || ch == '.' || !self.typed_length.is_empty()) {
+            let listening = self.base().is_some() || self.filleting();
+            if listening && (ch.is_ascii_digit() || ch == '.' || !self.typed_length.is_empty()) {
                 self.typed_length.push(ch);
             } else {
                 shortcut.push(ch);
@@ -1446,6 +1565,7 @@ impl BimApp {
             "AL" => Tool::Align(None),
             "OF" => Tool::Offset,
             "DW" => Tool::Demolish,
+            "LW" => Tool::Linework,
             "ZF" | "ZE" | "ZA" => {
                 self.fit();
                 return true;
@@ -1553,8 +1673,10 @@ impl BimApp {
                 return true;
             }
             // Revit's snap overrides: for the next point picked, that snap alone, or none.
-            "SE" | "SM" | "SI" | "SC" | "SP" | "SN" | "SO" | "SS" => {
+            "SE" | "SM" | "SI" | "SC" | "SP" | "SQ" | "ST" | "SN" | "SO" | "SS" => {
                 self.snap_once = match self.typed.as_str() {
+                    "SQ" => Some(Once::Only(Snap::Quadrant)),
+                    "ST" => Some(Once::Only(Snap::Tangent)),
                     "SE" => Some(Once::Only(Snap::Endpoint)),
                     "SM" => Some(Once::Only(Snap::Midpoint)),
                     "SI" => Some(Once::Only(Snap::Intersection)),
@@ -1580,8 +1702,23 @@ impl BimApp {
                 Some("rotate") => Tool::Rotate { centre: P2(0.0, 0.0), start: None, place: false },
                 Some("corner") => Tool::Trim(None),
                 Some("split") => Tool::Split,
+                Some("linework") => Tool::Linework,
+                Some("detail_group") => Tool::DetailGroup,
+                Some("repeating_detail") => Tool::RepeatingDetail(None),
+                Some("create_group") => {
+                    self.create_group();
+                    return true;
+                }
+                Some("ungroup") => {
+                    self.ungroup();
+                    return true;
+                }
                 Some("dimension") => Tool::Dimension(Vec::new()),
                 Some("text") => Tool::Text,
+                Some("detail_line") => {
+                    (self.drawing.insulation, self.drawing.cloud) = (None, None);
+                    Tool::DetailLine(Vec::new())
+                }
                 Some("spot") => Tool::Spot,
                 Some("tag") => Tool::Tag,
                 // Revit's CL is the structural column on its Structure tab, the architectural one elsewhere.
@@ -1593,6 +1730,12 @@ impl BimApp {
                 Some("mass") => Tool::Mass(Vec::new()),
                 Some("show_mass") => {
                     self.show_mass();
+                    return true;
+                }
+                Some("filled_region") => {
+                    if let Some(view) = self.plan_key() {
+                        self.start_sketch(sketch::Of::Region { view, masking: false }, Vec::new());
+                    }
                     return true;
                 }
                 Some(c @ ("mass_floors" | "wall_by_face" | "floor_by_face" | "roof_by_face" | "update_by_face")) => {
@@ -1609,6 +1752,19 @@ impl BimApp {
                 }
                 Some("delete") => {
                     self.delete();
+                    return true;
+                }
+                Some("fillet") => {
+                    self.set_tool(Tool::DetailLine(Vec::new()));
+                    self.set_shape(draw::Target::Detail, draw::Shape::Fillet);
+                    return true;
+                }
+                Some("join_polyline") => {
+                    self.join_polyline();
+                    return true;
+                }
+                Some("explode") => {
+                    self.explode_polyline();
                     return true;
                 }
                 // Revit's opens the Project Units dialog; BIMCraft's is the Manage tab's menu.
@@ -1679,6 +1835,10 @@ impl BimApp {
                 DimKind::Radial => Tool::Radial(None),
             },
             Some(Element::Text(_)) => Tool::Text,
+            Some(Element::DetailLine(l)) => {
+                self.line_style.clone_from(&l.style);
+                Tool::DetailLine(Vec::new())
+            }
             Some(Element::Spot(_)) => Tool::Spot,
             Some(Element::Tag(_)) => Tool::Tag,
             Some(Element::Section(_)) => Tool::Section(None),
@@ -1782,13 +1942,28 @@ impl BimApp {
     }
 
     fn set_tool(&mut self, mut tool: Tool) {
+        // Trim/Extend to Corner with two lines or walls selected (or picked, sketching) joins them at once, keeping the
+        // parts toward their middles; with any other selection it asks for the picks.
+        if tool == Tool::Trim(None) && self.corner_selected() {
+            return;
+        }
         // Paint works in the 3D view: open it, as the tool asks.
         if matches!(tool, Tool::Paint | Tool::Unpaint) && self.sheet != Sheet::View3D {
             self.open_sheet(Sheet::View3D);
         }
         // Move, Copy, Rotate and Mirror take the selection; Align, Trim, Split and Offset pick walls, Demolish anything.
         let edits = matches!(tool, Tool::Move(_) | Tool::Copy(_) | Tool::Rotate { .. } | Tool::Mirror { .. });
-        let picks = matches!(tool, Tool::Align(_) | Tool::Trim(_) | Tool::Split | Tool::Offset | Tool::Demolish);
+        let picks = matches!(
+            tool,
+            Tool::Align(_)
+                | Tool::Trim(_)
+                | Tool::TrimTo { .. }
+                | Tool::Vertex { .. }
+                | Tool::Split
+                | Tool::Offset
+                | Tool::Demolish
+                | Tool::Linework
+        );
         if edits && self.selection.is_empty() {
             self.status = Status { text: t("select what to move, copy, rotate or mirror first").into(), error: true };
             return;
@@ -1817,7 +1992,7 @@ impl BimApp {
             self.raise_context();
         }
         self.typed.clear();
-        self.typed_length.clear();
+        self.clear_typed();
         // The Floor tool makes structural floors only when the Structure tab asks (`structural_floor`).
         self.floor_structural = false;
         if let Tool::Run(category, _) = &tool {
@@ -1859,23 +2034,6 @@ impl BimApp {
         }
     }
 
-    /// The Wall tool's Draw panel: lines, or arcs. The next wall starts where the last one ended
-    /// (an arc not finished yet, where it started).
-    fn draw_arc(&mut self, arc: bool) {
-        if arc == self.wall_arc {
-            return;
-        }
-        let keep = match &self.tool {
-            Tool::Wall(chain) if self.wall_arc => chain.first().copied(),
-            Tool::Wall(chain) => chain.last().copied(),
-            _ => None,
-        };
-        self.wall_arc = arc;
-        if let Tool::Wall(chain) = &mut self.tool {
-            *chain = keep.into_iter().collect();
-        }
-    }
-
     /// The middle of what's selected: where Rotate turns it about until told otherwise.
     fn middle(&self) -> Option<P2> {
         let m = &self.session.model;
@@ -1911,7 +2069,9 @@ impl BimApp {
             Tool::Wall(chain) => chain.last().copied(),
             Tool::Run(_, start) => *start,
             Tool::Grid(start) | Tool::Move(start) | Tool::Copy(start) | Tool::Section(start) | Tool::SlopeArrow(start) => *start,
-            Tool::Stair(pts) | Tool::Ramp(pts) | Tool::Railing(pts) | Tool::Mass(pts) => pts.last().copied(),
+            Tool::Stair(pts) | Tool::Ramp(pts) | Tool::Railing(pts) | Tool::Mass(pts) | Tool::DetailLine(pts) | Tool::SketchLine(pts) => {
+                pts.last().copied()
+            }
             _ => None,
         }
     }
@@ -1938,7 +2098,7 @@ impl BimApp {
         if self.snap_once.take().is_some() {
             return;
         }
-        self.typed_length.clear();
+        self.clear_typed();
         self.status = Status::default();
         self.tool = match std::mem::replace(&mut self.tool, Tool::Modify) {
             Tool::Wall(chain) if !chain.is_empty() => Tool::Wall(Vec::new()),
@@ -1947,6 +2107,7 @@ impl BimApp {
             Tool::Mirror { draw, start: Some(_) } => Tool::Mirror { draw, start: None },
             Tool::Align(Some(_)) => Tool::Align(None),
             Tool::Trim(Some(_)) => Tool::Trim(None),
+            Tool::TrimTo { boundary: Some(_), many } => Tool::TrimTo { boundary: None, many },
             Tool::Dimension(refs) if !refs.is_empty() => Tool::Dimension(Vec::new()),
             Tool::Angular(refs) if !refs.is_empty() => Tool::Angular(Vec::new()),
             Tool::Radial(Some(_)) => Tool::Radial(None),
@@ -1958,11 +2119,30 @@ impl BimApp {
             Tool::Ramp(pts) if !pts.is_empty() => Tool::Ramp(Vec::new()),
             Tool::Railing(pts) if !pts.is_empty() => Tool::Railing(Vec::new()),
             Tool::Mass(pts) if !pts.is_empty() => Tool::Mass(Vec::new()),
+            Tool::DetailLine(pts) if !pts.is_empty() => Tool::DetailLine(Vec::new()),
             Tool::Shaft(Some(_)) => Tool::Shaft(None),
             Tool::SlopeArrow(Some(_)) => Tool::SlopeArrow(None),
             Tool::ExtrusionRoof(pts) if !pts.is_empty() => Tool::ExtrusionRoof(Vec::new()),
+            Tool::SketchLine(pts) if !pts.is_empty() => Tool::SketchLine(Vec::new()),
+            // Fillet Arc's lines picked so far go first, then the tool.
+            Tool::DetailLine(pts) if !self.drawing.fillet.is_empty() => {
+                self.drawing.fillet.clear();
+                Tool::DetailLine(pts)
+            }
+            Tool::SketchLine(pts) if !self.drawing.fillet.is_empty() => {
+                self.drawing.fillet.clear();
+                Tool::SketchLine(pts)
+            }
+            // While sketching, Trim/Extend's first pick likewise.
+            tool @ (Tool::Trim(_) | Tool::TrimTo { .. }) if self.drawing.trim.is_some() => {
+                self.drawing.trim = None;
+                tool
+            }
             Tool::Modify => {
-                self.selection.clear();
+                match &mut self.sketch {
+                    Some(sk) => sk.picked.clear(),
+                    None => self.selection.clear(),
+                }
                 Tool::Modify
             }
             _ => Tool::Modify,
@@ -1970,6 +2150,10 @@ impl BimApp {
     }
 
     fn delete(&mut self) {
+        if self.sketch.is_some() {
+            self.delete_sketch_lines();
+            return;
+        }
         if !self.selection.is_empty() {
             self.run("delete", json!({"ids": self.selection}));
         }
@@ -2006,7 +2190,7 @@ impl BimApp {
             self.front = sheet;
         }
         // The selection is the model's, not the view's: it stays, whatever view comes up.
-        self.typed_length.clear();
+        self.clear_typed();
         self.snap_once = None;
         // A ruler belongs to the view it was laid in.
         self.measured = None;
@@ -2028,7 +2212,12 @@ impl BimApp {
             Tool::Dimension(refs) | Tool::Angular(refs) => refs.clear(),
             Tool::Radial(r) => *r = None,
             Tool::Section(start) | Tool::Shaft(start) | Tool::Measure(start) => *start = None,
-            Tool::Stair(pts) | Tool::Ramp(pts) | Tool::Railing(pts) | Tool::ExtrusionRoof(pts) | Tool::Mass(pts) => pts.clear(),
+            Tool::Stair(pts)
+            | Tool::Ramp(pts)
+            | Tool::Railing(pts)
+            | Tool::ExtrusionRoof(pts)
+            | Tool::Mass(pts)
+            | Tool::DetailLine(pts) => pts.clear(),
             Tool::Move(_) | Tool::Copy(_) | Tool::SlopeArrow(_) | Tool::GableEdge => self.tool = Tool::Modify,
             _ => {}
         }
@@ -2767,6 +2956,8 @@ impl BimApp {
                 (Icon::Spot, "Spot Elevation", "Spot Elevation (EL): click a floor, a roof or a stair; in a section, a point", Tool::Spot),
             ],
         );
+        self.detail_panel(ui);
+        self.region_panel(ui);
         self.tools(
             ui,
             "Text",
@@ -2993,39 +3184,53 @@ impl BimApp {
             if big_button(ui, Icon::Parameters, "Project Parameters", self.parameters_dialog.is_some(), tip).clicked() {
                 self.parameters_dialog = Some(properties::ParametersDialog::new(&self.session.model));
             }
+            // Pens and lines, stacked: Line Weights, Object Styles, Line Styles.
+            stacked(ui, |ui| {
+                let tip = "Line Weights: what each pen draws on paper, the model's at each scale and the annotation's at any";
+                if stacked_button(ui, Icon::LineWeights, "Line Weights", self.line_weights_dialog.is_some(), tip).clicked() {
+                    self.line_weights_dialog = Some(lineweights::LineWeightsDialog::new(&self.session.model));
+                }
+                let tip = "Object Styles: the pen each category draws in, seen and cut, in every view";
+                if stacked_button(ui, Icon::ObjectStyles, "Object Styles", self.object_styles_dialog.is_some(), tip).clicked() {
+                    self.object_styles_dialog = Some(objectstyles::ObjectStylesDialog::new(&self.session.model));
+                }
+                let tip = "Line Styles: the pen, colour and line pattern detail lines draw in, and the patterns' dashes, dots and spaces";
+                if stacked_button(ui, Icon::ThinLines, "Line Styles", self.line_styles_dialog.is_some(), tip).clicked() {
+                    self.line_styles_dialog = Some(linestyles::LineStylesDialog::new(&self.session.model));
+                }
+            });
             let tip =
                 "Purge Unused (PU): take out the types, families and the rest nothing in the project uses; each category keeps a type";
             if big_button(ui, Icon::Delete, "Purge Unused", self.purge_dialog.is_some(), tip).clicked() {
                 self.open_purge();
             }
-            let tip = "Line Weights: what each pen draws on paper, the model's at each scale and the annotation's at any";
-            if big_button(ui, Icon::LineWeights, "Line Weights", self.line_weights_dialog.is_some(), tip).clicked() {
-                self.line_weights_dialog = Some(lineweights::LineWeightsDialog::new(&self.session.model));
-            }
-            let tip = "Object Styles: the pen each category draws in, seen and cut, in every view";
-            if big_button(ui, Icon::ObjectStyles, "Object Styles", self.object_styles_dialog.is_some(), tip).clicked() {
-                self.object_styles_dialog = Some(objectstyles::ObjectStylesDialog::new(&self.session.model));
-            }
-            let tip = "Snaps: what a picked point sticks to (ends, middles, crossings, centres, perpendiculars), and the angles it steps by; SE, SM, SI, SC, SP and SN take one alone for the next point, SO none";
-            if big_button(ui, Icon::Snaps, "Snaps", self.show_snaps, tip).clicked() {
-                self.show_snaps = true;
-            }
+            // Fills, snaps and units, stacked.
+            stacked(ui, |ui| {
+                let tip = "Fill Patterns: the patterns filled regions fill with, and the filled region types";
+                if stacked_button(ui, Icon::FillPatterns, "Fill Patterns", self.fill_patterns_dialog.is_some(), tip).clicked() {
+                    self.fill_patterns_dialog = Some(fillpatterns::FillPatternsDialog::new(&self.session.model));
+                }
+                let tip = "Snaps: what a picked point sticks to (ends, middles, crossings, centres, perpendiculars), and the angles it steps by; SE, SM, SI, SC, SP and SN take one alone for the next point, SO none";
+                if stacked_button(ui, Icon::Snaps, "Snaps", self.show_snaps, tip).clicked() {
+                    self.show_snaps = true;
+                }
+                let now = self.session.model.units;
+                let tip = tf("Project Units (UN): how lengths show and read; now {}", &[&t(now.label()).to_lowercase()]);
+                let r = stacked_button(ui, Icon::Units, "Project Units", false, &tip);
+                let asked = self.open_units;
+                let opened = ribbon::choices(ui, &r, asked, |ui| {
+                    for u in Units::ALL {
+                        if ui.selectable_label(u == now, t(u.label())).clicked() {
+                            self.run("units", json!({"length": u.name()}));
+                        }
+                    }
+                });
+                self.open_units &= !opened;
+            });
             let tip = "Keyboard Shortcuts (KS): customize, edit, and load shortcut keys";
             if big_button(ui, Icon::Keyboard, "Shortcuts", self.show_shortcuts, tip).clicked() {
                 self.show_shortcuts = true;
             }
-            let now = self.session.model.units;
-            let tip = tf("Project Units (UN): how lengths show and read; now {}", &[&t(now.label()).to_lowercase()]);
-            let r = big_button(ui, Icon::Units, "Project Units", false, &tip);
-            let asked = self.open_units;
-            let opened = ribbon::choices(ui, &r, asked, |ui| {
-                for u in Units::ALL {
-                    if ui.selectable_label(u == now, t(u.label())).clicked() {
-                        self.run("units", json!({"length": u.name()}));
-                    }
-                }
-            });
-            self.open_units &= !opened;
             // What the drawings say, and how new things are named.
             let now = self.session.model.language;
             let tip = tf("Project Language: what the drawings say and how new things are named; now {}", &[now.label()]);
@@ -3093,6 +3298,12 @@ impl BimApp {
 
     fn modify_tab(&mut self, ui: &mut Ui) {
         self.tools(ui, "Select", &[(Icon::Modify, "Modify", "Modify (MD): select elements", Tool::Modify)]);
+        if self.sketch.is_some() {
+            self.sketch_draw(ui);
+            self.mode_panel(ui);
+            return;
+        }
+        self.sketch_starters(ui);
         panel(ui, "Properties", |ui| {
             let shown = self.docking.shown(dock::Palette::Properties);
             if big_button(ui, Icon::Properties, "Properties", shown, "Properties (PP): show or hide the palette").clicked() {
@@ -3148,7 +3359,7 @@ impl BimApp {
         let rows: [Buttons; 2] = [
             &[
                 (Icon::Align, "Align", "Align (AL): pick a reference line, then what to line up with it", Some(Tool::Align(None)), true),
-                (Icon::Offset, "Offset", "Offset (OF): pick a wall; a copy goes to the cursor's side", Some(Tool::Offset), true),
+                (Icon::Offset, "Offset", "Offset (OF): pick a wall or a line; a copy goes to the cursor's side", Some(Tool::Offset), true),
                 (
                     Icon::MirrorPick,
                     "Mirror Pick Axis",
@@ -3163,7 +3374,21 @@ impl BimApp {
                     Some(Tool::Mirror { draw: true, start: None }),
                     some,
                 ),
-                (Icon::Split, "Split Element", "Split Element (SL): click a wall where to split it", Some(Tool::Split), true),
+                (Icon::Split, "Split Element", "Split Element (SL): click a wall or a line where to split it", Some(Tool::Split), true),
+                (
+                    Icon::Linework,
+                    "Linework",
+                    "Linework (LW): click an edge to draw it in another line style, or hide it, in this view only",
+                    Some(Tool::Linework),
+                    true,
+                ),
+                (
+                    Icon::TrimSingle,
+                    "Trim/Extend Single Element",
+                    "Trim/Extend Single Element: pick the line to trim or extend to, then the line to change, on the part to keep",
+                    Some(Tool::TrimTo { boundary: None, many: false }),
+                    true,
+                ),
             ],
             &[
                 (Icon::Move, "Move", "Move (MV): click a base point, then where it goes", Some(Tool::Move(None)), some),
@@ -3178,24 +3403,25 @@ impl BimApp {
                 (
                     Icon::Trim,
                     "Trim/Extend to Corner",
-                    "Trim/Extend to Corner (TR): pick two walls, on the parts to keep",
+                    "Trim/Extend to Corner (TR): pick two walls or two lines, on the parts to keep",
                     Some(Tool::Trim(None)),
+                    true,
+                ),
+                (
+                    Icon::TrimMultiple,
+                    "Trim/Extend Multiple Elements",
+                    "Trim/Extend Multiple Elements: pick the line to trim or extend to, then each line to change, on the part to keep",
+                    Some(Tool::TrimTo { boundary: None, many: true }),
                     true,
                 ),
                 (Icon::Delete, "Delete", "Delete (DE) the selection", None, some),
             ],
         ];
-        // The Wall tool's Draw panel: lines, or arcs by their ends and a point on them.
-        if matches!(self.tool, Tool::Wall(_)) {
-            panel(ui, "Draw", |ui| {
-                if big_button(ui, Icon::Line, "Line", !self.wall_arc, "Line: a wall along each step between the points clicked").clicked() {
-                    self.draw_arc(false);
-                }
-                let tip = "Start-End-Radius Arc: click its start, its end, then a point it passes through";
-                if big_button(ui, Icon::Arc, "Start-End-Radius Arc", self.wall_arc, tip).clicked() {
-                    self.draw_arc(true);
-                }
-            });
+        // The Wall tool's and the Detail Line tool's Draw panels: lines, rectangles, polygons, circles, arcs and the rest.
+        match self.tool {
+            Tool::Wall(_) => self.draw_panel(ui, draw::Target::Wall),
+            Tool::DetailLine(_) => self.draw_panel(ui, draw::Target::Detail),
+            _ => {}
         }
         // Placing a component: Revit's Mode panel, which loads a family from a file.
         if matches!(self.tool, Tool::Component | Tool::Fixture(_)) {
@@ -3211,6 +3437,22 @@ impl BimApp {
                         }
                     });
                 }
+            });
+        }
+        // Detail lines selected, or sketch lines picked: Join into Polyline and Explode Polyline.
+        let picked = self.sketch.as_ref().map(|sk| sk.picked.len());
+        if (self.lines_selected() && self.tool == Tool::Modify) || (picked.is_some() && self.tool == Tool::Modify) {
+            panel(ui, "Modify Lines", |ui| {
+                let two = picked.unwrap_or(self.selection.len()) >= 2;
+                let tip = "Join into Polyline (PJ): the lines selected, meeting end to end, become one polyline";
+                if ui.add_enabled_ui(two, |ui| big_button(ui, Icon::JoinPolyline, "Join into Polyline", false, tip)).inner.clicked() {
+                    self.join_polyline();
+                }
+                let tip = "Explode Polyline (PX): a polyline taken apart into a line or an arc for each segment";
+                if big_button(ui, Icon::ExplodePolyline, "Explode Polyline", false, tip).clicked() {
+                    self.explode_polyline();
+                }
+                self.vertex_buttons(ui);
             });
         }
         // Walls selected: Revit's Modify Wall panel.
@@ -3285,6 +3527,7 @@ impl BimApp {
                 self.set_tool(Tool::Unpaint);
             }
         });
+        self.mode_panel(ui);
     }
 
     /// The Options Bar: the contextual tab's name, then the tool's options.
@@ -3328,8 +3571,24 @@ impl BimApp {
                 ui.painter().text(r.left_center(), Align2::LEFT_CENTER, name, font, pal().text);
                 ui.separator();
             }
+            if self.sketch.is_some() {
+                self.sketch_options(ui);
+                match self.tool {
+                    Tool::SketchLine(_) => self.shape_options(ui),
+                    Tool::Offset => self.offset_options(ui),
+                    _ => {}
+                }
+                return;
+            }
             match self.tool {
                 Tool::Wall(_) => self.wall_options(ui),
+                Tool::Linework => self.linework_options(ui),
+                Tool::DetailGroup => self.group_options(ui),
+                Tool::RepeatingDetail(_) => {
+                    self.group_options(ui);
+                    let l = ui.label(t("Spacing:"));
+                    ui.add(egui::TextEdit::singleline(&mut self.repeat_spacing).desired_width(70.0)).labelled_by(l.id);
+                }
                 Tool::Paint => {
                     let label = ui.label(t("Material:"));
                     let names: Vec<String> = self.session.model.materials.keys().cloned().collect();
@@ -3422,6 +3681,7 @@ impl BimApp {
                     ui.add(TextEdit::singleline(&mut self.tag_label).desired_width(160.0).hint_text(t("a field, such as Type or Height")))
                         .labelled_by(l.id);
                 }
+                Tool::DetailLine(_) => self.line_style_options(ui),
                 Tool::Text => {
                     let l = ui.label(t("Text:"));
                     ui.add(TextEdit::singleline(&mut self.note_text).desired_width(240.0).hint_text(t("what the note says")))
@@ -3436,15 +3696,18 @@ impl BimApp {
                         self.attach_base = true;
                     }
                 }
-                Tool::Offset => {
-                    let l = ui.label(t("Offset:"));
-                    let hint = self.session.model.units.name();
-                    ui.add(TextEdit::singleline(&mut self.offset).desired_width(70.0).hint_text(hint)).labelled_by(l.id);
-                    ui.checkbox(&mut self.offset_copy, t("Copy"));
-                }
+                Tool::Offset => self.offset_options(ui),
                 _ => {}
             }
         });
+    }
+
+    /// Offset's Options Bar: the distance, and Copy.
+    fn offset_options(&mut self, ui: &mut Ui) {
+        let l = ui.label(t("Offset:"));
+        let hint = self.session.model.units.name();
+        ui.add(TextEdit::singleline(&mut self.offset).desired_width(70.0).hint_text(hint)).labelled_by(l.id);
+        ui.checkbox(&mut self.offset_copy, t("Copy"));
     }
 
     fn wall_options(&mut self, ui: &mut Ui) {
@@ -3460,7 +3723,10 @@ impl BimApp {
             }
         });
         c.response.labelled_by(l.id);
-        ui.checkbox(&mut self.chain, t("Chain"));
+        if self.shape().chains() {
+            ui.checkbox(&mut self.chain, t("Chain"));
+        }
+        self.shape_options(ui);
     }
 
     /// Rotate's Options Bar: an angle to type (Enter turns by it), Place Centre, and Copy.
@@ -3506,6 +3772,9 @@ impl BimApp {
 
     /// What the tool wants next, in the status bar as Revit puts it.
     fn prompt(&self) -> &'static str {
+        if let Some(hint) = self.sketch_prompt() {
+            return hint;
+        }
         match (self.sheet, &self.tool) {
             (Sheet::View3D, Tool::Modify) => {
                 return "Click to select. Drag to orbit (or Shift and the middle button), the middle button pans, the wheel zooms.";
@@ -3528,11 +3797,14 @@ impl BimApp {
             }
             _ => {}
         }
+        if matches!(self.target(), Some(draw::Target::Detail | draw::Target::Wall))
+            && let Some(prompt) = self.shape_prompt()
+        {
+            return prompt;
+        }
         match &self.tool {
             Tool::Modify => "Click to select, Tab for what's underneath, Ctrl adds, Shift takes away; drag to box or to move.",
             Tool::Wall(chain) if chain.is_empty() => "Click to enter the wall's start point.",
-            Tool::Wall(chain) if self.wall_arc && chain.len() == 1 => "Click to enter the arc's end point.",
-            Tool::Wall(_) if self.wall_arc => "Click a point the arc passes through: it sets the radius. Esc cancels.",
             Tool::Wall(_) => "Click to build the wall to the next point. Enter or Esc ends the chain, Shift keeps it square.",
             Tool::Attach if self.attach_base => "Pick a roof or a floor: the selected walls' bases stand on it.",
             Tool::Attach => "Pick a roof or a floor: the selected walls' tops follow its underside.",
@@ -3553,11 +3825,20 @@ impl BimApp {
             Tool::Mirror { draw: true, start: Some(_) } => "Click the end of the mirror axis.",
             Tool::Align(None) => "Pick a reference line: a grid, or a wall's face or centre line.",
             Tool::Align(Some(_)) => "Pick the wall or grid to line up with the reference.",
-            Tool::Trim(None) => "Pick the first wall, on the part to keep.",
-            Tool::Trim(Some(_)) => "Pick the second wall, on the part to keep.",
-            Tool::Split => "Click a wall where to split it.",
-            Tool::Offset => "Point to a wall: the offset goes to the cursor's side. Click to place it.",
+            Tool::Trim(None) => "Pick the first wall or line, on the part to keep.",
+            Tool::Trim(Some(_)) => "Pick the second wall or line, on the part to keep.",
+            Tool::TrimTo { boundary: None, .. } => "Pick the line to trim or extend to: a line, a wall or a grid.",
+            Tool::TrimTo { many: false, .. } => "Click the line to trim or extend to it, on the part to keep.",
+            Tool::TrimTo { many: true, .. } => "Click each line to trim or extend to it, on the part to keep; Esc picks another boundary.",
+            Tool::Vertex { delete: false } => "Click a polyline or a spline where a vertex goes.",
+            Tool::Vertex { delete: true } => "Click a polyline's corner or a spline's point to take it out.",
+            Tool::Split => "Click a wall or a line where to split it.",
+            Tool::Offset => "Point to a wall or a line: the offset goes to the cursor's side. Click to place it.",
             Tool::Demolish => "Click an element to take it down in the view's phase; click it again to take it back.",
+            Tool::Linework => "Click an edge to draw it in the line style in the Options Bar; <By Category> puts it back.",
+            Tool::DetailGroup => "Click where the group's origin goes.",
+            Tool::RepeatingDetail(None) => "Click where the repeating detail starts.",
+            Tool::RepeatingDetail(Some(_)) => "Click where it ends: the group repeats along the line every spacing.",
             Tool::Paint => "Click a face to paint it with the material in the Options Bar; the 3D view orbits as ever.",
             Tool::Unpaint => "Click a painted face to take its paint off.",
             Tool::Dimension(refs) if refs.is_empty() => "Pick a wall face, centre line or end, a door, a window or a grid to measure from.",
@@ -3602,8 +3883,11 @@ impl BimApp {
             Tool::Mass(pts) if pts.is_empty() => "Click the first corner of the mass's footprint.",
             Tool::Mass(pts) if pts.len() < 3 => "Click the footprint's next corner. Esc cancels.",
             Tool::Mass(_) => "Click the next corner; Enter, or the first corner again, finishes the mass. Esc cancels.",
+            Tool::DetailLine(pts) if pts.is_empty() => "Click where the detail line starts.",
+            Tool::DetailLine(_) => "Click its next point; Enter finishes it, the first point again closes it. Esc cancels.",
             Tool::SlopeArrow(None) => "Click the slope arrow's tail: where the floor's top stays at its height offset.",
             Tool::SlopeArrow(Some(_)) => "Click its head: the floor rises toward it at the Options Bar's slope. Esc cancels.",
+            Tool::SketchLine(_) | Tool::SketchPick => "Click where the line starts.",
         }
     }
 
@@ -3834,6 +4118,8 @@ impl BimApp {
         self.phasing_window(ctx);
         self.line_weights_window(ctx);
         self.object_styles_window(ctx);
+        self.line_styles_window(ctx);
+        self.fill_patterns_window(ctx);
         self.options_window(ctx);
         self.purge_window(ctx);
         if std::mem::take(&mut self.link_dialog) {
@@ -3907,8 +4193,8 @@ impl eframe::App for BimApp {
         self.show(ui);
     }
 
-    /// Tab over the plan cycles through what's under the cursor, as in Revit, rather than moving
-    /// the keyboard between widgets.
+    /// Tab over the plan cycles through what's under the cursor, as in Revit (or moves between a shape's numbers),
+    /// rather than moving the keyboard between widgets.
     fn raw_input_hook(&mut self, ctx: &Context, raw: &mut egui::RawInput) {
         self.pace(&mut raw.events);
         if self.canvas.hovering() && !ctx.egui_wants_keyboard_input() {

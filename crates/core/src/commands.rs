@@ -11,10 +11,12 @@ use serde_json::{Map, Value, json};
 use crate::cloud::{self, Cloud};
 use crate::engine::{Command, Run, Session};
 use crate::favorites::{self, FamilyEntry, Favorites, MaterialEntry};
+use crate::fills::{FillPattern, FilledRegion, FilledRegionType, Target};
 use crate::geom::{self, P2};
 use crate::graphics::{self, Graphics, Group, Look, Override, ViewTemplate};
 use crate::language::Language;
 use crate::library::Kind as LibKind;
+use crate::lines::{DetailLine, LineStyle};
 use crate::massing;
 use crate::model::{
     CEILING_HEIGHT, Ceiling, CeilingType, Column, ColumnType, Component, DEFAULT_HEIGHT, DimKind, Dimension, Element, Extrusion, Face,
@@ -26,6 +28,7 @@ use crate::model::{
 use crate::paint;
 use crate::phasing;
 use crate::render::Drawing;
+use crate::sketch::{self, SketchLine};
 use crate::texture::{self, Kind, Picture, Texture};
 use crate::units::Units;
 use crate::walls::{self, Axis, stacked};
@@ -156,8 +159,8 @@ pub static ALL: &[Command] = &[
         "floor",
         "Floor",
         &[],
-        "{boundary?: [[x,y],…], openings?: [[[x,y],…],…], level?, type?, offset?, slope?, arrow?: [[x,y],[x,y]], structural?} a \
-         slab (a structural one with `structural`, as Revit's Floor: Structural), its top at the level, or `offset` mm above it, open through `openings` (holes inside it, apart); no boundary = the outline \
+        "{boundary?: [[x,y],…], openings?: [[[x,y],…],…] | sketch?: [[[x,y],[x,y]],…], level?, type?, offset?, slope?, arrow?: \
+         [[x,y],[x,y]], structural?} a slab (a structural one with `structural`, as Revit's Floor: Structural), its top at the level, or `offset` mm above it, open through `openings` (holes inside it, apart); no boundary = the outline \
          of the level's walls along their centre lines, open over each loop of them standing free inside, joined to none of \
          the outer ones and with no room in it (a courtyard). Sloped: its top rises `slope` degrees (negative, falls) along \
          the slope arrow, from its tail, where it's at the offset, toward its head",
@@ -167,18 +170,40 @@ pub static ALL: &[Command] = &[
         "ceiling",
         "Ceiling",
         &[],
-        "{point: [x,y] | boundary: [[x,y],…], openings?: [[[x,y],…],…], level?, type?, offset?} a ceiling, its underside \
+        "{point: [x,y] | boundary: [[x,y],…], openings?: [[[x,y],…],…] | sketch: [[[x,y],[x,y]],…], level?, type?, offset?} a ceiling, its underside \
          `offset` mm (2600) above the level, open through `openings` (holes inside it, apart): in the room around `point`, out \
          to its walls' faces and round the walls standing inside it, or along `boundary`. Reflected ceiling plans show it",
         ceiling,
+    ),
+    other(
+        "sketch",
+        "Sketch",
+        "{lines: [[[x,y],[x,y]],…]} solves a sketch without making anything, as Finish Edit Mode does: lines in any order, \
+         either way round, joined end to end (within 1 mm) into closed loops; a loop inside no other (or inside a hole) an \
+         outline, counter-clockwise, one inside an outline a hole in it, clockwise. Gives each region's `outline`, `holes` and \
+         `area_m2`, or every problem with the lines it's about (numbered from 0): ends no other line meets, lines that \
+         intersect or overlap, three or more lines at a point. `sketch` on floor, ceiling, roof and shaft, and edit_boundary, \
+         take the same lines for one outline and its holes",
+        sketch_lines,
     ),
     edit(
         "shaft",
         "Shaft Opening",
         &[],
-        "{boundary: [[x,y],…], level?, top_level?, height?, base_offset?} a hole through the floors, ceilings and roofs it \
-         passes through, from `base_offset` above the level up to the next level, or `height` mm, or up to `top_level`",
+        "{boundary: [[x,y],…] | sketch: [[[x,y],[x,y]],…], level?, top_level?, height?, base_offset?} a hole through the \
+         floors, ceilings and roofs it passes through, from `base_offset` above the level up to the next level, or `height` \
+         mm, or up to `top_level`",
         shaft,
+    ),
+    edit(
+        "edit_boundary",
+        "Edit Boundary",
+        &[],
+        "{id, sketch?: [[[x,y],[x,y]],…]} redraws a floor's, a ceiling's, a roof's footprint's or a shaft's outline and its \
+         holes (a floor's or a ceiling's openings, a roof's courtyards; a shaft has none) as a sketch, all at once (see \
+         `sketch`); a roof's gable edges stay gables where the new footprint has the same edge. Without `sketch`, gives the \
+         outline and holes it has now, as the lines to edit",
+        edit_boundary,
     ),
     edit(
         "mass",
@@ -394,7 +419,7 @@ pub static ALL: &[Command] = &[
         "roof",
         "Roof",
         &[],
-        "{level?, boundary?: [[x,y],…], courtyards?: [[[x,y],…],…], slope?, overhang?, gables?: [edge, …], gable?, offset?, \
+        "{level?, boundary?: [[x,y],…], courtyards?: [[[x,y],…],…] | sketch?: [[[x,y],[x,y]],…], slope?, overhang?, gables?: [edge, …], gable?, offset?, \
          extrusion?, openings?: [[[x,y],…],…], join?, type?} a roof on `level` (by default the one above the lowest), its \
          base `offset` mm above it. Over `boundary` or else the walls of the level below, `overhang` mm (500) past their \
          faces, round any `courtyards` (holes in it, inside it and apart, with eaves of their own; over the walls, by \
@@ -425,8 +450,8 @@ pub static ALL: &[Command] = &[
          parallel references, along a line through `at`; angular: the angle between two references that meet, on the side \
          of `at`; radial: a round column's radius, toward `at`. A ref is {id, face?}: a wall's centre (the default), left or \
          right face (of its start-to-end direction), start or end; a door's or window's centre, or its jamb toward its wall's \
-         start or end; a grid's line. Or a point [x, y] on one of those (for radial, on a round column's edge). It follows \
-         what it measures",
+         start or end; a grid's line; a straight detail line, or its start or end (radial: a circle or an arc of one). Or a \
+         point [x, y] on one of those (for radial, on a round column's edge). It follows what it measures",
         dimension,
     ),
     edit(
@@ -573,7 +598,8 @@ pub static ALL: &[Command] = &[
          image?} | null, rename?, delete?: true} a material of the project's library, created or changed: its colour in shaded 3D \
          views, the pattern its cut shows in plans and sections (where a layer is wide enough to hold it), and the one its \
          surfaces show at its size in the building (a floor's top in plan, a ceiling's underside in its ceiling plan). Patterns: \
-         none, solid, diagonal, crosshatch, horizontal, vertical, grid, brick, concrete, insulation. Its `texture` is what its \
+         none, solid, diagonal, crosshatch, horizontal, vertical, grid, brick, concrete, insulation, or the name of one of the \
+         project's fill patterns (see `fill_pattern`), kept while the material shows it and renamed with it. Its `texture` is what its \
          surfaces look like in the 3D view, over its colour, a tile of it `size` mm across and up, turned `angle` degrees and \
          moved `offset` mm: a pattern drawn in code, `kind` brick, block, boards, concrete, plaster, tile, roof, fabric, metal \
          or insulation (at its natural size unless `size` says); or `image`, a picture: the PNG or JPEG file at `path`, taken \
@@ -710,11 +736,79 @@ pub static ALL: &[Command] = &[
         "corner",
         "Trim/Extend to Corner",
         &["TR"],
-        "{ids: [wall, wall], keep?: [[x, y], [x, y]]} trims or extends two walls to meet where their lines cross; `keep` is a \
-         point on the part of each to keep",
+        "{ids: [a, b], keep?: [[x, y], [x, y]]} trims or extends two walls, or two detail lines (lines or arcs), to meet where \
+         their lines (or circles) cross; `keep` is a point on the part of each to keep",
         corner,
     ),
-    edit("split", "Split", &["SL"], "{id, at: [x, y]} splits a wall in two at `at`; doors and windows go with their part", split),
+    edit(
+        "offset",
+        "Offset",
+        &["OF"],
+        "{id, distance, toward: [x, y], copy?} a detail line drawn again `distance` mm beside itself on the side `toward` is, \
+         arcs round the same centres, an ellipse or a spline as a spline through points within 0.05 mm of the true offset \
+         (which Revit can't): a copy (the default), or with `copy` false moved",
+        offset,
+    ),
+    edit(
+        "trim_extend",
+        "Trim/Extend Single Element",
+        &[],
+        "{boundary, ids: [id, …], keep: [[x, y], …]} trims or extends each detail line of `ids` (lines and arcs) to where it \
+         meets `boundary` (a detail line, a wall's location line or a grid), keeping the part of each its `keep` point is on: \
+         Revit's Trim/Extend Single Element, and Multiple Elements with several",
+        trim_extend,
+    ),
+    edit(
+        "split",
+        "Split",
+        &["SL"],
+        "{id, at: [x, y]} splits a wall or a detail line in two at `at`: a wall's doors and windows go with their part; a \
+         detail line of any shape splits where it passes nearest `at` (a spline by its control points exactly, one through \
+         points into two through points within 0.05 mm of it), and a closed one (a circle, a whole ellipse, a closed \
+         polyline) opens there instead, into one that starts and ends at `at`",
+        split,
+    ),
+    edit(
+        "join_polyline",
+        "Join into Polyline",
+        &["PJ"],
+        "{ids: [id, …]} joins detail lines of one view, lines, arcs and polylines that meet end to end, into one polyline in \
+         the first's line style (closed when they come round); the first keeps its id, the rest are deleted",
+        join_polyline,
+    ),
+    edit(
+        "fillet",
+        "Fillet Arc",
+        &["FL"],
+        "{ids: [a, b], radius} rounds the corner where two straight detail lines, or two straight walls, meet (or would, \
+         extended) with an arc of `radius` mm, in the first's line style or of the first's type: each is cut back to the arc",
+        fillet,
+    ),
+    edit(
+        "vertex",
+        "Add/Delete Vertex",
+        &[],
+        "{id, at: [x, y], delete?} a detail line (a polyline, or a spline of either kind) with a vertex more where it passes \
+         nearest `at` (a spline by its control points gains a control point and keeps its shape exactly), or with `delete` \
+         one fewer: the corner, control point or point passed through nearest `at`",
+        vertex,
+    ),
+    edit(
+        "convert_spline",
+        "Convert Spline",
+        &[],
+        "{id} a detail line that is a spline through points becomes the same curve by its control points, exactly; one by \
+         its control points becomes a spline through points within 0.05 mm of it",
+        convert_spline,
+    ),
+    edit(
+        "explode",
+        "Explode Polyline",
+        &["PX"],
+        "{id} takes a detail line that is a polyline apart into a line or an arc for each segment, in its view and style; \
+         the first keeps its id",
+        explode,
+    ),
     edit(
         "delete",
         "Delete",
@@ -722,6 +816,179 @@ pub static ALL: &[Command] = &[
         "{ids: [id,…]} deleting a wall deletes its doors and windows, deleting those their tags; a view takes its notes and \
          spot elevations, and what a spot elevation reads takes it; dimensions lose what's deleted",
         delete,
+    ),
+    edit(
+        "line_weights",
+        "Line Weights",
+        &[],
+        "{model?: [{scale, widths}, …], annotation?: [16 widths], reset?: true} the project's line weights, as Revit's \
+         Manage > Line Weights: what each pen draws on paper, mm. `model` gives, whole, the model's pens 1 to 16 at each of \
+         its scales (1 to 32 of them, 1 : `scale`): a view draws its walls, doors, patterns and the rest of the model in the \
+         column of the scale nearest its own (by how many times finer or coarser; the finer of two as near). `annotation` \
+         gives the 16 pens that dimensions, tags, text, grids, levels and marks draw in, at any scale. Each width is 0.01 to \
+         20 mm; pen 0 is always a hairline. `reset` goes back to what a project in its units starts with (the model's pens \
+         wider at finer scales; at 1 : 100, pen 4 is 0.18 mm and pen 10 0.35 mm). Without any, it says what they are, each \
+         scale named as the project's units name it, and `own` whether the project has set them",
+        line_weights,
+    ),
+    edit(
+        "object_styles",
+        "Object Styles",
+        &[],
+        "{categories?: {category: {projection?: pen, cut?: pen}, …}, reset?: true} the project's object styles, as Revit's \
+         Manage > Object Styles: the pen (0, a hairline, to 16) each model category draws its lines in where it is seen \
+         (`projection`) and where a view cuts it (`cut`), in every plan and section; a view's Visibility/Graphics overrides \
+         them. A category given keeps the pen it isn't given. The rest of an element's lines keep their own: a compound \
+         wall's layers, a door's jambs, a stair's walk line. `reset` goes back to what a project starts with (cut pen 10 and \
+         seen pen 4; a door's and a window's cut 6, a railing seen 6, a mass 4 both). Without either, it says each model \
+         category's, `own` whether the project has set it apart",
+        object_styles,
+    ),
+    edit(
+        "line_pattern",
+        "Line Patterns",
+        &[],
+        "{name?, segments?: [{dash: mm} | {space: mm} | \"dot\", …], rename?, delete?: true} a line pattern of the project's: \
+         a dash or a dot then a space, again and again, each dash and space 0.05 to 100 mm long on paper, so it reads the \
+         same at any scale. A project starts with Dash, Long Dash, Dot, Dash Dot, Hidden and Centre; Solid is a line with \
+         none. `rename` renames it, the line styles using it following; `delete` takes it away, while no style uses it. \
+         Without `name`, it lists every pattern",
+        line_pattern,
+    ),
+    edit(
+        "line_style",
+        "Line Styles",
+        &[],
+        "{name?, pen?, color?: \"#rrggbb\" | [r, g, b], pattern?: name | \"Solid\", rename?, delete?: true} a line style of \
+         the project's, as Revit's: the pen (0, a hairline, to 16) its lines draw in, their colour (black unless told) and \
+         their line pattern. A new one needs `pen`; one changed keeps what it isn't given. A project starts with Hairline, \
+         Thin Lines, Medium Lines, Wide Lines, Hidden Lines, Centre Lines and Overhead Lines. `rename` renames it, the lines \
+         drawn in it following; `delete` takes it away, while no line is drawn in it. Without `name`, it lists every style",
+        line_style,
+    ),
+    edit(
+        "fill_pattern",
+        "Fill Patterns",
+        &[],
+        "{name?, target?: drafting|model, lines?: [{angle, spacing, origin?: [x, y], shift?, dashes?: [mm, -mm, …]}, …], rename?, \
+         delete?: true} a fill pattern of the project's, as Revit's (and a PAT file's): families of parallel lines, each at \
+         `angle` degrees through `origin`, its lines `spacing` apart and each `shift` along from the last, whole or dashed \
+         (`dashes`: a dash's length, a space's as a negative one, 0 a dot); no lines, it fills solid. A drafting pattern's \
+         lengths are mm on paper, the same at any scale; a model pattern's mm in the building. A project starts with Solid \
+         fill, Diagonal Up and Down, Crosshatch, Diagonal Crosshatch, Horizontal, Vertical, Sand, Brick 225 x 75 and Tile 300. \
+         `rename` renames it, the region types filling with it following; `delete` takes it away while no type uses it. \
+         Without `name`, it lists every pattern",
+        fill_pattern,
+    ),
+    edit(
+        "linework",
+        "Linework",
+        &["LW"],
+        "{view?, id, at: [x, y], style? | invisible?: true, remove?: true} Revit's Linework: the edge of element `id` that a \
+         plan (`view`, a level's or a plan view; the lowest level's by default) draws nearest `at` (within 200 mm), drawn in \
+         that view only in line style `style`, or not at all with `invisible`; `remove` takes it off that edge again. It \
+         returns the edge, `from` and `to`",
+        linework,
+    ),
+    edit(
+        "import_fill_patterns",
+        "Import Fill Patterns",
+        &[],
+        "{path | text, replace?: false} the fill patterns of a PAT file (AutoCAD's and Revit's), from the file at `path` or \
+         as `text`: each `*Name` and its families of lines, in mm unless the file says `;%UNITS=INCH`, drafting unless a \
+         pattern says `;%TYPE=MODEL`. A pattern the project already has is left as it is unless `replace`; one that can't \
+         be a pattern (no lines, an offset of 0, too many families) is left out. It returns those `imported` and those \
+         `left_out`, each with why",
+        import_fill_patterns,
+    ),
+    other(
+        "export_fill_patterns",
+        "Export Fill Patterns",
+        "{path?, names?: [name, …]} the project's fill patterns (those `names` says, else all but the solid ones, which a PAT \
+         file can't hold) as a PAT file in mm, written to `path`, or returned as `text` without it",
+        export_fill_patterns,
+    ),
+    edit(
+        "filled_region_type",
+        "Filled Region Types",
+        &[],
+        "{name?, foreground?: pattern | null, foreground_color?, background?: pattern | null, background_color?, masking?, \
+         rename?, delete?: true} a filled region type of the project's: its foreground pattern over its background one, each \
+         in its colour (\"#rrggbb\" or [r, g, b], black unless told), over the paper when `masking` (it hides what's under \
+         it). A new one starts with none. A project starts with Solid Black, Diagonal Up, Crosshatch, Sand, Brick and Masking. \
+         `rename` renames it, its regions following; `delete` takes it away while no region is of it. Without `name`, it \
+         lists every type",
+        filled_region_type,
+    ),
+    edit(
+        "filled_region",
+        "Filled Region",
+        &["FR"],
+        "{sketch: [[[x,y],[x,y]],…], view?, type?, line_style?: name | null} a filled region in a view (a plan, a section, an \
+         elevation or a sheet, in its own terms; the lowest plan by default): the loops its sketch closes into (see \
+         `sketch`: any number of outlines, a loop inside one a hole, one inside that an island), filled as type `type` \
+         (Solid Black unless told) says, its boundary in line style `line_style` (Thin Lines unless told; null, unseen: a \
+         masking region's way). It draws over the model, under the annotation; edit its sketch with edit_boundary",
+        filled_region,
+    ),
+    edit(
+        "create_group",
+        "Create Group",
+        &["GP"],
+        "{ids, name?} a detail group made of detail lines, filled regions and text notes of one view, as Revit's Create \
+         Group: they become type `name`'s members (Group 1, 2… unless told), and one group of it takes their place, its \
+         origin the middle of them. Place it again with detail_group; ungroup gives its members back. Returns {id, name}",
+        create_group,
+    ),
+    edit(
+        "detail_group",
+        "Place Detail Group",
+        &[],
+        "{type, at: [x,y], angle?, mirrored?, view?} a detail group of type `type` placed in a view (the lowest plan by \
+         default): its members drawn with their origin at `at`, turned `angle` degrees counter-clockwise, mirrored across \
+         their x axis first when `mirrored`. Move, copy, rotate and mirror take it whole",
+        detail_group,
+    ),
+    edit(
+        "repeating_detail",
+        "Repeating Detail",
+        &[],
+        "{type, start: [x,y], end: [x,y], spacing, mirrored?, view?} detail group `type` repeated along the line from \
+         `start` to `end`, every `spacing` mm from `start` (at most 2000 of them), each turned along the line, as Revit's \
+         Repeating Detail Component: brick coursing, blocking, batt ties. Returns {id, count}",
+        repeating_detail,
+    ),
+    edit(
+        "ungroup",
+        "Ungroup",
+        &["UG"],
+        "{id} the members of detail group `id` as detail lines, filled regions and text notes of its view again, where it \
+         drew them; the group goes, its type stays. Returns {ids}",
+        ungroup,
+    ),
+    edit(
+        "group_type",
+        "Detail Groups",
+        &[],
+        "{name?, rename?, delete?: true} a detail group type: `rename` renames it, its groups following; `delete` takes it \
+         away while none of it is placed. Without `name`, it lists each with its members and how many are placed",
+        group_type,
+    ),
+    edit(
+        "detail_line",
+        "Detail Line",
+        &["DL"],
+        "{view?, style?, and a curve: `points` [[x, y], …] (with `arcs`, each segment's turn in degrees counter-clockwise, \
+         and `closed`), `start` and `end` (with `arc` degrees or a `through` point), `centre` and `radius` (a circle), \
+         `centre` and `radii` [a, b] (an ellipse, with `angle` degrees and `span` [from, to] degrees for part of one), \
+         `control` [[x, y], …] (a spline by its control points, with `knots`), or `fit` [[x, y], …] (a spline through them, \
+         with `start_tangent` and `end_tangent`)} a detail line in a view, by name or id, in the view's own terms: a \
+         level's plan (the lowest by default; plan mm), a section or an elevation (along its line from its start, and up) \
+         or a sheet by number (paper mm). It draws in line style `style` (Thin Lines unless told), only in its view, and \
+         goes with it; with `insulation`, a width in mm, it draws as batt insulation along its curve, as Revit's Insulation; \
+         with `centre_mark` true, a small cross marks the centre of its arcs, circle or ellipse; with `cloud`, an arc length \
+         in mm, it draws as a revision cloud's scallops along it (outward round a loop), of `revision` (any text)",
+        detail_line,
     ),
     edit(
         "delete_type",
@@ -1442,6 +1709,25 @@ pub fn element_json(m: &Model, id: Id) -> Value {
             extra.insert("perimeter_m".into(), json!(region.as_ref().map_or(0.0, |g| (g.perimeter() / 10.0).round() / 100.0)));
         }
         Element::Text(_) => {
+            extra.insert("level".into(), json!(m.level_of(e)));
+        }
+        Element::DetailGroup(g) => {
+            extra.insert("members".into(), json!(m.detail_groups.get(&g.type_name).map_or(0, |t| t.members.len())));
+            extra.insert("level".into(), json!(m.level_of(e)));
+        }
+        Element::RepeatingDetail(r) => {
+            extra.insert("count".into(), json!(r.places().map_or(0, |v| v.len())));
+            extra.insert("level".into(), json!(m.level_of(e)));
+        }
+        Element::FilledRegion(r) => {
+            let area = sketch::solve(&r.sketch).map_or(0.0, |p| p.area());
+            extra.insert("area_m2".into(), json!(m2(area)));
+            extra.insert("level".into(), json!(m.level_of(e)));
+        }
+        Element::DetailLine(l) => {
+            let length = l.curve.length();
+            extra.insert("shape".into(), json!(l.curve.kind()));
+            extra.insert("length".into(), json!(hundredth(length)));
             extra.insert("level".into(), json!(m.level_of(e)));
         }
         Element::Spot(sp) => {
@@ -3210,15 +3496,20 @@ fn floor(s: &mut Session, p: &Value) -> R {
     let m = &s.model;
     let level = level_param(c, m, p, "level")?;
     let type_name = type_param(c, p, m, "floor")?;
-    let (mut boundary, found) = if absent(p.get("boundary")) {
-        floor_outline(m, level).ok_or_else(|| bad(c, format!("no walls enclose an area on {}; give `boundary`", level_name(m, level))))?
-    } else {
-        (points(c, p, "boundary")?, Vec::new())
+    let (mut boundary, openings, sketch) = match sketched(c, p, "openings", &[])? {
+        Some((r, lines)) => (r.outer, r.holes, lines),
+        None => {
+            let (boundary, found) = match absent(p.get("boundary")) {
+                true => floor_outline(m, level)
+                    .ok_or_else(|| bad(c, format!("no walls enclose an area on {}; give `boundary`", level_name(m, level))))?,
+                false => (ring(c, "boundary", points(c, p, "boundary")?)?, Vec::new()),
+            };
+            (boundary, rings(c, "opening", p, "openings")?.unwrap_or(found), Vec::new())
+        }
     };
     if geom::area(&boundary) < 0.0 {
         boundary.reverse();
     }
-    let openings: Vec<Vec<P2>> = shaped(c, p, "openings", "a list of outlines [[[x,y],…],…]")?.unwrap_or(found);
     let arrow = match absent(p.get("arrow")) {
         true => None,
         false => match points(c, p, "arrow")?.as_slice() {
@@ -3240,6 +3531,9 @@ fn floor(s: &mut Session, p: &Value) -> R {
         slope,
         arrow,
         structural,
+        sketch,
+        pattern_origin: P2(0.0, 0.0),
+        pattern_angle: 0.0,
     }));
     Ok(json!({"id": id, "area_m2": area}))
 }
@@ -3249,26 +3543,37 @@ fn ceiling(s: &mut Session, p: &Value) -> R {
     let m = &s.model;
     let level = level_param(c, m, p, "level")?;
     let type_name = type_param(c, p, m, "ceiling")?;
-    let (mut boundary, found) = match (absent(p.get("boundary")), point_opt(c, p, "point")?) {
-        (false, _) => (points(c, p, "boundary")?, Vec::new()),
+    let drawn = sketched(c, p, "openings", &[])?;
+    let sketch = drawn.as_ref().map(|(_, lines)| lines.clone()).unwrap_or_default();
+    let (mut boundary, found) = match (drawn, absent(p.get("boundary")), point_opt(c, p, "point")?) {
+        (Some((r, _)), ..) => (r.outer, r.holes),
+        (None, false, _) => (ring(c, "boundary", points(c, p, "boundary")?)?, Vec::new()),
         // The room's free floor: what the walls' faces close around the point, and the walls standing
         // inside it, clockwise as a floor's openings are.
-        (true, Some(at)) => geom::region_at(&m.face_lines(level), at, TOL)
+        (None, true, Some(at)) => geom::region_at(&m.face_lines(level), at, TOL)
             .map(|r| {
                 let holes = r.holes.iter().map(|h| tidy(&h.iter().rev().copied().collect::<Vec<P2>>())).collect();
                 (geom::corners(&r.outer).into_iter().map(micron).collect(), holes)
             })
             .ok_or_else(|| bad(c, format!("no walls on {} close around [{}, {}]; give `boundary`", level_name(m, level), at.0, at.1)))?,
-        (true, None) => return Err(bad(c, "`point` [x, y] in a room, or `boundary` [[x, y], …], is required")),
+        (None, true, None) => return Err(bad(c, "`point` [x, y] in a room, `boundary` [[x, y], …] or `sketch` is required")),
     };
     if geom::area(&boundary) < 0.0 {
         boundary.reverse();
     }
-    let openings: Vec<Vec<P2>> = shaped(c, p, "openings", "a list of outlines [[[x,y],…],…]")?.unwrap_or(found);
+    let openings: Vec<Vec<P2>> = rings(c, "opening", p, "openings")?.unwrap_or(found);
     let offset = num(c, p, "offset")?.unwrap_or(CEILING_HEIGHT);
     // Its openings lie inside it and apart, or the model refuses it.
     let area = m2(geom::area(&boundary) - openings.iter().map(|o| geom::area(o).abs()).sum::<f64>());
-    let id = s.model_mut().insert(Element::Ceiling(Ceiling { params: Default::default(), type_name, level, boundary, openings, offset }));
+    let id = s.model_mut().insert(Element::Ceiling(Ceiling {
+        params: Default::default(),
+        type_name,
+        level,
+        boundary,
+        openings,
+        offset,
+        sketch,
+    }));
     Ok(json!({"id": id, "area_m2": area}))
 }
 
@@ -3276,13 +3581,17 @@ fn shaft(s: &mut Session, p: &Value) -> R {
     let c = "shaft";
     let m = &s.model;
     let level = level_param(c, m, p, "level")?;
-    let mut boundary = points(c, p, "boundary")?;
+    let (mut boundary, sketch) = match sketched(c, p, "", &[])? {
+        Some((r, lines)) if r.holes.is_empty() => (r.outer, lines),
+        Some(_) => return Err(bad(c, "a shaft is one outline with no holes in it: sketch each hole as a shaft of its own")),
+        None => (ring(c, "boundary", points(c, p, "boundary")?)?, Vec::new()),
+    };
     if geom::area(&boundary) < 0.0 {
         boundary.reverse();
     }
     let (top_level, height) = top_param(c, m, p, level)?;
     let base_offset = num(c, p, "base_offset")?.unwrap_or(0.0);
-    let id = s.model_mut().insert(Element::Shaft(Shaft { level, boundary, top_level, height, base_offset }));
+    let id = s.model_mut().insert(Element::Shaft(Shaft { level, boundary, top_level, height, base_offset, sketch }));
     Ok(json!({"id": id}))
 }
 
@@ -4045,27 +4354,31 @@ fn roof(s: &mut Session, p: &Value) -> R {
     };
     let type_name = type_param(c, p, m, "roof")?;
     let extrusion: Option<Extrusion> = shaped(c, p, "extrusion", "{line: [[x,y],[x,y]], profile: [[along, up],…], from?, to}")?;
-    let given = !absent(p.get("boundary"));
+    let drawn = sketched(c, p, "courtyards", &[])?;
+    let sketch = drawn.as_ref().map(|(_, lines)| lines.clone()).unwrap_or_default();
+    let given = !absent(p.get("boundary")) || drawn.is_some();
     let overhang = num(c, p, "overhang")?.unwrap_or(if given || extrusion.is_some() { 0.0 } else { 500.0 });
-    let (boundary, found) = match (given, &extrusion) {
-        (true, _) => (points(c, p, "boundary")?, Vec::new()),
-        (false, Some(_)) => (Vec::new(), Vec::new()),
-        (false, None) => roof_footprint(m, level, overhang).map_err(|e| bad(c, e))?,
+    let (boundary, found) = match (drawn, given, &extrusion) {
+        (Some((r, _)), ..) => (r.outer, r.holes),
+        (None, true, _) => (ring(c, "boundary", points(c, p, "boundary")?)?, Vec::new()),
+        (None, false, Some(_)) => (Vec::new(), Vec::new()),
+        (None, false, None) => roof_footprint(m, level, overhang).map_err(|e| bad(c, e))?,
     };
     let r = Roof {
         params: Default::default(),
         type_name,
         level,
         boundary,
-        courtyards: shaped(c, p, "courtyards", "a list of outlines [[[x,y],…],…]")?.unwrap_or(found),
+        courtyards: rings(c, "courtyard", p, "courtyards")?.unwrap_or(found),
         slope: if extrusion.is_some() { 0.0 } else { num(c, p, "slope")?.unwrap_or(30.0) },
         overhang,
         gable: flag(c, p, "gable")?,
         gables: shaped(c, p, "gables", "a list of edge numbers")?.unwrap_or_default(),
         offset: num(c, p, "offset")?.unwrap_or(0.0),
-        openings: shaped(c, p, "openings", "a list of outlines [[[x,y],…],…]")?.unwrap_or_default(),
+        openings: rings(c, "opening", p, "openings")?.unwrap_or_default(),
         join: id_opt(c, p, "join")?,
         extrusion,
+        sketch,
     };
     let id = s.model_mut().insert(Element::Roof(r));
     Ok(json!({"id": id}))
@@ -4133,6 +4446,7 @@ fn dormer(s: &mut Session, p: &Value) -> R {
         openings: Vec::new(),
         join: Some(host),
         extrusion: None,
+        sketch: Vec::new(),
     }));
     let roof_guid = model.guid(roof);
     let wall = |start: P2, end: P2| {
@@ -4167,6 +4481,158 @@ fn dormer(s: &mut Session, p: &Value) -> R {
 }
 
 /// `key` as JSON shaped like `T` (a list of at most `MAX_POINTS`), or none.
+/// A sketch line as a command takes it: `[[x,y],[x,y]]` straight, `[[x,y],[x,y],[x,y]]` an arc from the first to the
+/// second through the third, or `{start, end, through?, id?}`, `id` one of the sketch's lines it keeps.
+#[derive(serde::Deserialize)]
+#[serde(untagged)]
+enum Given {
+    Line([P2; 2]),
+    Arc([P2; 3]),
+    Full(Box<sketch::RawSketchLine>),
+}
+
+const SKETCH_SHAPE: &str = "a list of lines, each [[x,y],[x,y]], an arc [[x,y],[x,y],[x,y]] (its ends, then a point it passes \
+     through) or an object: `id?` and a curve's fields, `start` and `end` (with `arc` degrees or a `through` point), \
+     `points` (with `arcs` and `closed`), `centre` and `radius`, `centre` and `radii` (with `angle` and `span`), `control` \
+     (with `knots`), or `fit` (with `start_tangent` and `end_tangent`)";
+
+/// The lines given under `key`, a line given an `id` keeping that of the line of `old` (the sketch being edited) it names.
+fn sketch_param(c: &str, p: &Value, key: &str, old: &[SketchLine]) -> Result<Option<Vec<SketchLine>>, String> {
+    let Some(given) = shaped::<Vec<Given>>(c, p, key, SKETCH_SHAPE)? else { return Ok(None) };
+    given
+        .into_iter()
+        .enumerate()
+        .map(|(i, g)| match g {
+            Given::Line([a, b]) => Ok(SketchLine::new(a, b)),
+            Given::Arc([a, b, t]) => Ok(SketchLine::arc(a, b, t)),
+            Given::Full(k) => {
+                let curve = k.fields().curve().map_err(|e| bad(c, format!("`{key}` line {i}: {e}")))?;
+                let mut l = SketchLine { style: k.style.clone(), invisible: k.invisible, ..SketchLine::from(curve) };
+                if k.id != 0 {
+                    let id = k.id;
+                    let was = old.iter().find(|o| o.id == id).ok_or_else(|| {
+                        bad(c, format!("`{key}` line {i}: {id} isn't a line of this sketch; leave `id` out for a new one"))
+                    })?;
+                    (l.id, l.guid) = (was.id, was.guid);
+                }
+                Ok(l)
+            }
+        })
+        .collect::<Result<Vec<_>, _>>()
+        .map(Some)
+}
+
+/// `sketch`: lines drawn in any order, solved into one outline (counter-clockwise) and its holes (clockwise), as
+/// `sketch.rs` solves them, and the lines, to keep; None when it isn't given. Given with `boundary` or `holes` (the key the
+/// element's holes go by), it's refused. A line given an `id` keeps that of the line of `old` it names.
+fn sketched(c: &str, p: &Value, holes: &str, old: &[SketchLine]) -> Result<Option<(geom::Region, Vec<SketchLine>)>, String> {
+    let Some(lines) = sketch_param(c, p, "sketch", old)? else { return Ok(None) };
+    if ["boundary", holes].iter().any(|k| !k.is_empty() && !absent(p.get(*k))) {
+        return Err(bad(c, format!("give the outline as `sketch` or `boundary` (with `{holes}`), not both")));
+    }
+    match sketch::solve_one(&lines) {
+        Ok(r) => Ok(Some((r, lines))),
+        Err(e) => Err(bad(c, format!("the sketch isn't one outline: {}", sketch::say(&e, &sketch::namer(&lines))))),
+    }
+}
+
+/// A ring given as points (`what`: a boundary, an opening), any point repeating the one before it (or at its end, the
+/// first) left out, judged as the sketch of its edges, edge i from point i to the next: none crossing or along another.
+/// Fewer than three points, or no area, [`Model::check`] refuses.
+fn ring(c: &str, what: &str, given: Vec<P2>) -> Result<Vec<P2>, String> {
+    let mut r: Vec<P2> = Vec::with_capacity(given.len());
+    for q in given {
+        if r.last().is_none_or(|l| l.dist(q) > TOL) {
+            r.push(q);
+        }
+    }
+    while r.len() > 1 && r.first().zip(r.last()).is_some_and(|(a, b)| a.dist(*b) <= TOL) {
+        r.pop();
+    }
+    if r.len() < 3 || r.iter().any(|q| !q.is_finite()) {
+        return Ok(r);
+    }
+    match sketch::solve(&sketch::lines_of(&r, &[])) {
+        Ok(_) => Ok(r),
+        Err(e) if e.iter().all(|p| matches!(p, sketch::Problem::NoArea { .. })) => Ok(r),
+        Err(e) => Err(bad(c, format!("{what} isn't a simple outline: {}", sketch::say(&e, &|i| format!("edge {i}"))))),
+    }
+}
+
+/// Rings given under `key` (a floor's openings, a roof's courtyards), each judged as [`ring`] judges one.
+fn rings(c: &str, what: &str, p: &Value, key: &str) -> Result<Option<Vec<Vec<P2>>>, String> {
+    let Some(given) = shaped::<Vec<Vec<P2>>>(c, p, key, "a list of outlines [[[x,y],…],…]")? else { return Ok(None) };
+    given.into_iter().enumerate().map(|(i, r)| ring(c, &format!("{what} {i}"), r)).collect::<Result<_, _>>().map(Some)
+}
+
+fn sketch_lines(_: &mut Session, p: &Value) -> R {
+    let c = "sketch";
+    let lines = sketch_param(c, p, "lines", &[])?.ok_or_else(|| bad(c, "`lines` [[[x,y],[x,y]],…] is required"))?;
+    let profile = sketch::solve(&lines)
+        .map_err(|e| bad(c, format!("the lines don't make closed loops: {}", sketch::say(&e, &sketch::namer(&lines)))))?;
+    let regions: Vec<Value> =
+        profile.regions.iter().map(|r| json!({"outline": r.outer, "holes": r.holes, "area_m2": m2(r.area())})).collect();
+    Ok(json!({"regions": regions, "area_m2": m2(profile.area())}))
+}
+
+/// An element's sketch: the one it keeps, while that still draws its outline and holes; else their edges, as new lines.
+fn boundary_now(e: &Element) -> Option<Vec<SketchLine>> {
+    let (outline, holes) = match e {
+        Element::Floor(f) => (f.boundary.clone(), f.openings.clone()),
+        Element::Ceiling(x) => (x.boundary.clone(), x.openings.clone()),
+        Element::Roof(r) if r.extrusion.is_none() => (r.boundary.clone(), r.courtyards.clone()),
+        Element::Shaft(sh) => (sh.boundary.clone(), Vec::new()),
+        _ => return None,
+    };
+    let kept = e.sketch().filter(|ls| sketch::draws(ls, &outline, &holes)).cloned();
+    Some(kept.unwrap_or_else(|| sketch::lines_of(&outline, &holes)))
+}
+
+/// Revit's Edit Boundary: an element's outline and its holes redrawn as one sketch.
+fn edit_boundary(s: &mut Session, p: &Value) -> R {
+    let c = "edit_boundary";
+    let m = &s.model;
+    let id = id_opt(c, p, "id")?.ok_or_else(|| bad(c, "`id`, the floor, ceiling, roof or shaft to edit, is required"))?;
+    let e = m.elements.get(id).cloned().ok_or_else(|| bad(c, format!("no element {id}")))?;
+    if let Element::Roof(Roof { extrusion: Some(_), .. }) = e {
+        return Err(bad(c, format!("{id} is an extrusion roof: change its profile, `modify` its `extrusion`")));
+    }
+    // A filled region is its sketch, any number of outlines.
+    if let Element::FilledRegion(r) = e {
+        let Some(lines) = sketch_param(c, p, "sketch", &r.sketch)? else { return Ok(json!({"id": id, "sketch": r.sketch})) };
+        let profile = sketch::solve(&lines)
+            .map_err(|e| bad(c, format!("the sketch doesn't close into loops: {}", sketch::say(&e, &sketch::namer(&lines)))))?;
+        let id = m.elements.id(id).ok_or_else(|| bad(c, "no such element"))?;
+        s.model_mut().elements.insert(id, Element::FilledRegion(FilledRegion { sketch: lines, ..r }));
+        return Ok(json!({"id": id, "area_m2": m2(profile.area())}));
+    }
+    let now =
+        boundary_now(&e).ok_or_else(|| bad(c, format!("{id} isn't a floor, a ceiling, a roof's footprint, a shaft or a filled region")))?;
+    let Some((r, lines)) = sketched(c, p, "", &now)? else {
+        return Ok(json!({"id": id, "sketch": now}));
+    };
+    let area = m2(r.area());
+    let e = match e {
+        Element::Floor(f) => Element::Floor(Floor { boundary: r.outer, openings: r.holes, sketch: lines, ..f }),
+        Element::Ceiling(x) => Element::Ceiling(Ceiling { boundary: r.outer, openings: r.holes, sketch: lines, ..x }),
+        Element::Shaft(_) if !r.holes.is_empty() => return Err(bad(c, "a shaft is one outline with no holes in it")),
+        Element::Shaft(sh) => Element::Shaft(Shaft { boundary: r.outer, sketch: lines, ..sh }),
+        Element::Roof(old) => {
+            let mut new = Roof { boundary: r.outer, courtyards: r.holes, gables: Vec::new(), sketch: lines, ..old.clone() };
+            // A gable stays where its edge does, either way round.
+            let same =
+                |(a, b): (P2, P2), (c, d): (P2, P2)| (a.dist(c) <= TOL && b.dist(d) <= TOL) || (a.dist(d) <= TOL && b.dist(c) <= TOL);
+            let kept: Vec<(P2, P2)> = old.edges().enumerate().filter(|(i, _)| old.gables.contains(i)).map(|(_, e)| e).collect();
+            new.gables = new.edges().enumerate().filter(|(_, e)| kept.iter().any(|k| same(*k, *e))).map(|(i, _)| i).collect();
+            Element::Roof(new)
+        }
+        _ => return Err(bad(c, format!("{id} isn't a floor, a ceiling, a roof's footprint or a shaft"))),
+    };
+    let id = m.elements.id(id).ok_or_else(|| bad(c, "no such element"))?;
+    s.model_mut().elements.insert(id, e);
+    Ok(json!({"id": id, "area_m2": area}))
+}
+
 fn shaped<T: serde::de::DeserializeOwned>(c: &str, p: &Value, key: &str, shape: &str) -> Result<Option<T>, String> {
     match p.get(key) {
         v if absent(v) => Ok(None),
@@ -4688,12 +5154,20 @@ fn material(s: &mut Session, p: &Value) -> R {
     if let Some(v) = p.get("color").filter(|v| !v.is_null()) {
         mat.color = colour(v).ok_or_else(|| bad(c, format!("`color` is \"#rrggbb\" or [r, g, b], each 0 to 255, not {v}")))?;
     }
-    for (key, slot) in [("cut", &mut mat.cut), ("surface", &mut mat.surface)] {
+    // A pattern drawn in code by its name, or one of the project's fill patterns.
+    for (key, slot, fill) in [("cut", &mut mat.cut, &mut mat.cut_pattern), ("surface", &mut mat.surface, &mut mat.surface_pattern)] {
         if let Some(v) = p.get(key).filter(|v| !v.is_null()) {
-            *slot = serde_json::from_value(v.clone()).map_err(|_| {
+            if let Ok(pattern) = serde_json::from_value::<Pattern>(v.clone()) {
+                (*slot, *fill) = (pattern, None);
+            } else if let Some(n) = v.as_str().map(str::trim).filter(|n| m.fill_patterns.contains_key(*n)) {
+                (*slot, *fill) = (Pattern::None, Some(n.to_string()));
+            } else {
                 let names: Vec<String> = Pattern::ALL.iter().map(|p| json!(p).as_str().unwrap_or_default().to_string()).collect();
-                bad(c, format!("`{key}`: {v} isn't a pattern; one of {}", names.join(", ")))
-            })?;
+                return Err(bad(
+                    c,
+                    format!("`{key}`: {v} isn't a pattern: one of {}, or a fill pattern of the project's", names.join(", ")),
+                ));
+            }
         }
     }
     let name = match string(c, p, "rename")? {
@@ -5516,10 +5990,19 @@ pub(crate) struct Motion<'a> {
 /// The element taken by `mo`. Levels have no place in plan; a door or window on its own goes
 /// only along its wall, by a translation, else only with its wall.
 pub(crate) fn transformed(c: &str, m: &Model, id: Id, mo: &Motion, with: &BTreeSet<Id>) -> Result<Element, String> {
+    let e = m.elements.get(id).cloned().ok_or_else(|| bad(c, format!("no element {id}")))?;
+    transform(c, m, e, id, mo, with)
+}
+
+/// Element `e`, element `id` of `m` or a detail group's member, taken by `mo`, as [`transformed`].
+pub(crate) fn transform(c: &str, m: &Model, mut e: Element, id: Id, mo: &Motion, with: &BTreeSet<Id>) -> Result<Element, String> {
     let f = mo.map;
     let within = |g: Guid| m.elements.id(g).is_some_and(|i| with.contains(&i));
-    let mut e = m.elements.get(id).cloned().ok_or_else(|| bad(c, format!("no element {id}")))?;
     let category = e.category();
+    // Its sketch goes with it, line for line.
+    if let Some(lines) = e.sketch_mut() {
+        lines.iter_mut().for_each(|l| *l = l.map(f));
+    }
     match &mut e {
         Element::Level(_) => return Err(bad(c, format!("level {id} has no place in plan; change its elevation, or add a level"))),
         Element::Sheet(_) => return Err(bad(c, format!("sheet {id} has no place in plan; move the views on it"))),
@@ -5539,6 +6022,18 @@ pub(crate) fn transformed(c: &str, m: &Model, id: Id, mo: &Motion, with: &BTreeS
             n.leader = n.leader.map(f);
         }
         Element::Spot(sp) => sp.at = f(sp.at),
+        Element::DetailLine(l) => l.curve = l.curve.map(|p| micron(f(p))),
+        // Its sketch went with it, above; its pattern goes too.
+        Element::FilledRegion(r) => (r.pattern_origin, r.pattern_angle) = turned(f, r.pattern_origin, r.pattern_angle),
+        // Its members go with it; a mirror image is its type's, flipped.
+        Element::DetailGroup(g) => {
+            (g.at, g.angle) = turned(f, g.at, g.angle);
+            g.mirrored ^= mo.mirror;
+        }
+        Element::RepeatingDetail(r) => {
+            (r.start, r.end) = (f(r.start), f(r.end));
+            r.mirrored ^= mo.mirror;
+        }
         // A link is moved and turned as a whole; its file stays as it is.
         Element::Link(l) => (l.at, l.angle) = turned(f, l.at, l.angle),
         Element::Viewport(v) => v.at = f(v.at),
@@ -5587,6 +6082,7 @@ pub(crate) fn transformed(c: &str, m: &Model, id: Id, mo: &Motion, with: &BTreeS
                 fl.boundary.reverse();
             }
             fl.arrow = fl.arrow.map(|a| a.map(f));
+            (fl.pattern_origin, fl.pattern_angle) = turned(f, fl.pattern_origin, fl.pattern_angle);
         }
         Element::Ceiling(cl) => {
             cl.boundary.iter_mut().chain(cl.openings.iter_mut().flatten()).for_each(|q| *q = f(*q));
@@ -5972,6 +6468,18 @@ fn corner(s: &mut Session, p: &Value) -> R {
     let ids = ids_param(c, &s.model, p)?;
     let m = &s.model;
     let [a, b] = ids.as_slice() else { return Err(bad(c, "`ids` takes two walls")) };
+    if let (Some(Element::DetailLine(la)), Some(Element::DetailLine(lb))) = (m.elements.get(*a), m.elements.get(*b)) {
+        let keep = points(c, p, "keep").ok().filter(|k| k.len() == 2).unwrap_or_else(|| vec![la.curve.middle(), lb.curve.middle()]);
+        let (ca, cb) = crate::draw::corner(&la.curve, keep[0], &lb.curve, keep[1]).ok_or_else(|| {
+            bad(c, "the lines don't meet, run on as far as need be: they're parallel, or an arc's circle misses the other")
+        })?;
+        let (ia, ib) = (*a, *b);
+        let (la, lb) = (la.clone(), lb.clone());
+        let m = s.model_mut();
+        m.elements.insert(ia, Element::DetailLine(DetailLine { curve: ca.map(micron), ..la }));
+        m.elements.insert(ib, Element::DetailLine(DetailLine { curve: cb.map(micron), ..lb }));
+        return Ok(json!({"ids": [ia, ib]}));
+    }
     let (Some(wa), Some(wb)) = (m.wall(*a), m.wall(*b)) else { return Err(bad(c, "`ids` takes two walls")) };
     if wa.arc != 0.0 || wb.arc != 0.0 {
         return Err(bad(c, "it trims and extends straight walls; a curved one changes by its ends or its `arc`"));
@@ -6003,7 +6511,13 @@ fn corner(s: &mut Session, p: &Value) -> R {
 fn split(s: &mut Session, p: &Value) -> R {
     let c = "split";
     let m = &s.model;
-    let id = id_opt(c, p, "id")?.ok_or_else(|| bad(c, "`id`, a wall, is required"))?;
+    let id = id_opt(c, p, "id")?.ok_or_else(|| bad(c, "`id`, a wall or a detail line, is required"))?;
+    if let Some(lid) = m.elements.id(id)
+        && let Some(Element::DetailLine(l)) = m.elements.get(lid)
+    {
+        let (l, at) = (l.clone(), point_req(c, p, "at")?);
+        return split_line(s, lid, l, at);
+    }
     let w = m.wall(id).cloned().ok_or_else(|| bad(c, format!("{id} is not a wall")))?;
     let id = m.elements.id(id).unwrap_or_default();
     let at = point_req(c, p, "at")?;
@@ -6053,6 +6567,224 @@ fn split(s: &mut Session, p: &Value) -> R {
         }
     }
     Ok(json!({"ids": [id, new]}))
+}
+
+/// Detail line `id` split where it passes nearest `at`, or a closed one opened there.
+fn split_line(s: &mut Session, id: Id, l: DetailLine, at: P2) -> R {
+    let c = "split";
+    let (t, off) = l.curve.nearest(at);
+    if off > 100.0 {
+        return Err(bad(c, format!("[{}, {}] isn't on detail line {id}: it passes {} mm from it", at.0, at.1, hundredth(off))));
+    }
+    let (first, second) = l.curve.split(t).ok_or_else(|| bad(c, "split between the line's ends"))?;
+    let m = s.model_mut();
+    m.elements.insert(id, Element::DetailLine(DetailLine { curve: first, ..l.clone() }));
+    match second {
+        Some(curve) => {
+            let new = m.insert(Element::DetailLine(DetailLine { curve, ..l }));
+            Ok(json!({"ids": [id, new]}))
+        }
+        None => Ok(json!({"ids": [id], "opened": true})),
+    }
+}
+
+fn join_polyline(s: &mut Session, p: &Value) -> R {
+    let c = "join_polyline";
+    let m = &s.model;
+    let ids = ids_param(c, m, p)?;
+    if ids.len() < 2 {
+        return Err(bad(c, "give two detail lines or more to join"));
+    }
+    let mut lines: Vec<DetailLine> = Vec::new();
+    for &id in &ids {
+        match m.elements.get(id) {
+            Some(Element::DetailLine(l)) => lines.push(l.clone()),
+            _ => return Err(bad(c, format!("{id} is not a detail line"))),
+        }
+    }
+    let Some(first) = lines.first().cloned() else { return Err(bad(c, "give two detail lines or more to join")) };
+    if let Some((i, _)) = lines.iter().enumerate().find(|(_, l)| l.view != first.view) {
+        return Err(bad(c, format!("detail line {} is in another view than {}; join lines of one view", ids[i], ids[0])));
+    }
+    if let Some((i, l)) = lines.iter().enumerate().find(|(_, l)| !l.curve.is_poly() || l.curve.is_closed()) {
+        return Err(bad(c, format!("detail line {} is a {}; only open lines, arcs and polylines join", ids[i], l.curve.kind())));
+    }
+    let curves: Vec<crate::curves::Curve> = lines.iter().map(|l| l.curve.clone()).collect();
+    let curve =
+        crate::curves::join(&curves).ok_or_else(|| bad(c, "the lines don't make one chain, each end meeting the next within 1 mm"))?;
+    let m = s.model_mut();
+    for &id in &ids[1..] {
+        m.elements.remove(id);
+    }
+    m.elements.insert(ids[0], Element::DetailLine(DetailLine { curve, ..first }));
+    Ok(json!({"id": ids[0]}))
+}
+
+fn offset(s: &mut Session, p: &Value) -> R {
+    let c = "offset";
+    let m = &s.model;
+    let id = id_opt(c, p, "id")?.and_then(|g| m.elements.id(g)).ok_or_else(|| bad(c, "`id`, a detail line, is required"))?;
+    let Some(Element::DetailLine(l)) = m.elements.get(id).cloned() else { return Err(bad(c, format!("{id} is not a detail line"))) };
+    let d = num(c, p, "distance")?.ok_or_else(|| bad(c, "`distance`, mm, is required"))?;
+    if !(d.is_finite() && d > 0.0 && d <= MAX_COORD) {
+        return Err(bad(c, format!("`distance` is more than 0 mm, not {d}")));
+    }
+    let toward = point_req(c, p, "toward")?;
+    let curve = crate::draw::pick(&l.curve, toward, d)
+        .ok_or_else(|| bad(c, format!("a {} can't be offset by {d} mm (it would turn inside out, or fold over itself)", l.curve.kind())))?
+        .map(micron);
+    let copy = absent(p.get("copy")) || flag(c, p, "copy")?;
+    let m = s.model_mut();
+    let out = DetailLine { curve, ..l };
+    if copy {
+        let new = m.insert(Element::DetailLine(out));
+        Ok(json!({"id": new}))
+    } else {
+        m.elements.insert(id, Element::DetailLine(out));
+        Ok(json!({"id": id}))
+    }
+}
+
+fn trim_extend(s: &mut Session, p: &Value) -> R {
+    let c = "trim_extend";
+    let m = &s.model;
+    let boundary = id_opt(c, p, "boundary")?
+        .and_then(|g| m.elements.id(g))
+        .ok_or_else(|| bad(c, "`boundary`, a line to trim or extend to, is required"))?;
+    let edge = crate::draw::element_curve(m, boundary).ok_or_else(|| bad(c, format!("{boundary} has no line to trim or extend to")))?;
+    let ids = ids_param(c, m, p)?;
+    let keep = points(c, p, "keep")?;
+    if keep.len() != ids.len() {
+        return Err(bad(c, format!("`keep` gives a point on each line to keep: {} for {} lines", keep.len(), ids.len())));
+    }
+    let mut done = Vec::new();
+    for (&id, &k) in ids.iter().zip(&keep) {
+        let Some(Element::DetailLine(l)) = m.elements.get(id) else { return Err(bad(c, format!("{id} is not a detail line"))) };
+        let x = crate::draw::meet(&l.curve, &edge, k).ok_or_else(|| bad(c, format!("detail line {id} never meets {boundary}")))?;
+        let curve = crate::draw::trim_to(&l.curve, k, x)
+            .ok_or_else(|| bad(c, format!("detail line {id} can't be cut there: nothing would be left")))?;
+        done.push((id, DetailLine { curve: curve.map(micron), ..l.clone() }));
+    }
+    let m = s.model_mut();
+    for (id, l) in done {
+        m.elements.insert(id, Element::DetailLine(l));
+    }
+    Ok(json!({"ids": ids}))
+}
+
+fn fillet(s: &mut Session, p: &Value) -> R {
+    let c = "fillet";
+    let m = &s.model;
+    let ids = ids_param(c, m, p)?;
+    let &[a, b] = ids.as_slice() else { return Err(bad(c, "`ids` is two detail lines")) };
+    // Two straight walls: cut back, and an arc wall like the first between them.
+    if let (Some(wa), Some(wb)) = (m.wall(a).cloned(), m.wall(b).cloned()) {
+        let radius = num(c, p, "radius")?.ok_or_else(|| bad(c, "`radius`, mm, is required"))?;
+        if !(radius.is_finite() && radius > TOL && radius <= MAX_COORD) {
+            return Err(bad(c, format!("`radius` is more than {TOL} mm, not {radius}")));
+        }
+        if wa.arc != 0.0 || wb.arc != 0.0 {
+            return Err(bad(c, "it rounds two straight walls; a curved one changes by its ends or its `arc`"));
+        }
+        let (ca, arc, cb) =
+            crate::draw::fillet_lines(&crate::curves::Curve::line(wa.start, wa.end), &crate::curves::Curve::line(wb.start, wb.end), radius)
+                .ok_or_else(|| {
+                    bad(c, "the walls are straight, meet at an angle and are long enough for the arc; these aren't, or it doesn't fit")
+                })?;
+        let sweep = match &arc {
+            crate::curves::Curve::Poly { arcs, .. } => arcs.first().copied().unwrap_or(0.0),
+            _ => 0.0,
+        };
+        let (pa, pb) = (ca.vertices(), cb.vertices());
+        let (&[a0, a1], &[b0, b1]) = (pa.as_slice(), pb.as_slice()) else { return Err(bad(c, "the walls can't be rounded")) };
+        let mut round = Wall { start: micron(arc.start()), end: micron(arc.end()), arc: degrees(sweep), ..wa.clone() };
+        massing::detach(&mut round.params);
+        let m = s.model_mut();
+        m.elements.insert(a, Element::Wall(Wall { start: micron(a0), end: micron(a1), ..wa }));
+        m.elements.insert(b, Element::Wall(Wall { start: micron(b0), end: micron(b1), ..wb }));
+        let id = m.insert(Element::Wall(round));
+        return Ok(json!({"id": id, "ids": [a, b]}));
+    }
+    let line = |id: Id| match m.elements.get(id) {
+        Some(Element::DetailLine(l)) => Ok(l.clone()),
+        _ => Err(bad(c, format!("{id} is not a detail line"))),
+    };
+    let (la, lb) = (line(a)?, line(b)?);
+    if la.view != lb.view {
+        return Err(bad(c, format!("detail lines {a} and {b} are in different views")));
+    }
+    let radius = num(c, p, "radius")?.ok_or_else(|| bad(c, "`radius`, mm, is required"))?;
+    if !(radius.is_finite() && radius > TOL && radius <= MAX_COORD) {
+        return Err(bad(c, format!("`radius` is more than {TOL} mm, not {radius}")));
+    }
+    let (ca, arc, cb) = crate::draw::fillet_lines(&la.curve, &lb.curve, radius).ok_or_else(|| {
+        bad(c, "the lines are straight, meet at an angle and are long enough for the arc; these aren't, or it doesn't fit")
+    })?;
+    let (ca, arc, cb) = (ca.map(micron), arc.map(micron), cb.map(micron));
+    let m = s.model_mut();
+    m.elements.insert(a, Element::DetailLine(DetailLine { curve: ca, ..la.clone() }));
+    m.elements.insert(b, Element::DetailLine(DetailLine { curve: cb, ..lb }));
+    let id = m.insert(Element::DetailLine(DetailLine { curve: arc, ..la }));
+    Ok(json!({"id": id, "ids": [a, b]}))
+}
+
+/// Detail line `id`, as `p` names it, for a command `c` that changes its curve.
+fn line_of(c: &str, m: &Model, p: &Value) -> Result<(Id, DetailLine), String> {
+    let id = id_opt(c, p, "id")?.and_then(|g| m.elements.id(g)).ok_or_else(|| bad(c, "`id`, a detail line, is required"))?;
+    match m.elements.get(id) {
+        Some(Element::DetailLine(l)) => Ok((id, l.clone())),
+        _ => Err(bad(c, format!("{id} is not a detail line"))),
+    }
+}
+
+fn vertex(s: &mut Session, p: &Value) -> R {
+    let c = "vertex";
+    let (id, l) = line_of(c, &s.model, p)?;
+    let at = point_req(c, p, "at")?;
+    let delete = flag(c, p, "delete")?;
+    let curve = if delete { l.curve.without_vertex(at) } else { l.curve.with_vertex(at) }.ok_or_else(|| {
+        bad(
+            c,
+            match delete {
+                true => format!("detail line {id} is a {}: it has no vertex to spare", l.curve.kind()),
+                false => format!("detail line {id} is a {}: only polylines and splines take a vertex, between their ends", l.curve.kind()),
+            },
+        )
+    })?;
+    s.model_mut().elements.insert(id, Element::DetailLine(DetailLine { curve, ..l }));
+    Ok(json!({"id": id}))
+}
+
+fn convert_spline(s: &mut Session, p: &Value) -> R {
+    let c = "convert_spline";
+    let (id, l) = line_of(c, &s.model, p)?;
+    let curve = l.curve.converted().ok_or_else(|| bad(c, format!("detail line {id} is a {}, not a spline", l.curve.kind())))?;
+    let kind = curve.kind();
+    s.model_mut().elements.insert(id, Element::DetailLine(DetailLine { curve, ..l }));
+    Ok(json!({"id": id, "shape": kind}))
+}
+
+fn explode(s: &mut Session, p: &Value) -> R {
+    let c = "explode";
+    let m = &s.model;
+    let id = id_opt(c, p, "id")?.ok_or_else(|| bad(c, "`id`, a detail line, is required"))?;
+    let lid = m.elements.id(id).ok_or_else(|| bad(c, "there's no such element"))?;
+    let Some(Element::DetailLine(l)) = m.elements.get(lid).cloned() else { return Err(bad(c, format!("{lid} is not a detail line"))) };
+    let parts = crate::curves::explode(&l.curve);
+    if parts.len() < 2 {
+        return Err(bad(c, format!("detail line {lid} is a {}, already one piece", l.curve.kind())));
+    }
+    let m = s.model_mut();
+    let mut ids = vec![lid];
+    for (i, curve) in parts.into_iter().enumerate() {
+        let part = Element::DetailLine(DetailLine { curve, ..l.clone() });
+        if i == 0 {
+            m.elements.insert(lid, part);
+        } else {
+            ids.push(m.insert(part));
+        }
+    }
+    Ok(json!({"ids": ids}))
 }
 
 /// How an entry reads in a message: `wall type`, `family`, `family type`; and the library entry it is.
@@ -6175,6 +6907,10 @@ fn delete(s: &mut Session, p: &Value) -> R {
                         Element::Viewport(v) => gone.contains(&v.sheet) || gone.contains(&v.view),
                         // Notes and spot elevations go with their view, spots with what they read.
                         Element::Text(n) => gone.contains(&n.view),
+                        Element::DetailLine(l) => gone.contains(&l.view),
+                        Element::FilledRegion(r) => gone.contains(&r.view),
+                        Element::DetailGroup(g) => gone.contains(&g.view),
+                        Element::RepeatingDetail(r) => gone.contains(&r.view),
                         Element::Spot(sp) => gone.contains(&sp.view) || sp.host.is_some_and(|h| gone.contains(&h)),
                         _ => false,
                     }
@@ -6212,6 +6948,7 @@ fn delete(s: &mut Session, p: &Value) -> R {
     // No view keeps an override for what isn't there.
     for g in m.elements.values_mut().filter_map(graphics::graphics_mut) {
         g.elements.retain(|id, _| !gone.contains(id));
+        g.linework.retain(|l| !gone.contains(&l.element));
     }
     for (id, d) in kept {
         m.elements.insert(id, Element::Dimension(d));
@@ -6243,6 +6980,588 @@ fn units(s: &mut Session, p: &Value) -> R {
         }
     }
     Ok(json!({"length": s.model.units.name()}))
+}
+
+/// `kind` `from` is called `to` now: its library entry, and everything that names it.
+fn rename_entry(m: &mut Model, kind: &LibKind, from: &str, to: &str) {
+    m.library.renamed(kind, from, to);
+    m.lib_refs_mut(&mut |k, n| {
+        if k == kind && n == from {
+            *n = to.to_string();
+        }
+    });
+}
+
+/// An error naming the first key of `p` that isn't one of `keys`, the ones command `c` takes.
+fn only(c: &str, p: &Value, keys: &[&str]) -> Result<(), String> {
+    match p.as_object().and_then(|o| o.keys().find(|k| !keys.contains(&k.as_str()))) {
+        Some(k) => Err(bad(c, format!("`{k}` isn't one of its parameters: {}", keys.join(", ")))),
+        None => Ok(()),
+    }
+}
+
+/// The name `p` gives under `key`, trimmed, unless it gives none or only spaces.
+fn name_param(c: &str, p: &Value, key: &str) -> Result<Option<String>, String> {
+    Ok(string(c, p, key)?.map(|n| n.trim().to_string()).filter(|n| !n.is_empty()))
+}
+
+fn line_pattern(s: &mut Session, p: &Value) -> R {
+    let c = "line_pattern";
+    only(c, p, &["name", "segments", "rename", "delete"])?;
+    let Some(name) = name_param(c, p, "name")? else {
+        return Ok(json!({"patterns": s.model.line_patterns}));
+    };
+    let m = s.model_mut();
+    if flag(c, p, "delete")? {
+        if m.line_patterns.remove(&name).is_none() {
+            return Err(bad(c, format!("there's no line pattern `{name}`")));
+        }
+        if let Some((user, _)) = m.line_styles.iter().find(|(_, st)| st.pattern.as_deref() == Some(&*name)) {
+            return Err(bad(c, format!("`{name}` is line style `{user}`'s pattern; give it another first")));
+        }
+        return Ok(json!({"deleted": name}));
+    }
+    let pattern = match (p.get("segments"), m.line_patterns.get(&name)) {
+        (v, Some(was)) if absent(v) => was.clone(),
+        (v, None) if absent(v) => {
+            let there: Vec<&str> = m.line_patterns.keys().map(String::as_str).collect();
+            return Err(bad(c, format!("there's no line pattern `{name}`; make one with `segments`{}", known_names(&there))));
+        }
+        (v, _) => serde_json::from_value(v.cloned().unwrap_or_default())
+            .map_err(|e| bad(c, format!("`segments` is [{{\"dash\": mm}} | {{\"space\": mm}} | \"dot\", …]: {e}")))?,
+    };
+    let name = match name_param(c, p, "rename")? {
+        Some(to) if to != name => {
+            if m.line_patterns.contains_key(&to) {
+                return Err(bad(c, format!("there's already a line pattern `{to}`")));
+            }
+            m.line_patterns.remove(&name);
+            rename_entry(m, &LibKind::LinePattern, &name, &to);
+            to
+        }
+        _ => name,
+    };
+    if name.eq_ignore_ascii_case(crate::lines::SOLID) {
+        return Err(bad(c, format!("{} is a line with no pattern; name it another way", crate::lines::SOLID)));
+    }
+    pattern.check(&name).map_err(|e| bad(c, e))?;
+    if m.line_patterns.get(&name) != Some(&pattern) {
+        m.line_patterns.insert(name.clone(), pattern.clone());
+    }
+    Ok(json!({"name": name, "segments": pattern}))
+}
+
+fn line_style(s: &mut Session, p: &Value) -> R {
+    let c = "line_style";
+    only(c, p, &["name", "pen", "color", "pattern", "rename", "delete"])?;
+    let Some(name) = name_param(c, p, "name")? else {
+        return Ok(json!({"styles": s.model.line_styles}));
+    };
+    let m = s.model_mut();
+    if flag(c, p, "delete")? {
+        if m.line_styles.remove(&name).is_none() {
+            return Err(bad(c, format!("there's no line style `{name}`")));
+        }
+        if let Some((id, _)) = m.elements.iter().find(|(_, e)| matches!(e, Element::DetailLine(l) if l.style == name)) {
+            return Err(bad(c, format!("detail line {id} is drawn in `{name}`; give it another style first")));
+        }
+        let lineworked = |e: &Element| {
+            graphics::graphics_of_element(e).is_some_and(|g| g.linework.iter().any(|l| l.style.as_deref() == Some(name.as_str())))
+        };
+        if let Some((id, _)) = m.elements.iter().find(|(_, e)| lineworked(e)) {
+            return Err(bad(c, format!("view {id} draws an edge in `{name}` with Linework; take it off first")));
+        }
+        return Ok(json!({"deleted": name}));
+    }
+    let mut style = match (m.line_styles.get(&name), p.get("pen")) {
+        (Some(was), _) => was.clone(),
+        (None, Some(_)) => LineStyle { pen: crate::pen::Pen::FINE, color: [0, 0, 0], pattern: None },
+        (None, None) => return Err(bad(c, format!("there's no line style `{name}`; make one with `pen`"))),
+    };
+    if let Some(v) = p.get("pen").filter(|v| !v.is_null()) {
+        style.pen = serde_json::from_value(v.clone()).map_err(|e| bad(c, format!("`pen`: {e}")))?;
+    }
+    if let Some(v) = p.get("color").filter(|v| !v.is_null()) {
+        style.color = colour(v).ok_or_else(|| bad(c, format!("`color` is \"#rrggbb\" or [r, g, b], each 0 to 255, not {v}")))?;
+    }
+    if let Some(v) = p.get("pattern") {
+        style.pattern = match v {
+            Value::Null => None,
+            Value::String(n) if n.trim().eq_ignore_ascii_case(crate::lines::SOLID) => None,
+            Value::String(n) => Some(n.trim().to_string()),
+            v => return Err(bad(c, format!("`pattern` is a line pattern's name, or \"{}\", not {v}", crate::lines::SOLID))),
+        };
+    }
+    let name = match name_param(c, p, "rename")? {
+        Some(to) if to != name => {
+            if m.line_styles.contains_key(&to) {
+                return Err(bad(c, format!("there's already a line style `{to}`")));
+            }
+            m.line_styles.remove(&name);
+            rename_entry(m, &LibKind::LineStyle, &name, &to);
+            to
+        }
+        _ => name,
+    };
+    style.check(&name, &m.line_patterns).map_err(|e| bad(c, e))?;
+    if m.line_styles.get(&name) != Some(&style) {
+        m.line_styles.insert(name.clone(), style.clone());
+    }
+    Ok(json!({"name": name, "style": style}))
+}
+
+/// The keys of a curve's fields, as a command takes them.
+const CURVE_KEYS: &[&str] = &[
+    "start",
+    "end",
+    "through",
+    "arc",
+    "points",
+    "arcs",
+    "closed",
+    "centre",
+    "radius",
+    "radii",
+    "angle",
+    "span",
+    "control",
+    "knots",
+    "fit",
+    "start_tangent",
+    "end_tangent",
+];
+
+/// The curve `p`'s curve fields give, checked: an error says which shape's fields to give.
+fn curve_param(c: &str, p: &Value) -> Result<crate::curves::Curve, String> {
+    let fields: serde_json::Map<String, Value> = p
+        .as_object()
+        .map(|o| o.iter().filter(|(k, _)| CURVE_KEYS.contains(&k.as_str())).map(|(k, v)| (k.clone(), v.clone())).collect())
+        .unwrap_or_default();
+    let f: crate::curves::Fields =
+        serde_json::from_value(Value::Object(fields)).map_err(|e| bad(c, format!("{e}: a line is {}", crate::curves::FORMS)))?;
+    let curve = f.curve().map_err(|e| bad(c, e))?;
+    curve.check("the line").map_err(|e| bad(c, e))?;
+    Ok(curve)
+}
+
+fn detail_line(s: &mut Session, p: &Value) -> R {
+    let c = "detail_line";
+    only(c, p, &[&["view", "level", "style", "insulation", "centre_mark", "cloud", "revision"], CURVE_KEYS].concat())?;
+    let m = &s.model;
+    let curve = curve_param(c, p)?;
+    let insulation = num(c, p, "insulation")?;
+    let centre_mark = flag(c, p, "centre_mark")?;
+    let cloud = num(c, p, "cloud")?;
+    let revision = string(c, p, "revision")?;
+    let view = view_param(c, m, p, true)?;
+    let style = match name_param(c, p, "style")? {
+        Some(n) => n,
+        // Thin Lines, in the project's language, or its first style.
+        None => {
+            let thin = m.language.word(crate::lines::THIN);
+            let first = m.line_styles.keys().next();
+            m.line_styles
+                .get_key_value(thin)
+                .map(|(k, _)| k)
+                .or(first)
+                .cloned()
+                .ok_or_else(|| bad(c, "the project has no line style; make one first"))?
+        }
+    };
+    let l = DetailLine { view: m.guid(view), curve, style, insulation, centre_mark, cloud, revision };
+    let id = s.model_mut().insert(Element::DetailLine(l));
+    Ok(json!({"id": id}))
+}
+
+fn linework(s: &mut Session, p: &Value) -> R {
+    let c = "linework";
+    only(c, p, &["view", "level", "id", "at", "style", "invisible", "remove"])?;
+    let m = &s.model;
+    let key = view_param(c, m, p, false)?;
+    if m.plan_level(key).is_none() {
+        return Err(bad(c, "Linework works in plans: give a level's plan or a plan view as `view`"));
+    }
+    let id = element_id(c, m, p.get("id").unwrap_or(&Value::Null))?;
+    let at = point_req(c, p, "at")?;
+    let (remove, invisible) = (flag(c, p, "remove")?, flag(c, p, "invisible")?);
+    let style = name_param(c, p, "style")?;
+    if let Some(st) = &style
+        && !m.line_styles.contains_key(st)
+    {
+        let there: Vec<&str> = m.line_styles.keys().map(String::as_str).collect();
+        return Err(bad(c, format!("there's no line style `{st}`{}", known_names(&there))));
+    }
+    if !remove && style.is_none() && !invisible {
+        return Err(bad(c, "give `style`, a line style, or `invisible: true`; `remove: true` takes Linework off"));
+    }
+    let guid = m.guid(id);
+    let source = m.plan_source(key);
+    if remove {
+        let g =
+            s.model_mut().elements.get_mut(source).and_then(graphics::graphics_mut).ok_or_else(|| bad(c, "that view has no graphics"))?;
+        let before = g.linework.len();
+        g.linework.retain(|l| l.element != guid || geom::dist_to_segment(at, l.from, l.to) > LINEWORK_REACH);
+        return Ok(json!({"removed": before - g.linework.len()}));
+    }
+    let (from, to) = render::edge_at(m, key, id, at, LINEWORK_REACH).ok_or_else(|| {
+        bad(c, format!("element {} draws no edge within {LINEWORK_REACH} mm of [{}, {}] in that view", m.shown(id), at.0, at.1))
+    })?;
+    let g = s.model_mut().elements.get_mut(source).and_then(graphics::graphics_mut).ok_or_else(|| bad(c, "that view has no graphics"))?;
+    // The same edge again takes the newer style.
+    g.linework.retain(|l| !(l.element == guid && l.from.dist(from) < 1e-3 && l.to.dist(to) < 1e-3));
+    g.linework.push(graphics::Linework { element: guid, from: micron(from), to: micron(to), style: if invisible { None } else { style } });
+    Ok(json!({"from": [from.0, from.1], "to": [to.0, to.1]}))
+}
+
+/// How near an edge a Linework pick is taken, mm.
+const LINEWORK_REACH: f64 = 200.0;
+
+fn import_fill_patterns(s: &mut Session, p: &Value) -> R {
+    let c = "import_fill_patterns";
+    only(c, p, &["path", "text", "replace"])?;
+    let replace = flag(c, p, "replace")?;
+    let read = match (string(c, p, "path")?, string(c, p, "text")?) {
+        (Some(path), None) => crate::pat::read_file(&PathBuf::from(path)),
+        (None, Some(text)) => crate::pat::read(&text),
+        _ => return Err(bad(c, "give `path`, a PAT file, or its `text`")),
+    }
+    .map_err(|e| bad(c, e))?;
+    let m = s.model_mut();
+    let (mut imported, mut left_out) = (Vec::new(), Vec::new());
+    for (name, pattern) in read.patterns {
+        if m.fill_patterns.contains_key(&name) && !replace {
+            left_out.push(json!({"name": name, "why": "the project has a pattern of that name"}));
+            continue;
+        }
+        m.fill_patterns.insert(name.clone(), pattern);
+        imported.push(name);
+    }
+    left_out.extend(read.left_out.into_iter().map(|(name, why)| json!({"name": name, "why": why})));
+    Ok(json!({"imported": imported, "left_out": left_out}))
+}
+
+fn export_fill_patterns(s: &mut Session, p: &Value) -> R {
+    let c = "export_fill_patterns";
+    only(c, p, &["path", "names"])?;
+    let m = &s.model;
+    let names: Option<Vec<String>> = shaped(c, p, "names", "[name, …]")?;
+    if let Some(missing) = names.iter().flatten().find(|n| !m.fill_patterns.contains_key(*n)) {
+        return Err(bad(c, format!("there's no fill pattern `{missing}`")));
+    }
+    let chosen = m.fill_patterns.iter().filter(|(n, _)| names.as_ref().is_none_or(|w| w.contains(n)));
+    let text = crate::pat::write(chosen);
+    match string(c, p, "path")? {
+        Some(path) => {
+            crate::autosave::atomic_write(&PathBuf::from(&path), &text).map_err(|e| bad(c, e))?;
+            Ok(json!({"path": path}))
+        }
+        None => Ok(json!({"text": text})),
+    }
+}
+
+fn fill_pattern(s: &mut Session, p: &Value) -> R {
+    let c = "fill_pattern";
+    only(c, p, &["name", "target", "lines", "rename", "delete"])?;
+    let Some(name) = name_param(c, p, "name")? else {
+        return Ok(json!({"patterns": s.model.fill_patterns}));
+    };
+    let m = s.model_mut();
+    if flag(c, p, "delete")? {
+        if m.fill_patterns.remove(&name).is_none() {
+            return Err(bad(c, format!("there's no fill pattern `{name}`")));
+        }
+        let uses = |t: &FilledRegionType| [&t.foreground, &t.background].into_iter().flatten().any(|n| *n == name);
+        if let Some((user, _)) = m.region_types.iter().find(|(_, t)| uses(t)) {
+            return Err(bad(c, format!("filled region type `{user}` fills with `{name}`; give it another first")));
+        }
+        let shows = |x: &crate::model::Material| [&x.cut_pattern, &x.surface_pattern].into_iter().flatten().any(|n| *n == name);
+        if let Some((user, _)) = m.materials.iter().find(|(_, x)| shows(x)) {
+            return Err(bad(c, format!("material `{user}` shows `{name}`; give it another first")));
+        }
+        return Ok(json!({"deleted": name}));
+    }
+    let mut pattern = match (m.fill_patterns.get(&name), absent(p.get("lines")) && absent(p.get("target"))) {
+        (Some(was), _) => was.clone(),
+        (None, false) => FillPattern::default(),
+        (None, true) => {
+            let there: Vec<&str> = m.fill_patterns.keys().map(String::as_str).collect();
+            return Err(bad(c, format!("there's no fill pattern `{name}`; make one with `lines`{}", known_names(&there))));
+        }
+    };
+    if let Some(t) = shaped::<Target>(c, p, "target", "drafting or model")? {
+        pattern.target = t;
+    }
+    if let Some(lines) = shaped(c, p, "lines", "[{angle, spacing, origin?: [x, y], shift?, dashes?: [mm, -mm, …]}, …]")? {
+        pattern.lines = lines;
+    }
+    let name = match name_param(c, p, "rename")? {
+        Some(to) if to != name => {
+            if m.fill_patterns.contains_key(&to) {
+                return Err(bad(c, format!("there's already a fill pattern `{to}`")));
+            }
+            m.fill_patterns.remove(&name);
+            rename_entry(m, &LibKind::FillPattern, &name, &to);
+            to
+        }
+        _ => name,
+    };
+    pattern.check(&name).map_err(|e| bad(c, e))?;
+    if m.fill_patterns.get(&name) != Some(&pattern) {
+        m.fill_patterns.insert(name.clone(), pattern.clone());
+    }
+    Ok(json!({"name": name, "pattern": pattern}))
+}
+
+fn create_group(s: &mut Session, p: &Value) -> R {
+    let c = "create_group";
+    only(c, p, &["ids", "name"])?;
+    let m = &s.model;
+    let ids = ids_param(c, m, p)?;
+    if ids.is_empty() {
+        return Err(bad(c, "`ids`: the detail lines, filled regions and text notes to group"));
+    }
+    if ids.len() > crate::groups::MAX_MEMBERS {
+        return Err(bad(c, format!("{} elements; a group holds at most {}", ids.len(), crate::groups::MAX_MEMBERS)));
+    }
+    let mut view = None;
+    let mut members = Vec::new();
+    let mut extent: Vec<P2> = Vec::new();
+    for &id in &ids {
+        let e = m.elements.get(id).ok_or_else(|| bad(c, format!("no element {id}")))?;
+        if !crate::groups::holds(e) {
+            return Err(bad(
+                c,
+                format!("{} {id} can't be in a detail group: it holds detail lines, filled regions and text notes", e.category()),
+            ));
+        }
+        let v = m.annotation_plan(e);
+        if view.is_some_and(|w| Some(w) != v) {
+            return Err(bad(c, "the elements are in different views; a group's members are all in one"));
+        }
+        view = v;
+        match e {
+            Element::DetailLine(l) => extent.extend(l.curve.points()),
+            Element::FilledRegion(r) => extent.extend(r.sketch.iter().flat_map(|l| l.points())),
+            Element::Text(n) => extent.push(n.at),
+            _ => {}
+        }
+        members.push(e.clone());
+    }
+    let view = view.ok_or_else(|| bad(c, "the elements are in no view"))?;
+    let (lo, hi) = extent.iter().fold((P2(f64::INFINITY, f64::INFINITY), P2(f64::NEG_INFINITY, f64::NEG_INFINITY)), |(lo, hi), q| {
+        (P2(lo.0.min(q.0), lo.1.min(q.1)), P2(hi.0.max(q.0), hi.1.max(q.1)))
+    });
+    if extent.is_empty() {
+        return Err(bad(c, "the elements have no extent"));
+    }
+    let origin = micron((lo + hi) * 0.5);
+    let name = match name_param(c, p, "name")? {
+        Some(n) if m.detail_groups.contains_key(&n) => return Err(bad(c, format!("there's already a detail group `{n}`"))),
+        Some(n) => n,
+        None => (1..).map(|k| format!("Group {k}")).find(|n| !m.detail_groups.contains_key(n)).unwrap_or_default(),
+    };
+    // About the origin, in no view; a region's boundary lines get ids of their own again when they're elements' once more.
+    let back = move |q: P2| q - origin;
+    let mo = Motion { map: &back, slide: None, mirror: false };
+    let mut held = Vec::new();
+    for (e, id) in members.into_iter().zip(&ids) {
+        let mut e = transform(c, m, e, *id, &mo, &BTreeSet::new())?;
+        crate::groups::set_view(&mut e, Guid::default());
+        if let Some(lines) = e.sketch_mut() {
+            lines.iter_mut().for_each(|l| (l.id, l.guid) = (0, Guid::default()));
+        }
+        held.push(crate::groups::Member { id: 0, guid: Guid::default(), element: e });
+    }
+    delete(s, &json!({"ids": ids}))?;
+    let m = s.model_mut();
+    m.detail_groups.insert(name.clone(), crate::groups::GroupType { members: held });
+    let g = crate::groups::DetailGroup { view, type_name: name.clone(), at: origin, angle: 0.0, mirrored: false };
+    let id = m.insert(Element::DetailGroup(g));
+    Ok(json!({"id": id, "name": name}))
+}
+
+fn detail_group(s: &mut Session, p: &Value) -> R {
+    let c = "detail_group";
+    only(c, p, &["type", "at", "angle", "mirrored", "view", "level"])?;
+    let m = &s.model;
+    let type_name = name_param(c, p, "type")?.ok_or_else(|| bad(c, "`type`, the detail group to place, is required"))?;
+    if !m.detail_groups.contains_key(&type_name) {
+        let there: Vec<&str> = m.detail_groups.keys().map(String::as_str).collect();
+        return Err(bad(c, format!("there's no detail group `{type_name}` (there are: {})", there.join(", "))));
+    }
+    let at = point_req(c, p, "at")?;
+    let angle = degrees(num(c, p, "angle")?.unwrap_or(0.0));
+    let view = m.guid(view_param(c, m, p, true)?);
+    let g = crate::groups::DetailGroup { view, type_name, at, angle, mirrored: flag(c, p, "mirrored")? };
+    let id = s.model_mut().insert(Element::DetailGroup(g));
+    Ok(json!({"id": id}))
+}
+
+fn repeating_detail(s: &mut Session, p: &Value) -> R {
+    let c = "repeating_detail";
+    only(c, p, &["type", "start", "end", "spacing", "mirrored", "view", "level"])?;
+    let m = &s.model;
+    let type_name = name_param(c, p, "type")?.ok_or_else(|| bad(c, "`type`, the detail group to repeat, is required"))?;
+    let (start, end) = (point_req(c, p, "start")?, point_req(c, p, "end")?);
+    let spacing = num(c, p, "spacing")?.ok_or_else(|| bad(c, "`spacing`, mm from one group to the next, is required"))?;
+    let view = m.guid(view_param(c, m, p, true)?);
+    let r = crate::groups::RepeatingDetail { view, type_name, start, end, spacing, mirrored: flag(c, p, "mirrored")? };
+    let count = r.places().map_or(0, |v| v.len());
+    let id = s.model_mut().insert(Element::RepeatingDetail(r));
+    Ok(json!({"id": id, "count": count}))
+}
+
+fn ungroup(s: &mut Session, p: &Value) -> R {
+    let c = "ungroup";
+    only(c, p, &["id"])?;
+    let m = &s.model;
+    let id = element_id(c, m, p.get("id").unwrap_or(&Value::Null))?;
+    let Some(Element::DetailGroup(g)) = m.elements.get(id) else {
+        return Err(bad(c, format!("element {id} isn't a detail group")));
+    };
+    let members = crate::groups::placed(m, g);
+    delete(s, &json!({"ids": [id]}))?;
+    let m = s.model_mut();
+    let ids: Vec<Id> = members.into_iter().map(|e| m.insert(e)).collect();
+    Ok(json!({"ids": ids}))
+}
+
+fn group_type(s: &mut Session, p: &Value) -> R {
+    let c = "group_type";
+    only(c, p, &["name", "rename", "delete"])?;
+    let placed = |m: &Model, name: &str| -> Vec<Id> {
+        let of = |e: &Element| match e {
+            Element::DetailGroup(g) => g.type_name == name,
+            Element::RepeatingDetail(r) => r.type_name == name,
+            _ => false,
+        };
+        m.elements.iter().filter(|(_, e)| of(e)).map(|(id, _)| *id).collect()
+    };
+    let Some(name) = name_param(c, p, "name")? else {
+        let m = &s.model;
+        let all: Map<String, Value> =
+            m.detail_groups.iter().map(|(n, g)| (n.clone(), json!({"members": g.members.len(), "placed": placed(m, n).len()}))).collect();
+        return Ok(json!({"groups": all}));
+    };
+    if !s.model.detail_groups.contains_key(&name) {
+        return Err(bad(c, format!("there's no detail group `{name}`")));
+    }
+    if flag(c, p, "delete")? {
+        if let Some(id) = placed(&s.model, &name).first() {
+            return Err(bad(c, format!("detail group {id} is of `{name}`; delete or ungroup it first")));
+        }
+        s.model_mut().detail_groups.remove(&name);
+        return Ok(json!({"deleted": name}));
+    }
+    let name = match name_param(c, p, "rename")? {
+        Some(to) if to != name => {
+            let m = s.model_mut();
+            if m.detail_groups.contains_key(&to) {
+                return Err(bad(c, format!("there's already a detail group `{to}`")));
+            }
+            if let Some(g) = m.detail_groups.remove(&name) {
+                m.detail_groups.insert(to.clone(), g);
+            }
+            rename_entry(m, &LibKind::DetailGroup, &name, &to);
+            to
+        }
+        _ => name,
+    };
+    Ok(json!({"name": name}))
+}
+
+fn filled_region_type(s: &mut Session, p: &Value) -> R {
+    let c = "filled_region_type";
+    only(c, p, &["name", "foreground", "foreground_color", "background", "background_color", "masking", "rename", "delete"])?;
+    let Some(name) = name_param(c, p, "name")? else {
+        return Ok(json!({"types": s.model.region_types}));
+    };
+    let m = s.model_mut();
+    if flag(c, p, "delete")? {
+        if m.region_types.remove(&name).is_none() {
+            return Err(bad(c, format!("there's no filled region type `{name}`")));
+        }
+        if let Some((id, _)) = m.elements.iter().find(|(_, e)| matches!(e, Element::FilledRegion(r) if r.type_name == name)) {
+            return Err(bad(c, format!("filled region {id} is of `{name}`; give it another type first")));
+        }
+        return Ok(json!({"deleted": name}));
+    }
+    let mut t = m.region_types.get(&name).cloned().unwrap_or_default();
+    let pattern = |key: &str| -> Result<Option<Option<String>>, String> {
+        match p.get(key) {
+            None => Ok(None),
+            Some(Value::Null) => Ok(Some(None)),
+            Some(Value::String(n)) => Ok(Some(Some(n.trim().to_string()).filter(|n| !n.is_empty()))),
+            Some(v) => Err(bad(c, format!("`{key}` is a fill pattern's name, or null for none, not {v}"))),
+        }
+    };
+    if let Some(f) = pattern("foreground")? {
+        t.foreground = f;
+    }
+    if let Some(b) = pattern("background")? {
+        t.background = b;
+    }
+    for (key, slot) in [("foreground_color", &mut t.foreground_color), ("background_color", &mut t.background_color)] {
+        if let Some(v) = p.get(key).filter(|v| !v.is_null()) {
+            *slot = colour(v).ok_or_else(|| bad(c, format!("`{key}` is \"#rrggbb\" or [r, g, b], each 0 to 255, not {v}")))?;
+        }
+    }
+    if !absent(p.get("masking")) {
+        t.masking = flag(c, p, "masking")?;
+    }
+    let name = match name_param(c, p, "rename")? {
+        Some(to) if to != name => {
+            if m.region_types.contains_key(&to) {
+                return Err(bad(c, format!("there's already a filled region type `{to}`")));
+            }
+            m.region_types.remove(&name);
+            rename_entry(m, &LibKind::FilledRegionType, &name, &to);
+            to
+        }
+        _ => name,
+    };
+    t.check(&name, &m.fill_patterns).map_err(|e| bad(c, e))?;
+    if m.region_types.get(&name) != Some(&t) {
+        m.region_types.insert(name.clone(), t.clone());
+    }
+    Ok(json!({"name": name, "type": t}))
+}
+
+fn filled_region(s: &mut Session, p: &Value) -> R {
+    let c = "filled_region";
+    only(c, p, &["sketch", "view", "level", "type", "line_style"])?;
+    let m = &s.model;
+    let lines = sketch_param(c, p, "sketch", &[])?.ok_or_else(|| bad(c, "`sketch`, its outlines' lines, is required"))?;
+    let profile = sketch::solve(&lines)
+        .map_err(|e| bad(c, format!("the sketch doesn't close into loops: {}", sketch::say(&e, &sketch::namer(&lines)))))?;
+    let view = view_param(c, m, p, true)?;
+    // Solid Black, in the project's language, or its first type.
+    let type_name = match name_param(c, p, "type")? {
+        Some(n) => n,
+        None => {
+            let solid = m.language.word(crate::fills::SOLID_BLACK);
+            m.region_types
+                .get_key_value(solid)
+                .map(|(k, _)| k)
+                .or(m.region_types.keys().next())
+                .cloned()
+                .ok_or_else(|| bad(c, "the project has no filled region type; make one first"))?
+        }
+    };
+    // Thin Lines unless told; null (or "Invisible") draws none.
+    let line_style = match p.get("line_style") {
+        None => {
+            let thin = m.language.word(crate::lines::THIN);
+            m.line_styles.get_key_value(thin).map(|(k, _)| k).or(m.line_styles.keys().next()).cloned()
+        }
+        Some(Value::Null) => None,
+        Some(Value::String(n)) if n.trim().eq_ignore_ascii_case("invisible") => None,
+        Some(Value::String(n)) => Some(n.trim().to_string()),
+        Some(v) => return Err(bad(c, format!("`line_style` is a line style's name, or null for invisible lines, not {v}"))),
+    };
+    let r = FilledRegion { view: m.guid(view), type_name, line_style, sketch: lines, pattern_origin: P2(0.0, 0.0), pattern_angle: 0.0 };
+    let id = s.model_mut().insert(Element::FilledRegion(r));
+    Ok(json!({"id": id, "area_m2": m2(profile.area())}))
 }
 
 fn line_weights(s: &mut Session, p: &Value) -> R {

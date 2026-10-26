@@ -22,6 +22,7 @@ use egui::{
 };
 use serde_json::{Value, json};
 
+use crate::draw;
 use crate::icons::Icon;
 use crate::lang::{t, tf};
 use crate::properties::number;
@@ -409,12 +410,16 @@ pub(crate) fn paint(p: &Painter, at: Place, d: &Drawing, selected: &[Id], hovere
                 let stroke = Stroke::new(on_screen(*width, at.k, thin), accent.map_or(color(*c), |a| a.0));
                 let mut pts: Vec<Pos2> = pts.iter().map(|q| at.pos(*q)).collect();
                 match dash {
-                    Some([on, off]) => {
+                    Some(dash) => {
                         // A dashed ring: its closing side too.
                         if *closed {
                             pts.extend(pts.first().copied());
                         }
-                        p.extend(Shape::dashed_line(&pts, stroke, *on, *off));
+                        // Its on and off lengths, as big as its width is drawn.
+                        let k = at.k.max(f32::EPSILON);
+                        let on: Vec<f32> = dash.iter().step_by(2).map(|x| x * k).collect();
+                        let off: Vec<f32> = dash.iter().skip(1).step_by(2).map(|x| x * k).collect();
+                        p.extend(Shape::dashed_line_with_offset(&pts, stroke, &on, &off, 0.0));
                     }
                     None if *closed => {
                         p.add(Shape::closed_line(pts, stroke));
@@ -456,7 +461,7 @@ fn ghost(p: &Painter, origin: Pos2, d: &Drawing, selected: &[Id], f: &dyn Fn(Pos
 
 /// A short reading drawn where a tool previews, on a soft background so it stays legible over
 /// what's drawn: `text` anchored at `at` as `align` says.
-fn tag(p: &Painter, at: Pos2, align: Align2, text: impl Into<String>) {
+pub(crate) fn tag(p: &Painter, at: Pos2, align: Align2, text: impl Into<String>) {
     let galley = p.layout_no_wrap(text.into(), FontId::proportional(12.0), pal().accent);
     let rect = align.anchor_size(at, galley.size());
     p.rect_filled(rect.expand2(vec2(3.0, 1.0)), 2.0, pal().surface.gamma_multiply(0.85));
@@ -673,7 +678,7 @@ fn start_of(tool: &Tool) -> &[P2] {
 
 /// A selection box from pixel `from` to `q` of a view in `rect`: Revit draws a crossing box (right
 /// to left) dashed, a window box solid.
-fn box_shapes(rect: Rect, from: (f32, f32), q: (f32, f32)) -> Vec<Shape> {
+pub(crate) fn box_shapes(rect: Rect, from: (f32, f32), q: (f32, f32)) -> Vec<Shape> {
     let r = Rect::from_two_pos(pos(rect.min, from), pos(rect.min, q));
     let fill = Shape::rect_filled(r, 0.0, pal().accent.gamma_multiply(0.08));
     if q.0 < from.0 {
@@ -724,7 +729,7 @@ impl BimApp {
         if response.clicked() {
             return response.interact_pointer_pos();
         }
-        self.canvas.lifted.filter(|(_, quick)| *quick || self.tool != Tool::Modify).map(|(at, _)| at)
+        self.canvas.lifted.filter(|(_, quick)| *quick || self.tool != Tool::Modify || self.sketch.is_some()).map(|(at, _)| at)
     }
 
     /// A drag has begun on `id`: it is selected, and the selection it replaces is kept for
@@ -755,7 +760,17 @@ impl BimApp {
     /// vertical.
     pub(crate) fn snap(&self, m: &Model, level: Id, v: &View, at: (f32, f32), from: &[P2], square: bool) -> Found {
         let reach = Reach { point: SNAP / v.scale, line: f64::from(PICK) / v.scale };
-        snap::snap(m, level, v.mm(at), reach, from, square, &self.snaps_now())
+        let view = self.plan_key().unwrap_or(level);
+        match &self.sketch {
+            Some(sk) => {
+                let editing = match sk.of {
+                    crate::sketch::Of::Edit(id) => Some(id),
+                    _ => None,
+                };
+                snap::in_sketch(m, snap::Sketch { view, lines: &sk.lines, editing }, v.mm(at), reach, from, square, &self.snaps_now())
+            }
+            None => snap::snap(m, view, v.mm(at), reach, from, square, &self.snaps_now()),
+        }
     }
 
     /// What a pick at pixel `q` would land on, shown: its marker and what it is, and the guide it
@@ -813,6 +828,21 @@ impl BimApp {
                 p.line_segment([at + vec2(0.0, -7.0), at + vec2(0.0, 7.0)], stroke);
                 p.circle_filled(at, 2.5, pal().accent);
             }
+            // A quarter of a round, its corner on the point.
+            Kind::Quadrant => {
+                let arc: Vec<Pos2> = (0..=8)
+                    .map(|k| f32::from(k as u8) * std::f32::consts::FRAC_PI_2 / 8.0)
+                    .map(|a| at + vec2(-9.0 + 12.0 * a.cos(), 6.0 - 12.0 * a.sin()))
+                    .collect();
+                p.add(Shape::line(arc, stroke));
+                p.line_segment([at + vec2(-9.0, 6.0), at + vec2(3.0, 6.0)], stroke);
+                p.line_segment([at + vec2(-9.0, 6.0), at + vec2(-9.0, -6.0)], stroke);
+            }
+            // A round, and the line touching it on top.
+            Kind::Tangent => {
+                p.circle_stroke(at + vec2(0.0, 5.0), 5.0, stroke);
+                p.line_segment([at + vec2(-8.0, 0.0), at + vec2(8.0, 0.0)], stroke);
+            }
             Kind::Angle => {
                 p.circle_filled(at, 3.0, pal().accent);
             }
@@ -836,14 +866,16 @@ impl BimApp {
         let fit = |w, h| if up { render::ceiling_plan(&model, key, w, h).view } else { render::plan(&model, key, w, h).view };
         let Some((view, local)) = self.canvas.navigate(ui, &response, rect, key, fit) else { return };
         let mods = ui.input(|i| i.modifiers);
+        let shape = self.shape();
         let c = &mut self.canvas;
         c.cursor = local.map(|q| view.mm(q));
         let d = c.drawing.drawing(&model, key, view, up);
 
         // What's under the cursor; Tab steps through it. (Without the app's input hook, as in
         // tests, egui moved the keyboard to a widget on that Tab: give it back.)
+        let sketching = self.sketch.is_some();
         let under = match (&self.tool, local) {
-            (Tool::Modify, Some(q)) => d.pick_all(q, PICK),
+            (Tool::Modify, Some(q)) if !sketching => d.pick_all(q, PICK),
             _ => Vec::new(),
         };
         if under != c.under {
@@ -857,9 +889,16 @@ impl BimApp {
                 }
             });
         }
-        if (std::mem::take(&mut self.tab_cycle) || tab) && !c.under.is_empty() {
+        let tabbed = std::mem::take(&mut self.tab_cycle) || tab;
+        if tabbed && !c.under.is_empty() {
             c.cycle = (c.cycle + 1) % c.under.len();
         }
+        // While a rectangle is drawn, Tab moves between its width and its height.
+        if tabbed && self.typed_fields() == 2 {
+            std::mem::swap(&mut self.typed_length, &mut self.drawing.other);
+            self.drawing.field = 1 - self.drawing.field.min(1);
+        }
+        let c = &mut self.canvas;
         // How near the cursor a dimension's reference line must be, mm.
         let near = 2.0 * f64::from(PICK) / view.scale;
         // What the tool in hand would take at pixel `q`: under the cursor for the highlight, under
@@ -867,12 +906,40 @@ impl BimApp {
         // (Modify, here, is what is drawn nearest; Tab cycles through what is under the cursor.)
         let tool = self.tool.clone();
         let under_at = |q: (f32, f32)| match &tool {
+            Tool::Modify if sketching => None,
             Tool::Modify => d.pick(q, PICK),
-            Tool::Door | Tool::Window | Tool::Trim(_) | Tool::Split | Tool::Offset => {
-                d.pick(q, PICK).filter(|id| model.wall(*id).is_some())
+            Tool::SketchPick => d.pick(q, PICK).filter(|id| model.wall(*id).is_some()),
+            // A line to draw along, or to round.
+            Tool::DetailLine(_) | Tool::Wall(_) | Tool::SketchLine(_) if shape == draw::Shape::PickLines => {
+                d.pick_all(q, PICK).into_iter().find(|id| draw::element_curve(&model, *id).is_some())
             }
-            Tool::Demolish => d.pick(q, PICK),
-            Tool::Align(_) | Tool::Mirror { draw: false, .. } => d.pick(q, PICK).filter(|id| !model.reference_lines(*id).is_empty()),
+            Tool::Wall(_) if shape == draw::Shape::Fillet => {
+                d.pick_all(q, PICK).into_iter().find(|id| model.wall(*id).is_some_and(|w| w.arc == 0.0))
+            }
+            Tool::DetailLine(_) if shape == draw::Shape::Fillet => {
+                d.pick_all(q, PICK).into_iter().find(|id| matches!(model.elements.get(id), Some(Element::DetailLine(_))))
+            }
+            Tool::Split => {
+                d.pick_all(q, PICK).into_iter().find(|id| matches!(model.elements.get(id), Some(Element::Wall(_) | Element::DetailLine(_))))
+            }
+            Tool::Trim(_) | Tool::Offset => {
+                d.pick_all(q, PICK).into_iter().find(|id| matches!(model.elements.get(id), Some(Element::Wall(_) | Element::DetailLine(_))))
+            }
+            Tool::Vertex { .. } => {
+                d.pick_all(q, PICK).into_iter().find(|id| matches!(model.elements.get(id), Some(Element::DetailLine(_))))
+            }
+            Tool::TrimTo { boundary: None, .. } => d.pick_all(q, PICK).into_iter().find(|id| draw::element_curve(&model, *id).is_some()),
+            Tool::TrimTo { .. } => {
+                d.pick_all(q, PICK).into_iter().find(|id| matches!(model.elements.get(id), Some(Element::DetailLine(_))))
+            }
+            Tool::Door | Tool::Window => d.pick(q, PICK).filter(|id| model.wall(*id).is_some()),
+            Tool::Demolish | Tool::Linework => d.pick(q, PICK),
+            // With a reference picked, a region's or a floor's pattern lines too.
+            Tool::Align(Some(_)) => d.pick(q, PICK).filter(|id| {
+                !model.reference_lines(*id).is_empty()
+                    || matches!(model.elements.get(*id), Some(Element::FilledRegion(_) | Element::Floor(_)))
+            }),
+            Tool::Align(None) | Tool::Mirror { draw: false, .. } => d.pick(q, PICK).filter(|id| !model.reference_lines(*id).is_empty()),
             // Something to measure to: with a line parallel to the first one picked, or for an angle,
             // one across it.
             Tool::Dimension(refs) => d
@@ -907,13 +974,17 @@ impl BimApp {
         };
 
         let crop = self.crop_grips(ui, &response, rect, &view, key);
+        let dragged = self.sketch_drag(ui, &response, rect, &view, level);
         self.canvas.found.set(None);
         self.grip_drag(ui, &response, rect, &view, level);
+        self.line_grip_drag(ui, &response, rect, &view, level);
         // A drag from an element moves the selection; from empty floor, it draws a selection box.
         if response.drag_started_by(PointerButton::Primary)
             && self.tool == Tool::Modify
+            && !sketching
             && self.canvas.crop_drag.is_none()
             && self.canvas.grip.is_none()
+            && self.drawing.grip.is_none()
             && let Some(o) = ui.input(|i| i.pointer.press_origin())
         {
             let o = (o.x - rect.min.x, o.y - rect.min.y);
@@ -948,7 +1019,7 @@ impl BimApp {
             self.open_sheet(Sheet::Section(id));
             return;
         }
-        if let Some(at) = self.clicked_at(&response) {
+        if let Some(at) = self.clicked_at(&response).filter(|_| !dragged) {
             let q = (at.x - rect.min.x, at.y - rect.min.y);
             // What lay under the press, which the hand may have left by the time the button came up.
             let found = if Some(q) == local { hovered } else { under_at(q) };
@@ -956,15 +1027,50 @@ impl BimApp {
             // A snap override typed was for that point.
             self.snap_once = None;
         }
+        // A double click ends a spline or a polyline at the point clicked, as Enter does.
+        if response.double_clicked() && !dragged && self.finishable() {
+            self.finish_open_shape();
+        }
 
         let p = ui.painter_at(rect);
         p.rect_filled(rect, 0.0, color(render::PAPER));
         let mut marked = self.selection.clone();
-        if let Tool::Trim(Some((first, _))) = self.tool {
+        if let Tool::Trim(Some((first, _))) | Tool::TrimTo { boundary: Some(first), .. } = self.tool {
             marked.push(first);
         }
         let pictures = self.canvas.drawing.pictures(ui.ctx(), &d);
+        // Fillet Arc's lines picked so far, in the selection's colour.
+        marked.extend(self.drawing.fillet.iter().filter_map(|(l, _)| match l {
+            draw::Picked::Element(id) => Some(*id),
+            draw::Picked::Sketch(_) => None,
+        }));
         paint(&p, Place::at(rect.min), &d, &marked, hovered, self.thin, &pictures);
+        if let Some(sk) = &self.sketch {
+            let over = local
+                .filter(|_| self.tool == Tool::Modify && sk.drag.is_none())
+                .and_then(|q| sk.line_at(view.mm(q), f64::from(PICK) / view.scale));
+            let from: &[P2] = match &self.tool {
+                Tool::SketchLine(chain) if self.shape() == draw::Shape::Line || chain.len() < 2 => chain,
+                _ => &[],
+            };
+            let shift = ui.input(|i| i.modifiers.shift);
+            let cursor = local.map(|q| self.snap(&model, level, &view, q, from, shift).at);
+            // Trim/Extend's and Fillet Arc's picks so far, lit as the lines picked are.
+            let lit: Vec<usize> = self
+                .drawing
+                .trim
+                .map(|(i, _)| i)
+                .into_iter()
+                .chain(self.drawing.fillet.iter().filter_map(|(l, _)| match l {
+                    draw::Picked::Sketch(i) => Some(*i),
+                    draw::Picked::Element(_) => None,
+                }))
+                .collect();
+            sk.paint(&p, |q| pos(rect.min, view.px(q)), over, cursor, &lit);
+            if let (Some(q), Some(c)) = (local, cursor) {
+                self.sketch_preview(&p, &view, rect.min, q, c);
+            }
+        }
         p.extend(crop);
         let rooms = hovered.iter().map(|id| (*id, pal().hover)).chain(self.selection.iter().map(|id| (*id, pal().accent)));
         for (id, accent) in rooms {
@@ -1007,6 +1113,10 @@ impl BimApp {
             }
         }
         self.grip_overlay(ui, &model, &view, rect, level, &d);
+        let cursor = ui
+            .input(|i| i.pointer.latest_pos())
+            .map(|q| self.snap(&model, level, &view, (q.x - rect.min.x, q.y - rect.min.y), &[], false).at);
+        self.line_grip_overlay(&ui.painter_at(rect), rect, &view, cursor.filter(|_| self.drawing.grip.is_some()));
         self.temporary_dimension(ui, &model, &view, rect);
         self.context_menu(&response);
         self.nav_bar(ui, rect, key);
@@ -1195,6 +1305,22 @@ impl BimApp {
 
     fn click(&mut self, m: &Model, (level, key): (Id, Id), v: &View, at: (f32, f32), hovered: Option<Id>, mods: Modifiers) {
         match &self.tool {
+            &Tool::Vertex { delete } if self.sketch.is_some() => self.vertex_click(None, v.mm(at), f64::from(PICK) / v.scale, delete),
+            Tool::Split | Tool::Trim(_) | Tool::TrimTo { .. } | Tool::Offset if self.sketch.is_some() => {
+                let p = self.snap(m, level, v, at, &[], false).at;
+                self.sketch_modify(p, v.mm(at), f64::from(PICK) / v.scale);
+            }
+            Tool::Modify | Tool::SketchLine(_) | Tool::SketchPick if self.sketch.is_some() => {
+                let from = match &self.tool {
+                    Tool::SketchLine(chain) if self.shape() == draw::Shape::Line => chain.clone(),
+                    Tool::SketchLine(chain) if chain.len() < 2 => chain.clone(),
+                    _ => Vec::new(),
+                };
+                let p = self.snap(m, level, v, at, &from, mods.shift).at;
+                self.sketch_click(m, p, v.mm(at), f64::from(PICK) / v.scale, hovered, mods);
+            }
+            // A sketch tool with the sketch gone: nothing to draw into.
+            Tool::SketchLine(_) | Tool::SketchPick => self.tool = Tool::Modify,
             Tool::Modify => self.pick_up(hovered.into_iter().collect(), mods),
             Tool::Door | Tool::Window => {
                 let cat = if matches!(self.tool, Tool::Door) { "door" } else { "window" };
@@ -1208,6 +1334,27 @@ impl BimApp {
             Tool::Elevation => {
                 self.run("elevation", json!({"at": point(round(v.mm(at)))}));
             }
+            Tool::Wall(_) if self.shape() == draw::Shape::Fillet => {
+                let picked = hovered.filter(|id| m.wall(*id).is_some());
+                self.fillet_pick(picked.map(draw::Picked::Element), v.mm(at));
+            }
+            Tool::Wall(_) if self.shape() == draw::Shape::PickLines => {
+                if let Some(c) = hovered.and_then(|id| self.picked_curve(id, v.mm(at))) {
+                    self.make_walls(level, &[c]);
+                }
+            }
+            Tool::Wall(_) if self.shape() == draw::Shape::PickFaces => {
+                match bimcraft_core::massing::face_at(m, v.mm(at), 2.0 * f64::from(PICK) / v.scale) {
+                    Some((mass, face)) => {
+                        let mut p = json!({"mass": mass, "faces": [face]});
+                        if let Some(t) = self.types.get("wall") {
+                            p["type"] = json!(t);
+                        }
+                        self.run("wall_by_face", p);
+                    }
+                    None => self.status = Status { text: t("Pick Faces: click a face of a mass").into(), error: true },
+                }
+            }
             Tool::Wall(_) | Tool::Grid(_) | Tool::Move(_) | Tool::Copy(_) | Tool::Section(_) | Tool::Run(..) => {
                 let chain: Vec<P2> = match &self.tool {
                     Tool::Wall(chain) => chain.clone(),
@@ -1216,8 +1363,13 @@ impl BimApp {
                     }
                     _ => Vec::new(),
                 };
-                // The point an arc passes through follows no guide from the points before it.
-                let chain = if self.wall_arc && matches!(self.tool, Tool::Wall(_)) && chain.len() == 2 { Vec::new() } else { chain };
+                // A shape's points past its second follow no guide from the points before.
+                let chain = match (&self.tool, self.shape()) {
+                    (Tool::Wall(_), draw::Shape::Line) => chain,
+                    (Tool::Wall(_), _) if chain.len() >= 2 => Vec::new(),
+                    (Tool::Wall(_), _) => chain.last().copied().into_iter().collect(),
+                    _ => chain,
+                };
                 let square = mods.shift || (self.constrain && matches!(self.tool, Tool::Move(_) | Tool::Copy(_)));
                 self.place(level, self.snap(m, level, v, at, &chain, square).at);
             }
@@ -1255,6 +1407,14 @@ impl BimApp {
                     Some(a) => self.reflect((a, p)),
                 }
             }
+            // A model pattern's line, picked second, moves the pattern onto the reference.
+            &Tool::Align(Some(r))
+                if let Some(id) =
+                    hovered.filter(|id| matches!(m.elements.get(*id), Some(Element::FilledRegion(_) | Element::Floor(_))))
+                    && let Some(line) = render::pattern_line_at(m, key, id, v.mm(at), 2.0 * f64::from(PICK) / v.scale) =>
+            {
+                self.align_pattern(m, r, id, line)
+            }
             &Tool::Align(reference) => match (reference, hovered.and_then(|id| Some((id, nearest_line(m, id, v.mm(at))?)))) {
                 (None, Some((_, line))) => self.tool = Tool::Align(Some(line)),
                 (Some(r), Some((id, line))) => self.align(r, id, line),
@@ -1274,15 +1434,47 @@ impl BimApp {
                 }
             }
             Tool::Offset => {
-                if let Some(id) = hovered
+                if let Some(id) = hovered.filter(|id| matches!(m.elements.get(*id), Some(Element::DetailLine(_)))) {
+                    match m.units.parse(&self.offset).filter(|d| *d > 0.0) {
+                        Some(d) => {
+                            self.run("offset", json!({"id": id, "distance": d, "toward": point(v.mm(at)), "copy": self.offset_copy}));
+                        }
+                        None => self.status = Status { text: tf("offset: `{}` is not a distance", &[&self.offset]), error: true },
+                    }
+                } else if let Some(id) = hovered
                     && let Some(by) = self.offset_by(m, id, v.mm(at))
                 {
                     self.run(if self.offset_copy { "copy" } else { "move" }, json!({"ids": [id], "by": point(by)}));
                 }
             }
+            &Tool::Vertex { delete } => {
+                let p = self.snap(m, level, v, at, &[], false).at;
+                self.vertex_click(hovered, if delete { v.mm(at) } else { p }, f64::from(PICK) / v.scale, delete);
+            }
+            &Tool::TrimTo { boundary, many } => match (boundary, hovered) {
+                (None, Some(b)) => self.tool = Tool::TrimTo { boundary: Some(b), many },
+                (Some(b), Some(id)) if id != b => {
+                    self.run("trim_extend", json!({"boundary": b, "ids": [id], "keep": [point(v.mm(at))]}));
+                    if !many {
+                        self.tool = Tool::TrimTo { boundary: None, many };
+                    }
+                }
+                _ => {}
+            },
             Tool::Demolish => {
                 if let Some(id) = hovered {
                     self.demolish(id);
+                }
+            }
+            Tool::Linework => {
+                if let Some(id) = hovered {
+                    let mut p = json!({"view": key, "id": id, "at": point(v.mm(at))});
+                    match self.linework_style.as_str() {
+                        crate::linestyles::INVISIBLE => p["invisible"] = json!(true),
+                        crate::linestyles::BY_CATEGORY => p["remove"] = json!(true),
+                        style => p["style"] = json!(style),
+                    }
+                    self.run("linework", p);
                 }
             }
             // Paint works in the 3D view, which it opens; a plan's tool goes back to Modify.
@@ -1335,6 +1527,18 @@ impl BimApp {
                 (None, None) => {}
             },
             Tool::Text => self.write_note(key, round(v.mm(at))),
+            Tool::DetailGroup => self.place_group(key, self.snap(m, level, v, at, &[], false).at),
+            &Tool::RepeatingDetail(start) => {
+                let p = self.snap(m, level, v, at, start.as_slice(), mods.shift).at;
+                match start {
+                    None => self.tool = Tool::RepeatingDetail(Some(p)),
+                    Some(a) => {
+                        if self.repeat(key, a, p) {
+                            self.tool = Tool::RepeatingDetail(None);
+                        }
+                    }
+                }
+            }
             Tool::Spot => {
                 self.run("spot", json!({"at": point(round(v.mm(at))), "view": key}));
             }
@@ -1427,6 +1631,26 @@ impl BimApp {
                     && path.last().is_none_or(|l| l.dist(p) > TOL)
                 {
                     path.push(p);
+                }
+            }
+            Tool::DetailLine(path) => {
+                let guide: Vec<P2> = match self.shape() {
+                    draw::Shape::Line | draw::Shape::Polyline => path.clone(),
+                    _ if path.len() >= 2 => Vec::new(),
+                    _ => path.last().copied().into_iter().collect(),
+                };
+                let p = self.snap(m, level, v, at, &guide, mods.shift).at;
+                match self.shape() {
+                    draw::Shape::Fillet => {
+                        let picked = hovered.filter(|id| matches!(m.elements.get(*id), Some(Element::DetailLine(_))));
+                        self.fillet_pick(picked.map(draw::Picked::Element), v.mm(at));
+                    }
+                    draw::Shape::PickLines => {
+                        if let Some(c) = hovered.and_then(|id| self.picked_curve(id, v.mm(at))) {
+                            self.make_detail_lines(level, &[c]);
+                        }
+                    }
+                    _ => self.place_detail_line(level, p),
                 }
             }
             // On the level above, over this plan's walls; once made, selected, as a finished sketch is.
@@ -1672,6 +1896,74 @@ impl BimApp {
         }
     }
 
+    /// The Detail Line tool's next point. A line a click, as walls are: each click after the first makes a line from the
+    /// one before, and with Chain goes on from there until back on the first point. With Polyline, the points gather into
+    /// one line, closed when back on the first, else finished with Enter.
+    fn place_detail_line(&mut self, level: Id, p: P2) {
+        if !matches!(self.shape(), draw::Shape::Line | draw::Shape::Polyline) {
+            if let Some(made) = self.shape_click(p) {
+                self.make_detail_lines(level, &made);
+            }
+            return;
+        }
+        let polyline = self.one_line();
+        let Tool::DetailLine(path) = &mut self.tool else { return };
+        let (Some(first), Some(last)) = (path.first().copied(), path.last().copied()) else {
+            path.push(p);
+            return;
+        };
+        if last.dist(p) <= TOL {
+            return;
+        }
+        if polyline {
+            if path.len() >= 2 && first.dist(p) <= TOL {
+                self.finish_detail_line_closed(level, true);
+            } else {
+                path.push(p);
+            }
+            return;
+        }
+        // Beside the points clicked, by the Options Bar's Offset.
+        let line = draw::offset_line(last, p, self.draw_options().offset);
+        let mut params = json!({"start": point(line[0]), "end": point(line[1]), "view": level});
+        self.line_extras(&mut params);
+        if self.run("detail_line", params).is_some() {
+            let Tool::DetailLine(path) = &mut self.tool else { return };
+            if !self.line_chain || first.dist(p) <= TOL {
+                path.clear();
+            } else {
+                path.push(p);
+            }
+        }
+    }
+
+    /// The Detail Line tool's Enter: with Polyline, a detail line through the points clicked, in the plan of `level`;
+    /// else the chain ends, its lines made as it went.
+    pub(crate) fn finish_detail_line(&mut self, level: Id) {
+        if self.one_line() {
+            self.finish_detail_line_closed(level, false);
+        } else if self.shape().open_ended() {
+            if let Some(made) = self.finish_shape() {
+                self.make_detail_lines(level, &made);
+            }
+        } else if let Tool::DetailLine(path) = &mut self.tool {
+            path.clear();
+        }
+    }
+
+    /// A detail line through the points clicked, round to the first again where `closed`, in the Options Bar's line
+    /// style; fewer than two points make none.
+    fn finish_detail_line_closed(&mut self, level: Id, closed: bool) {
+        let Tool::DetailLine(path) = &mut self.tool else { return };
+        let path = std::mem::take(path);
+        if path.len() < 2 {
+            return;
+        }
+        let mut p = json!({"points": path.iter().map(|q| point(*q)).collect::<Vec<_>>(), "view": level, "closed": closed});
+        self.line_extras(&mut p);
+        self.run("detail_line", p);
+    }
+
     /// The Mass tool's Enter, or its first corner clicked again: a mass over the footprint clicked, on the plan's level,
     /// up to the Options Bar's top. Fewer than three corners make none.
     pub(crate) fn finish_mass(&mut self, level: Id) {
@@ -1742,6 +2034,23 @@ impl BimApp {
         self.tool = Tool::Align(None);
     }
 
+    /// Align on a pattern: element `id`'s pattern moved across so its `line` lies on `reference`.
+    fn align_pattern(&mut self, m: &Model, reference: (P2, P2), id: Id, line: (P2, P2)) {
+        if !geom::parallel(reference.0, reference.1, line.0, line.1) {
+            self.status = Status { text: t("align: the lines aren't parallel").into(), error: true };
+            return;
+        }
+        let origin = match m.elements.get(id) {
+            Some(Element::FilledRegion(r)) => r.pattern_origin,
+            Some(Element::Floor(f)) => f.pattern_origin,
+            _ => return,
+        };
+        let n = (reference.1 - reference.0).unit().perp();
+        let to = micron(origin + n * (reference.0 - line.0).dot(n));
+        self.run("modify", json!({"id": id, "pattern_origin": point(to)}));
+        self.tool = Tool::Align(None);
+    }
+
     /// Where Offset takes wall `id` for the cursor at `p`: across it, toward `p`, by the Options
     /// Bar's distance.
     fn offset_by(&mut self, m: &Model, id: Id, p: P2) -> Option<P2> {
@@ -1761,31 +2070,27 @@ impl BimApp {
     /// The tool's next point: of a wall chain, a grid's ends, a move's or a copy's base point and
     /// destination.
     pub(crate) fn place(&mut self, level: Id, p: P2) {
-        // An arc: its start, its end, then a point it passes through, which makes it.
-        if self.wall_arc
-            && let Tool::Wall(chain) = &mut self.tool
-        {
-            match chain.as_slice() {
-                &[start, end] => {
-                    let arc = walls::sweep_through(start, p, end);
-                    if self.build_walls(level, &[start, end], false, arc) {
-                        let Tool::Wall(chain) = &mut self.tool else { return };
-                        *chain = if self.chain { vec![end] } else { Vec::new() };
-                    }
-                }
-                [start] if start.dist(p) <= TOL => {}
-                _ => chain.push(p),
+        // A shape other than a line: its points, then the walls along what they make.
+        if matches!(self.tool, Tool::Wall(_)) && self.shape() != draw::Shape::Line {
+            if matches!(self.shape(), draw::Shape::PickLines | draw::Shape::PickFaces) {
+                return;
+            }
+            if let Some(made) = self.shape_click(p) {
+                self.make_walls(level, &made);
             }
             return;
         }
         if matches!(self.tool, Tool::Run(..)) {
             return self.place_run(level, p);
         }
+        if matches!(self.tool, Tool::DetailLine(_)) {
+            return self.place_detail_line(level, p);
+        }
         match &mut self.tool {
             // A line: each click after the first builds the wall from the one before it.
             Tool::Wall(chain) => match (chain.first().copied(), chain.last().copied()) {
                 (Some(first), Some(last)) if last.dist(p) > TOL => {
-                    if self.build_walls(level, &[last, p], false, 0.0) {
+                    if self.build_walls(level, &draw::offset_line(last, p, self.draw_options().offset), false, 0.0) {
                         let Tool::Wall(chain) = &mut self.tool else { return };
                         // Back on its start, the chain closes; without Chain, every wall stands alone.
                         if !self.chain || first.dist(p) <= TOL {
@@ -1845,14 +2150,22 @@ impl BimApp {
     /// The typed length, from the tool's base point toward the cursor: along the guide the cursor
     /// snapped to, else onto the nearest snap angle when close. Enter while a length is typed.
     pub(crate) fn place_typed(&mut self, level: Id) {
+        if self.filleting() {
+            self.fillet_typed();
+            return;
+        }
+        let Some(cursor) = self.canvas.cursor else { return };
+        if self.place_numbers(level, self.canvas.found.get().map_or(cursor, |f| f.at)) {
+            return;
+        }
         let typed = std::mem::take(&mut self.typed_length);
-        let (Some(base), Some(cursor)) = (self.base(), self.canvas.cursor) else { return };
+        let Some(base) = self.base() else { return };
         let toward = match self.canvas.found.get() {
             Some(f) if f.at.dist(base) > TOL => (f.at - base).unit(),
             _ => snap_angle(cursor - base, self.snaps.angle),
         };
         match self.session.model.units.parse(&typed) {
-            Some(len) if len > 0.0 && len <= MAX_COORD => self.place(level, micron(base + toward * len)),
+            Some(len) if len > 0.0 && len <= MAX_COORD => self.put(level, micron(base + toward * len)),
             _ => self.status = Status { text: tf("`{}` is not a length", &[typed.trim()]), error: true },
         }
     }
@@ -1868,6 +2181,14 @@ impl BimApp {
     /// Walls along `points`, each turning `arc` degrees, as the Options Bar says: their type,
     /// their top, the line they stand on. Whether they were made.
     fn build_walls(&mut self, level: Id, points: &[P2], closed: bool, arc: f64) -> bool {
+        match self.wall_params(level, points, closed, arc) {
+            Some(p) => self.run("wall", p).is_some(),
+            None => false,
+        }
+    }
+
+    /// The Wall tool's params for walls through `points`: the type and the Options Bar's location line and height.
+    pub(crate) fn wall_params(&mut self, level: Id, points: &[P2], closed: bool, arc: f64) -> Option<Value> {
         let mut p = json!({
             "points": points.iter().map(|q| point(*q)).collect::<Vec<_>>(), "level": level, "closed": closed,
             "arc": arc, "location": self.wall_location.name(),
@@ -1881,10 +2202,10 @@ impl BimApp {
             Ok(_) => {}
             Err(e) => {
                 self.status = Status { text: tf("wall: {}", &[&e]), error: true };
-                return false;
+                return None;
             }
         }
-        self.run("wall", p).is_some()
+        Some(p)
     }
 
     /// The wall selected alone, with Modify: the one whose ends are grips.
@@ -2099,7 +2420,7 @@ impl BimApp {
             self.dim_edit = None;
             return;
         };
-        if self.tool != Tool::Modify || self.canvas.drag.is_some() || self.canvas.grip.is_some() {
+        if self.tool != Tool::Modify || self.canvas.drag.is_some() || self.canvas.grip.is_some() || self.drawing.grip.is_some() {
             return;
         }
         match m.elements.get(id) {
@@ -2152,6 +2473,53 @@ impl BimApp {
                 Some((_, typed)) => self.status = Status { text: tf("`{}` is not a length", &[typed.trim()]), error: true },
                 None => {}
             }
+        }
+    }
+
+    /// The listening dimensions of a shape being drawn, with the cursor at `next`: a rectangle's width and height by
+    /// their sides, a radius, an angle or a reach by the cursor, each as typed once something is; else the length
+    /// from the last point, as a line's. The number Tab is on says Enter.
+    fn shape_dimensions(&self, sc: &Scene, chain: &[P2], next: P2) {
+        let m = sc.m;
+        let shape = self.shape();
+        let names = bimcraft_core::draw::numbers(shape, chain.len());
+        let label = |at: P2, text: String| tag(sc.p, sc.screen(at) + vec2(12.0, -12.0), Align2::LEFT_BOTTOM, text);
+        // The radius by the cursor, or as typed.
+        if shape == draw::Shape::Fillet {
+            if !self.typed_length.is_empty() && self.filleting() {
+                label(next, format!("R {} (Enter)", self.typed_length.trim()));
+            } else if let Some(r) = self.fillet_radius_at(next).filter(|_| self.filleting()) {
+                label(next, format!("R {}", m.units.with_unit(r)));
+            }
+            return;
+        }
+        let Some(&last) = chain.last() else { return };
+        if names.is_empty() {
+            let text = if self.typed_length.is_empty() {
+                m.units.with_unit(last.dist(next))
+            } else {
+                format!("{} (Enter)", self.typed_length.trim())
+            };
+            label(next, text);
+            return;
+        }
+        let now = bimcraft_core::draw::reading(shape, chain, next);
+        let field = self.drawing.field.min(names.len() - 1);
+        let places: Vec<P2> = match (shape, chain) {
+            (draw::Shape::Rectangle, &[a]) => vec![(a + P2(next.0, a.1)) * 0.5, (P2(next.0, a.1) + next) * 0.5],
+            _ => vec![next],
+        };
+        for (i, name) in names.iter().enumerate() {
+            let typed = if i == field { &self.typed_length } else { &self.drawing.other };
+            let shown = match now.get(i) {
+                _ if !typed.is_empty() => typed.trim().to_string(),
+                Some(v) if *name == "Angle" => degrees(*v),
+                Some(v) if *name == "Radius" => format!("R {}", m.units.with_unit(*v)),
+                Some(v) => m.units.with_unit(*v),
+                None => continue,
+            };
+            let text = if i == field && (!typed.is_empty() || names.len() > 1) { format!("{shown} (Enter)") } else { shown };
+            label(places.get(i).copied().unwrap_or(next), text);
         }
     }
 
@@ -2214,7 +2582,24 @@ impl BimApp {
         let sketched = |e: &Element| ghost(p, origin, &render::sketch(m, *v, m.next_id, e), &[m.next_id], &|pt| pt);
         let ghost = |f: &dyn Fn(Pos2) -> Pos2| ghost(p, origin, sc.d, &self.selection, f);
         let chain = match &self.tool {
-            Tool::Wall(chain) | Tool::Railing(chain) | Tool::Mass(chain) => chain.as_slice(),
+            Tool::Wall(chain) | Tool::Railing(chain) | Tool::Mass(chain) | Tool::DetailLine(chain) | Tool::SketchLine(chain) => {
+                chain.as_slice()
+            }
+            Tool::SketchPick => &[],
+            // The group a click would place.
+            Tool::DetailGroup => {
+                if let Some(e) = self.group_at(m, key, self.found(sc, q, &[], false)) {
+                    sketched(&e);
+                }
+                return;
+            }
+            &Tool::RepeatingDetail(Some(a)) => {
+                if let Some(e) = self.repeat_to(m, key, a, self.found(sc, q, &[a], shift)) {
+                    sketched(&e);
+                }
+                return;
+            }
+            Tool::RepeatingDetail(None) => &[],
             Tool::ExtrusionRoof(pts) if pts.len() < 2 => pts.as_slice(),
             // The roof a click would make, swept across to the cursor.
             Tool::ExtrusionRoof(pts) => {
@@ -2338,12 +2723,25 @@ impl BimApp {
                 }
                 return;
             }
+            // The copy a click would make, on the cursor's side: of a wall, a detail line or a sketch line.
             Tool::Offset => {
                 let d = m.units.parse(&self.offset).filter(|d| *d > 0.0);
-                if let (Some(w), Some(d)) = (hovered.and_then(|id| m.wall(id)).filter(|w| w.arc == 0.0), d) {
+                let at = v.mm(q);
+                let line = match &self.sketch {
+                    Some(sk) => sk.line_at(at, f64::from(PICK) / v.scale).and_then(|i| sk.lines.get(i)).map(|l| l.curve.clone()),
+                    None => hovered
+                        .filter(|id| matches!(m.elements.get(*id), Some(Element::DetailLine(_))))
+                        .and_then(|id| draw::element_curve(m, id)),
+                };
+                if let (Some(c), Some(d)) = (line, d) {
+                    if let Some(copy) = bimcraft_core::draw::pick(&c, at, d) {
+                        let pts: Vec<Pos2> = copy.points().into_iter().map(|pt| sc.screen(pt)).collect();
+                        p.extend(Shape::dashed_line(&pts, stroke, 8.0, 4.0));
+                    }
+                } else if let (Some(w), Some(d)) = (hovered.and_then(|id| m.wall(id)).filter(|w| w.arc == 0.0), d) {
                     let n = (w.end - w.start).unit().perp();
-                    let by = n * if (v.mm(q) - w.start).dot(n) >= 0.0 { d } else { -d };
-                    dashed(sc.screen(w.start + by), sc.screen(w.end + by));
+                    let by = n * if (at - w.start).dot(n) >= 0.0 { d } else { -d };
+                    p.extend(Shape::dashed_line(&[sc.screen(w.start + by), sc.screen(w.end + by)], stroke, 8.0, 4.0));
                 }
                 return;
             }
@@ -2562,22 +2960,37 @@ impl BimApp {
             _ => return,
         };
         let square = shift || (self.constrain && matches!(self.tool, Tool::Move(_) | Tool::Copy(_)));
-        // The point an arc passes through follows no guide from the points before it.
-        let arc_through = self.wall_arc && matches!(self.tool, Tool::Wall(_)) && chain.len() == 2;
-        let next = self.found(sc, q, if arc_through { &[] } else { chain }, square);
+        // A shape other than a line: guided from its last point only, and its third point from none.
+        let shape = self.shape();
+        let shaped = self.target().is_some() && !matches!(shape, draw::Shape::Line | draw::Shape::Polyline);
+        let guide = match (shaped, chain) {
+            (false, _) => chain,
+            (true, [.., last]) if chain.len() < 2 || shape.open_ended() => std::slice::from_ref(last),
+            (true, _) => &[],
+        };
+        let next = self.found(sc, q, guide, square);
+        if shaped {
+            for c in self.shape_preview(next) {
+                p.add(Shape::line(c.points().into_iter().map(|pt| sc.screen(pt)).collect(), stroke));
+            }
+            if let (Some(&last), true) =
+                (chain.last(), matches!(shape, draw::Shape::Circle | draw::Shape::Inscribed | draw::Shape::Circumscribed))
+            {
+                p.extend(ruler_shapes(sc, last, next));
+            }
+            self.shape_dimensions(sc, chain, next);
+            return;
+        }
         if let Tool::Move(Some(base)) | Tool::Copy(Some(base)) = &self.tool {
             let delta = sc.screen(next) - sc.screen(*base);
             ghost(&|pt| pt + delta);
         }
         // A line's walls are built as it goes: only the next one is to come.
-        let built = if matches!(self.tool, Tool::Wall(_)) && !self.wall_arc { chain.len().saturating_sub(1) } else { 0 };
+        // Walls, and detail lines a click, are made as they go: only the next one is still a preview.
+        let one_by_one = matches!(self.tool, Tool::Wall(_) | Tool::DetailLine(_)) && shape == draw::Shape::Line && !self.one_line();
+        let built = if one_by_one { chain.len().saturating_sub(1) } else { 0 };
         let mut pts: Vec<Pos2> = chain.iter().skip(built).map(|pt| sc.screen(*pt)).collect();
         pts.push(sc.screen(next));
-        // An arc waiting for its third point: the arc through the cursor.
-        if let (true, &[start, end]) = (self.wall_arc && matches!(self.tool, Tool::Wall(_)), chain) {
-            let axis = Axis::new(start, end, walls::sweep_through(start, next, end));
-            pts = axis.points(0.0, axis.length(), 0.0).into_iter().map(|pt| sc.screen(pt)).collect();
-        }
         p.add(Shape::line(pts, stroke));
         // The mass a click would close: its outline as the plan draws it, and its area.
         if let (Tool::Mass(_), true) = (&self.tool, chain.len() >= 2) {
@@ -2597,8 +3010,7 @@ impl BimApp {
             label(sc.screen(middle), format!("{area:.2} {unit}"));
         }
         // The ruler along the new line, and an arc at the corner it turns from the line before.
-        let arc_next = self.wall_arc && matches!(self.tool, Tool::Wall(_));
-        if let (Some(&last), false) = (chain.last(), arc_next) {
+        if let Some(&last) = chain.last() {
             p.extend(ruler_shapes(sc, last, next));
             if let [.., prev, l] = chain
                 && let Some(a) = corner_arc(sc, *prev, *l, next)
@@ -2608,10 +3020,7 @@ impl BimApp {
         }
         // The listening dimension: the length so far and the angle (at the corner it turns, else from
         // east), or the length being typed; an arc's radius.
-        let arc = match (arc_next, chain) {
-            (true, &[start, end]) => Axis::new(start, end, walls::sweep_through(start, next, end)).radius(),
-            _ => None,
-        };
+        let arc: Option<f64> = None;
         let reading = |last: P2| {
             let angle = match chain {
                 [.., prev, l] => snap::corner(*prev, *l, next),
