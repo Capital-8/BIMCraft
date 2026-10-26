@@ -113,6 +113,47 @@ fn the_crop_regions_outline_is_drawn_for_the_canvas_not_the_interface() {
     assert!(outlines.contains(&LIGHT.muted), "dark enough to read on white: {outlines:?}");
 }
 
+/// What the last frame painted of a sketch: the colours of its strokes, and the fills of its 8 px squares that have one (a
+/// picked line's grips).
+fn sketch_ink(h: &Harness<BimApp>) -> (Vec<Color32>, Vec<Color32>) {
+    fn walk(s: &Shape, out: &mut (Vec<Color32>, Vec<Color32>)) {
+        match s {
+            Shape::Path(p) => out.0.extend(match p.stroke.color {
+                ColorMode::Solid(c) => Some(c),
+                _ => None,
+            }),
+            Shape::Rect(r) if r.rect.size() == egui::vec2(8.0, 8.0) && r.fill != Color32::TRANSPARENT => out.1.push(r.fill),
+            Shape::Vec(v) => v.iter().for_each(|s| walk(s, out)),
+            _ => {}
+        }
+    }
+    let mut out = (Vec::new(), Vec::new());
+    h.output().shapes.iter().for_each(|c| walk(&c.shape, &mut out));
+    out
+}
+
+#[test]
+fn a_sketchs_wrong_lines_and_grips_are_drawn_for_the_canvas_not_the_interface() {
+    let mut h = app(&format!("{BOX}\nfloor {{}}"));
+    let f = ids(&h, "floor")[0];
+    h.state_mut().selection = vec![f];
+    h.run();
+    press(&mut h, "Modify | Floors");
+    press(&mut h, "Edit Boundary");
+    key(&mut h, Key::Escape);
+    // Taking the north line out leaves the two lines that met it loose; Finish says so and the lines show it.
+    click(&mut h, P2(4000.0, 6000.0));
+    key(&mut h, Key::Delete);
+    press(&mut h, "Finish Edit Mode");
+    assert!(h.state().sketch.as_ref().is_some_and(|s| s.wrong.len() == 2), "{}", h.state().status.text);
+    // A picked line's ends are grips.
+    click(&mut h, P2(4000.0, 0.0));
+    pick_look(&mut h, "Dark UI, Light Canvas");
+    let (strokes, grips) = sketch_ink(&h);
+    assert!(strokes.contains(&LIGHT.error), "wrong lines read on white: {strokes:?}");
+    assert!(!grips.is_empty() && grips.iter().all(|c| *c == LIGHT.surface), "grips: {grips:?}");
+}
+
 #[test]
 fn the_3d_views_picture_is_redrawn_when_the_canvas_turns_light_and_dark_again() {
     let (mut h, uploads) = app_keeping_uploads(BOX);

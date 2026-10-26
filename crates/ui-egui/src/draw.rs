@@ -13,7 +13,7 @@ use serde_json::{Value, json};
 
 use crate::icons::Icon;
 use crate::lang::t;
-use crate::style::pal;
+use crate::style::{canvas_pal, pal};
 use crate::{BimApp, Status, Tool, panel, small_button};
 
 /// What a Draw panel draws for.
@@ -1081,7 +1081,7 @@ impl BimApp {
         for h in shown.handles() {
             let r = Rect::from_center_size(at(h), vec2(9.0, 9.0));
             let held = live.is_some_and(|l| l.dist(h) < 1e-9);
-            p.rect_filled(r, 1.0, if held { pal().accent } else { pal().surface });
+            p.rect_filled(r, 1.0, if held { pal().accent } else { canvas_pal().surface });
             p.rect_stroke(r, 1.0, Stroke::new(1.5, pal().accent), StrokeKind::Middle);
         }
     }

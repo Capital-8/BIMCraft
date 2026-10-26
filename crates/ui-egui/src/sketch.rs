@@ -17,7 +17,7 @@ use crate::canvas::{box_shapes, tag};
 use crate::icons::Icon;
 use crate::lang::{t, tf};
 use crate::properties::number;
-use crate::style::pal;
+use crate::style::{canvas_pal, pal};
 use crate::{BimApp, Status, Tool, big_button, draw, panel, ribbon};
 
 /// What Finish Edit Mode makes of the lines.
@@ -162,7 +162,7 @@ impl Sketch {
             let (width, colour) = match () {
                 () if self.picked.contains(&i) || lit.contains(&i) => (3.0, pal().accent),
                 () if hovered == Some(i) => (3.0, pal().hover),
-                () if self.wrong.contains(&i) => (3.0, pal().error),
+                () if self.wrong.contains(&i) => (3.0, canvas_pal().error),
                 () => (2.0, SKETCH),
             };
             let shown = match (self.drag, cursor) {
@@ -174,7 +174,7 @@ impl Sketch {
         for l in self.picked.iter().filter_map(|&i| self.lines.get(i)) {
             for q in l.curve.handles() {
                 let r = Rect::from_center_size(at(moved(q)), vec2(8.0, 8.0));
-                p.rect_filled(r, 0.0, pal().surface);
+                p.rect_filled(r, 0.0, canvas_pal().surface);
                 p.rect_stroke(r, 0.0, Stroke::new(1.5, pal().accent), StrokeKind::Middle);
             }
         }
