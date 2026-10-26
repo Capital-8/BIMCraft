@@ -18,7 +18,7 @@ use crate::icons::Icon;
 use crate::lang::{t, tf};
 use crate::properties::number;
 use crate::style::pal;
-use crate::{BimApp, Status, Tool, big_button, draw, panel};
+use crate::{BimApp, Status, Tool, big_button, draw, panel, ribbon};
 
 /// What Finish Edit Mode makes of the lines.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -537,7 +537,7 @@ impl BimApp {
             return;
         }
         // Pushed to the right end by the room the rest leaves: its width as it was last drawn.
-        ui.add_space((ui.available_width() - self.mode_width).max(0.0));
+        ribbon::push_right(ui, self.mode_width);
         let drawn = ui.scope(|ui| {
             panel(ui, "Mode", |ui| {
                 if sketching {
