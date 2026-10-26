@@ -15,7 +15,7 @@ use egui_kittest::kittest::Queryable;
 use serde_json::{Value, json};
 use std::sync::Arc;
 
-use crate::{BimApp, Sheet, Tool};
+use crate::{BimApp, Sheet, Tab, Tool};
 
 const BOX: &str = r#"wall {"points": [[0,0],[8000,0],[8000,6000],[0,6000]], "closed": true}"#;
 
@@ -67,6 +67,21 @@ fn topmost(h: &mut Harness<BimApp>, name: &str) {
         h.event(Event::PointerButton { pos, button: PointerButton::Primary, pressed, modifiers: Modifiers::NONE });
     }
     h.run();
+}
+
+/// A tool from its panel's list (the panel's name, `Build ▾`), which has it whether the panel is folded to fit the window or not:
+/// the first row of that name under the list's button, not the ribbon's own nor one further down the window.
+fn from_list(h: &mut Harness<BimApp>, panel: &str, tool: &str) {
+    let name = format!("{panel} ▾");
+    press(h, &name);
+    let under = h.get_by_label(&name).rect().bottom();
+    let row = h
+        .get_all_by_label(tool)
+        .map(|n| n.rect())
+        .filter(|r| r.top() >= under)
+        .min_by(|a, b| a.top().total_cmp(&b.top()))
+        .map(|r| r.center());
+    click_at(h, row.unwrap());
 }
 
 /// The ribbon's tab scrolled to its right end with the wheel, for a tab wider than the window.
@@ -2419,6 +2434,9 @@ option {"set": "Studies", "options": ["Tall", "Low"]}
 mass {"boundary": [[1000, 1000], [3000, 1000], [3000, 2000], [1000, 2000]], "name": "Block A"}"#;
     let mut h =
         app(&format!("{BOX}\ndoor {{\"at\": [2000, 0]}}\nroof {{}}\ncomponent {{\"family\": \"WC\", \"at\": [4000, 5850]}}\n{extra}"));
+    // Wide enough for every tab's tools in the longest language: a narrower window hands some over to their panel's list.
+    h.set_size(vec2(1800.0, 900.0));
+    h.run();
     // The probe finds what it looks for: in English, the same labels are all English.
     assert!(english(&h, Lang::Spanish).contains(&"Architecture".to_string()));
     for l in [Lang::Portuguese, Lang::Spanish, Lang::Chinese] {
@@ -3089,7 +3107,9 @@ fn changing_a_schedule_every_project_has_makes_it_the_projects() {
     let mut h = app(&format!("{BOX}\ndoor {{\"at\": [2000, 0]}}\ndoor {{\"at\": [6000, 0], \"type\": \"Single 800 x 2100\"}}"));
     browse(&mut h, "Door Schedule");
     assert!(ids(&h, "schedule").is_empty(), "opened, it's still every project's");
-    press(&mut h, "Edit Sorting/Grouping");
+    // Low in Properties, it may lie below the palette's fold: pressed as a screen reader does.
+    h.get_by_label("Edit Sorting/Grouping").click_accesskit();
+    h.run();
     press(&mut h, "Add Sort");
     pick(&mut h, Role::CheckBox, "Itemize every instance");
     press(&mut h, "Close");
@@ -3146,10 +3166,11 @@ fn walls_drawn_near_an_angle_guide_snap_onto_it_and_turn_exact_corners() {
     key(&mut h, Key::Enter);
     let (a, b) = walls(&h)[0];
     assert!((degrees(a, b) - 30.0).abs() < 1e-3, "{a:?} {b:?}: 30.2° snaps onto 30°");
-    // 20° is no multiple of 15°, so it's free; but 90° from it is exact all the same.
+    // 20° is no multiple of 15°, so it's free; but 90° from it is exact all the same. Below the first, clear of the Options
+    // Bar floating over the view's top.
     tool(&mut h, "Wall");
-    click(&mut h, P2(0.0, 3000.0));
-    click(&mut h, P2(3000.0, 4092.0));
+    click(&mut h, P2(0.0, -3000.0));
+    click(&mut h, P2(3000.0, -1908.0));
     let (p, q) = match &h.state().tool {
         Tool::Wall(chain) => (chain[0], chain[1]),
         t => panic!("{t:?}"),
@@ -4238,34 +4259,117 @@ fn ph_and_do_open_phasing_and_design_options_and_so_do_the_manage_tabs_buttons()
     assert!(h.query_by_label("No design option sets yet: New Set makes one.").is_some());
     press(&mut h, "Close");
     assert!(h.query_by_label("Active design option:").is_none(), "no sets of options, no active one to pick");
-    // The Manage tab's buttons, past the window's edge until the tab is scrolled; the Properties palette has a Phasing group of
-    // its own, below.
+    // The Manage tab's buttons, in their panels' lists, as the window folds the tab's last panels to fit; the Properties palette
+    // has a Phasing group of its own, below.
     press(&mut h, "Manage");
-    scroll_ribbon_right(&mut h);
-    topmost(&mut h, "Phasing");
+    from_list(&mut h, "Phasing", "Phasing");
     assert!(h.query_by_label("Phases, in order:").is_some());
     press(&mut h, "Close");
-    topmost(&mut h, "Design Options");
+    from_list(&mut h, "Design Options", "Design Options");
     assert!(h.query_by_label("Option set:").is_some());
     press(&mut h, "Close");
     assert!(h.query_by_label("Option set:").is_none());
 }
 
 #[test]
-fn a_ribbon_tab_wider_than_the_window_scrolls_sideways_and_each_tab_keeps_its_place() {
+fn a_ribbon_tab_wider_than_the_window_folds_its_last_panels_to_buttons_that_list_their_tools() {
     let mut h = app(BOX);
+    h.set_size(vec2(1000.0, 800.0));
+    h.run();
     let window = h.ctx.content_rect().right();
-    let ribbon =
-        |h: &Harness<BimApp>, name: &str| h.get_all_by_label(name).map(|n| n.rect()).min_by(|a, b| a.top().total_cmp(&b.top())).unwrap();
     press(&mut h, "Manage");
-    assert!(ribbon(&h, "Design Options").right() > window, "the Manage tab is wider than a window of {window}");
+    assert!(h.query_by_label("Design Options").is_none(), "the last panel is folded at {window}");
+    assert!(h.get_by_label("Design Options ▾").rect().right() <= window, "to one button, in the window");
+    assert!(h.get_by_label("Materials").rect().left() >= 0.0, "and the first panel is as it was");
+    // The folded panel lists its tools, and a tool there works as on the ribbon.
+    press(&mut h, "Design Options ▾");
+    press(&mut h, "Design Options");
+    assert!(h.query_by_label("Option set:").is_some());
+}
+
+/// A tool that drops a list of choices down opens it from the list of a panel that has handed the tool over to its name (or folded
+/// whole): a click on the row must leave the choices on screen, not close the list and with it the tool's own popup.
+#[test]
+fn a_tool_with_choices_of_its_own_opens_them_from_a_panels_list() {
+    let mut shut = Vec::new();
+    for (tab, panel, tool, choice) in [
+        (Tab::Manage, "Settings", "Project Units", "Feet and inches"),
+        (Tab::Manage, "Settings", "Project Language", "Español"),
+        (Tab::Manage, "Family Editor", "New Family", "Furniture"),
+        (Tab::View, "Create", "Schedules", "Schedule/Quantities…"),
+        (Tab::View, "Create", "Duplicate View", "Duplicate with Detailing"),
+        (Tab::View, "Windows", "User Interface", "Language"),
+        (Tab::View, "Graphics", "Dark Mode", "Dark UI, Light Canvas"),
+        (Tab::View, "Sheet Composition", "Place View", "Floor Plan: Level 1"),
+    ] {
+        let mut h = app(BOX);
+        h.state_mut().tab = tab;
+        h.run();
+        if tool == "Place View" {
+            // It places a view on a sheet that is open.
+            press(&mut h, "Sheet");
+        }
+        from_list(&mut h, panel, tool);
+        if h.query_by_label(choice).is_none() {
+            shut.push(format!("{tool} (in {panel}'s list): `{choice}` is not on screen"));
+        }
+    }
+    assert!(shut.is_empty(), "a click on the row must leave the tool's choices on screen: {shut:#?}");
+    // And a choice picked there is made.
+    let mut h = app(BOX);
+    h.state_mut().tab = Tab::Manage;
+    h.run();
+    from_list(&mut h, "Settings", "Project Units");
+    press(&mut h, "Feet and inches");
+    assert_eq!(h.state().session.model.units, bimcraft_core::units::Units::FeetInches);
+    assert!(!egui::Popup::is_any_open(&h.ctx), "the list and its choices close with it");
+}
+
+/// UN (Project Units) at the least a window can be: the tool is in its panel's list by then, which the shortcut opens, and the
+/// first frame of the tab, which draws every tool, doesn't take the request for a button that is gone the next.
+#[test]
+fn the_units_shortcut_gets_to_the_choices_in_the_smallest_window_too() {
+    let mut h = app(BOX);
+    h.set_size(vec2(crate::window::MIN_SIZE[0], crate::window::MIN_SIZE[1]));
+    h.run();
+    shortcut(&mut h, "UN");
+    assert!(egui::Popup::is_any_open(&h.ctx), "the panel's list is open");
+    let row = h.get_by_label("Project Units").rect().center();
+    click_at(&mut h, row);
+    press(&mut h, "Feet and inches");
+    assert_eq!(h.state().session.model.units, bimcraft_core::units::Units::FeetInches);
+}
+
+#[test]
+fn a_panels_name_lists_its_tools() {
+    let mut h = app(BOX);
+    press(&mut h, "Build ▾");
+    let lowest =
+        |h: &Harness<BimApp>, name: &str| h.get_all_by_label(name).map(|n| n.rect().center()).max_by(|a, b| a.y.total_cmp(&b.y)).unwrap();
+    // The list under the name, with the ribbon's own button above it.
+    assert_eq!(h.get_all_by_label("Wall").count(), 2);
+    let row = lowest(&h, "Wall");
+    click_at(&mut h, row);
+    assert!(matches!(h.state().tool, Tool::Wall(_)));
+    // Its contextual tab has the ribbon now, and the list has closed.
+    assert_eq!(h.query_all_by_label("Wall").count(), 0);
+}
+
+#[test]
+fn a_ribbon_tab_too_wide_even_folded_scrolls_sideways_and_each_tab_keeps_its_place() {
+    let mut h = app(BOX);
+    h.set_size(vec2(520.0, 800.0));
+    h.run();
+    let window = h.ctx.content_rect().right();
+    assert!(h.get_by_label("Datum ▾").rect().right() > window, "folded, Architecture is still wider than {window}");
     scroll_ribbon_right(&mut h);
-    assert!(ribbon(&h, "Design Options").right() <= window, "at its end the last button is in the window");
-    assert!(ribbon(&h, "Materials").left() < 0.0, "and the first has gone out on the left");
-    press(&mut h, "Architecture");
-    assert!(ribbon(&h, "Wall").left() >= 0.0, "another tab starts at its left");
-    press(&mut h, "Manage");
-    assert!(ribbon(&h, "Design Options").right() <= window, "and Manage is where it was left");
+    assert!(h.get_by_label("Datum ▾").rect().right() <= window, "at its end the last panel is in the window");
+    // The tabs past the window's edge are out of reach at this size.
+    h.state_mut().tab = crate::Tab::Manage;
+    h.run();
+    h.state_mut().tab = crate::Tab::Architecture;
+    h.run();
+    assert!(h.get_by_label("Datum ▾").rect().right() <= window, "and Architecture is where it was left");
 }
 
 #[test]
@@ -4971,16 +5075,20 @@ mod clouds;
 mod control;
 mod dialog;
 mod dock;
+mod fonts;
 mod gpu;
 mod light_canvas;
 mod lineweights;
 mod links;
+mod look;
 mod mep;
 mod objectstyles;
 mod planviews;
 mod purge;
 mod revit;
+mod smallest;
 mod start;
+mod titlebar;
 mod window;
 
 #[test]
@@ -5649,11 +5757,11 @@ fn ids_of_selection_shows_each_ones_id_guid_and_ifc_globalid_and_copies_them() {
     let walls = ids(&h, "wall");
     press(&mut h, "Manage");
     // Nothing selected: nothing to show.
-    press(&mut h, "IDs of Selection");
+    from_list(&mut h, "Inquiry", "IDs of Selection");
     assert!(h.query_by_label("Copy All").is_none());
     h.state_mut().selection = vec![walls[0], walls[2]];
     h.run();
-    press(&mut h, "IDs of Selection");
+    from_list(&mut h, "Inquiry", "IDs of Selection");
     let (a, b) = (gid(&h, walls[0]), gid(&h, walls[2]));
     for text in [walls[0].to_string(), a.to_string(), bimcraft_core::ifc::compress(b.as_u128()), "2 selected.".to_string()] {
         assert!(h.query_by_label(&text).is_some(), "{text}");

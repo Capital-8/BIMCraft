@@ -113,6 +113,8 @@ pub enum Target {
 pub const FLOAT_SIZE: Vec2 = vec2(300.0, 420.0);
 /// A view's window, when it starts floating.
 pub const VIEW_SIZE: Vec2 = vec2(640.0, 440.0);
+/// The least height the last card on a side is given: its header, its tabs and its search, with room for a few rows.
+const LAST_MIN: f32 = 150.0;
 /// How wide the strip along the docked view's edge is that docks a palette there, in points.
 const EDGE: f32 = 36.0;
 /// How far the strips stand in from the view's edge, in points.
@@ -386,7 +388,8 @@ impl BimApp {
     /// The docked palettes, round the views; call between the bars and the views.
     pub(crate) fn docks(&mut self, ui: &mut Ui) {
         self.drop_headers.clear();
-        let frame = Frame::new().fill(pal().panel).stroke(Stroke::new(1.0, pal().border));
+        // The side holds the stacks' cards; between them and round them, the view's ground.
+        let frame = Frame::NONE;
         for side in Side::ALL {
             if self.docking.side(side).is_empty() {
                 continue;
@@ -396,7 +399,7 @@ impl BimApp {
                 Side::Right => Panel::right("dock-right").default_size(290.0),
                 Side::Bottom => Panel::bottom("dock-bottom").default_size(240.0),
             };
-            panel.frame(frame).resizable(true).min_size(140.0).show(ui, |ui| self.dock_side(ui, side));
+            panel.frame(frame).show_separator_line(false).resizable(true).min_size(140.0).show(ui, |ui| self.dock_side(ui, side));
         }
     }
 
@@ -404,10 +407,24 @@ impl BimApp {
     fn dock_side(&mut self, ui: &mut Ui, side: Side) {
         let stacks = self.docking.side(side).to_vec();
         let n = stacks.len();
-        let frame = Frame::new().fill(pal().panel).stroke(Stroke::new(1.0, pal().border));
         for (i, stack) in stacks.iter().enumerate() {
-            if i + 1 == n {
-                self.stack_ui(ui, stack, false);
+            // Each stack a card, standing off the window's edges and the next card: the last one off the bottom (or, along
+            // the bottom, off the right) too.
+            let last = i + 1 == n;
+            let frame = match side {
+                Side::Bottom => crate::style::card([true, last, true, true]),
+                _ => crate::style::card([true, true, true, last]),
+            };
+            // Flush to the window's right edge (Compact), a card's scrollbar would lie in the zone that resizes the window.
+            let frame = match crate::style::compact() && side == Side::Right && self.own_bar() {
+                true => frame.inner_margin(egui::Margin { right: crate::titlebar::EDGE as i8, ..egui::Margin::ZERO }),
+                false => frame,
+            };
+            if last {
+                frame.show(ui, |ui| {
+                    ui.set_min_size(ui.available_size());
+                    self.stack_ui(ui, stack, false);
+                });
                 continue;
             }
             // Named for the palette it holds, so a stack keeps its size while the others come and go.
@@ -415,11 +432,15 @@ impl BimApp {
             // An even share of what's left, but of the last two the first takes a little more (Properties over the
             // Project Browser, as they start).
             let share = if n - i == 2 { 0.55 } else { 1.0 / (n - i) as f32 };
+            // A card over others leaves them what they need, so the last never runs under the status bar when the window shrinks
+            // under a card that was taller: the others' least, 80 each, and the last's header, tabs and search.
+            let gap = f32::from(crate::style::gap());
+            let most = ui.available_height() - (n - i - 2) as f32 * (80.0 + gap) - LAST_MIN - gap;
             let panel = match side {
                 Side::Bottom => Panel::left(id).default_size(ui.available_width() * share),
-                _ => Panel::top(id).default_size(ui.available_height() * share),
+                _ => Panel::top(id).default_size(ui.available_height() * share).max_size(most.max(80.0)),
             };
-            panel.frame(frame).resizable(true).min_size(80.0).show(ui, |ui| {
+            panel.frame(frame).show_separator_line(false).resizable(true).min_size(80.0).show(ui, |ui| {
                 ui.set_min_size(ui.available_size());
                 self.stack_ui(ui, stack, false);
             });
@@ -456,17 +477,16 @@ impl BimApp {
     /// A stack: its title (or its tabs), its Dock menu and its close button, then the palette it shows.
     fn stack_ui(&mut self, ui: &mut Ui, stack: &Stack, floating: bool) {
         let Some(shown) = stack.shown() else { return };
-        let (rect, back) = ui.allocate_exact_size(vec2(ui.available_width(), 26.0), Sense::click_and_drag());
+        let (rect, back) = ui.allocate_exact_size(vec2(ui.available_width(), 32.0), Sense::click_and_drag());
         let p = ui.painter();
-        p.rect_filled(rect, 0.0, pal().bar);
         p.line_segment([rect.left_bottom(), rect.right_bottom()], Stroke::new(1.0, pal().border));
         self.drop_headers.push((shown, rect, floating));
         let lone = stack.tabs.len() == 1;
         if lone {
             let title = self.palette_title(shown);
             back.widget_info(|| WidgetInfo::labeled(WidgetType::Label, true, &title));
-            let at = rect.left_center() + vec2(10.0, 0.0);
-            ui.painter().text(at, Align2::LEFT_CENTER, title, FontId::proportional(13.0), pal().text);
+            let at = rect.left_center() + vec2(12.0, 0.0);
+            ui.painter().text(at, Align2::LEFT_CENTER, title, crate::style::semibold(13.0), pal().text);
         }
         if back.drag_started() {
             self.dragging = Some(if floating { Drag::Window(shown) } else { Drag::Palette(shown) });
@@ -502,7 +522,7 @@ impl BimApp {
                 Popup::menu(&r).show(|ui| self.dock_menu(ui, shown, rect));
             });
         });
-        let body = Frame::new().fill(pal().panel);
+        let body = Frame::NONE;
         body.show(ui, |ui| {
             ui.set_min_size(ui.available_size());
             self.palette_body(ui, shown);
@@ -536,7 +556,7 @@ impl BimApp {
 
     /// What a palette shows, under its title: as wide as where it's docked, its scroll bar at the edge.
     pub(crate) fn palette_body(&mut self, ui: &mut Ui, p: Palette) {
-        let scroll = egui::ScrollArea::vertical().auto_shrink([false, false]);
+        let scroll = egui::ScrollArea::vertical().auto_shrink([false, false]).min_scrolled_height(0.0);
         match p {
             Palette::Properties => {
                 scroll.id_salt("properties").show(ui, |ui| Frame::new().inner_margin(8.0).show(ui, |ui| self.properties(ui)));
@@ -600,7 +620,7 @@ impl BimApp {
                     let p = ui.painter();
                     p.rect_filled(rect, CornerRadius { nw: 6, ne: 6, sw: 0, se: 0 }, if active { pal().select_fill } else { pal().bar });
                     p.line_segment([rect.left_bottom(), rect.right_bottom()], Stroke::new(1.0, pal().border));
-                    let ink = if active { pal().accent } else { pal().text };
+                    let ink = if active { pal().accent_ink } else { pal().text };
                     p.text(rect.left_center() + vec2(10.0, 0.0), Align2::LEFT_CENTER, &title, FontId::proportional(13.0), ink);
                     if back.drag_started() {
                         self.dragging = Some(Drag::ViewWindow(f.sheet));
@@ -812,7 +832,7 @@ fn palette_tab(ui: &mut Ui, label: &str, active: bool) -> egui::Response {
         StrokeKind::Inside,
     );
     if r.has_focus() {
-        p.rect_stroke(rect, 4.0, Stroke::new(2.0, pal().accent), StrokeKind::Inside);
+        p.rect_stroke(rect, 4.0, crate::style::focus_ring(), StrokeKind::Inside);
     }
     p.text(rect.center(), Align2::CENTER_CENTER, label, font, if active { pal().text } else { pal().muted });
     r

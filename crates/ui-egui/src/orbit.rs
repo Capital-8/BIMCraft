@@ -350,7 +350,7 @@ impl BimApp {
             self.run("modify", json!({"id": id, "extent": [[lo.0, lo.1], [hi.0, hi.1]]}));
         }
         // The navigation bar, at the view's top right: Home (Revit's default orientation), fit, zoom.
-        let bar = Rect::from_min_size(rect.right_top() + vec2(-46.0, 14.0), vec2(32.0, 104.0));
+        let bar = Rect::from_min_size(self.nav_corner(rect), vec2(32.0, 104.0));
         p.rect(bar, 6.0, pal().surface, Stroke::new(1.0, pal().border), StrokeKind::Inside);
         ui.scope_builder(UiBuilder::new().max_rect(bar.shrink(3.0)).layout(Layout::top_down(Align::Center)), |ui| {
             ui.spacing_mut().item_spacing.y = 2.0;

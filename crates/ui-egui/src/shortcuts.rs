@@ -464,7 +464,7 @@ impl BimApp {
                 ui.label(RichText::new(err).color(pal().error));
             } else if let Some(msg) = &self.shortcuts_dialog.message {
                 ui.add_space(4.0);
-                ui.label(RichText::new(msg).color(pal().accent));
+                ui.label(RichText::new(msg).color(pal().accent_ink));
             }
 
             ui.add_space(6.0);

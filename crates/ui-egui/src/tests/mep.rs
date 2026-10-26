@@ -381,6 +381,9 @@ fn tests_previewed(h: &Harness<BimApp>) -> Vec<Vec<Pos2>> {
     }
     let mut out = Vec::new();
     h.output().shapes.iter().for_each(|c| walk(&c.shape, &mut out));
+    // On the drawing: a ribbon button that is on draws its icon in the accent too.
+    let view = h.state().view_rect;
+    out.retain(|o| o.iter().all(|p| view.contains(*p)));
     out
 }
 
@@ -415,9 +418,29 @@ fn a_fixture_tool_places_a_family_of_its_kind_where_clicked_and_lists_only_those
 fn the_fixture_tool_shows_the_fixture_a_click_would_place() {
     let mut h = app(BOX);
     from_tab(&mut h, "Plumbing", "Plumbing Fixture");
+    // Shapes in the accent over the drawing: the ribbon's button that is on has its icon in the accent too, which this must not count.
+    let in_accent = |h: &Harness<BimApp>| {
+        fn walk(s: &egui::Shape, view: egui::Rect, n: &mut usize) {
+            let accent = egui::epaint::ColorMode::Solid(crate::style::pal().accent);
+            match s {
+                egui::Shape::Path(p) if p.stroke.color == accent && p.points.iter().all(|q| view.contains(*q)) => *n += 1,
+                egui::Shape::LineSegment { points, stroke }
+                    if stroke.color == crate::style::pal().accent && points.iter().all(|q| view.contains(*q)) =>
+                {
+                    *n += 1
+                }
+                egui::Shape::Vec(v) => v.iter().for_each(|s| walk(s, view, n)),
+                _ => {}
+            }
+        }
+        let mut n = 0;
+        h.output().shapes.iter().for_each(|c| walk(&c.shape, h.state().view_rect, &mut n));
+        n
+    };
+    let before = in_accent(&h);
     h.hover_at(h.state().screen(P2(3000.0, 3000.0)));
     h.run();
-    assert!(!tests_previewed(&h).is_empty(), "the bathtub it would place is drawn in the accent");
+    assert!(in_accent(&h) > before, "the bathtub it would place is drawn in the accent: {before} before, {} after", in_accent(&h));
     assert!(ids(&h, "component").is_empty());
 }
 

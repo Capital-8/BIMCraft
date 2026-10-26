@@ -124,8 +124,58 @@ Undo's list. The arrows beside Undo and Redo (`BimApp::steps_list`) list `Sessio
 undo snapshot: the command's label and the elements it made and took away, by category, which `step_name` turns into Create Walls
 or Delete Door (else the label). A click runs `undo` or `redo` with `count`.
 
-Tabs. The open ribbon tab and the open view tab mould out of what they open: `rule_under_tabs` draws the rule under a row of tabs
-but for the open one, whose sides run down into the surface below. A view's × is part of its tab (`tab_button_with`'s `room`).
+Tabs. Ribbon and view tabs are pills (`tab_button_with`): the open one in the accent's soft tint, a contextual one solid green
+when open and tinted green when not. A view's × is part of its tab (`tab_button_with`'s `room`). The ribbon's tab row scrolls
+sideways with the wheel in a window too narrow for it.
+
+The look. `style.rs` holds the tokens: the palettes, light and dark, with a dark app bar; the
+card frame (`style::card`: 8 px corners, a hairline border and a soft shadow, standing `GAP` off the edges it's told to); IBM Plex Sans
+and Mono (`assets/fonts`, SIL OFL 1.1; built into the executable, so `NOTICE` names them with their versions and sha256 and every package
+carries it and both OFL.txt, as `copy_docs` in `packaging/env.sh`, `bimcraft.wxs` and `portable.ps1` do: `tests/fonts.rs` checks), with
+`style::semibold` for titles and tabs (the body's face until the window has loaded it, a frame after `apply`). The semibold face is a
+family of its own, and egui does not fall back across families, so the Chinese font joins every family in `style::families` (`lang::use_chinese_font`). `BimApp::show` paints the active view's ground (`backdrop`) under everything, then the app bar (Home, File, the
+Quick Access Toolbar and the title, light on dark, `style::on_app_bar`), and the ribbon, the Options Bar, the status bar and each docked
+palette stack as cards, so the gaps between them read as the view going on beneath; the view control bar is a small card in the view's
+corner. The Options Bar (`BimApp::options_bar`) floats over the view's top left, an `Area` above it, while there's something on it (a
+contextual tab's name, a tool's options): coming and going it takes no room, so the view never moves under a drag when a selection
+fills it, and a click on it never reaches the view. File > Settings > Layout picks Floating (the cards) or Compact (`BimApp::compact`, kept in `settings.json` as
+`layout`): the same pieces flush to the edges and square, `style::gap` and `style::card` reading it each frame (`style::follow`, given the `Look` the user kept: Compact and the Light Canvas).
+Text holds 4.5:1 and a focus ring or an icon 3:1 on what it sits on, in both themes (`style::tests` computes WCAG's ratio for every pair the
+window draws): `accent` is for fills, strokes and the drawing, `accent_ink` for the accent as text, an icon or a focus ring
+(`style::focus_ring`, which on the app bar is the bar's lettering colour), `on_context` for the open contextual tab's lettering. A new pair of
+colours goes in that test.
+
+The title bar (`titlebar.rs`). On Windows and Linux the window draws its own (`BimApp::own_title_bar`, set by `main`, which opens
+the window without the system's decorations): the app bar is the title bar. Its bare ground moves the window and a double-click
+there maximizes or restores it (`titlebar::drag_area`, laid out before the bar's buttons so they keep their presses), Minimize,
+Maximize (Restore Down when maximized) and Close sit flush in its right end (`caption_buttons`, 46 points each, Close red under the
+pointer), and `titlebar::frame`, over everything, resizes the window from 4-point zones along its edges (`titlebar::EDGE`; corners twice as long,
+winning where they meet) and draws a hairline round it; a maximized or full-screen window has neither. The zones sit over the window and win
+the hit test, so they are as thin as the room each layout leaves round its controls (the app bar keeps 5 above its buttons, the cards stand off by
+`GAP`, a Compact card 3), the top edge stops short of the caption buttons and the right edge starts under them (`titlebar::zones`, given
+where `caption_buttons` put them this frame), and a Compact card docked right pads its scrollbar in by the same 4. The titlebar tests run in
+the window's real geometry (`own` fills the window, with none of the margin `app()` keeps). Moving and resizing are the
+system's (`StartDrag`, `BeginResize`), so Windows' snapping works, and Close is the system's Close, so unsaved work is asked about.
+The start page has a slim bar of its own (`start_title_bar`). Settings > User Interface > Title bar asks for the system's instead
+(`system_title_bar`, kept in `settings.json`, read by `main` before the window opens and switched at once with `Decorations`);
+macOS keeps its own.
+
+The least a window can be is `window::MIN_SIZE`, 900 by 560 points (`main` gives it as the window's minimum), and nothing runs under, over or
+past anything else there (`tests/smallest.rs`, in the window's real geometry): the app bar's title sits between the quick access and the
+caption buttons, in the window's middle if it fits there and cut short with an ellipsis if not; the ribbon's tab row scrolls, and a tab just
+picked (a contextual tab comes last of all) is scrolled into view; the Options Bar wraps to a second line, and a view's navigation bar
+steps under it where a drop-down (which doesn't wrap) still reaches over it (`BimApp::nav_corner`); and a stack of palettes standing over another leaves it `dock::LAST_MIN`, so its last card never runs under the status bar,
+even when the window was brought down from a taller one. Nothing is fitted to a size below that: the window is asked not to go there.
+
+The ribbon's panels (`ribbon.rs`). A panel's name, under its tools, is a button (named `Build ▾` for screen readers) whose list
+(`ribbon::list`) draws the same tools again as rows: `ribbon::listing` turns `big_button` and `small_button` into `list_row`. A tab too
+wide for the window makes room from the right, on the last frame's widths (`ribbon::tab`, `ribbon::fits`): a panel hands its last tools
+over to its list (`ribbon::handed_over`: counted, not drawn), and when one tool left isn't room enough it folds to one button that lists
+them all, and the panel before it is asked; what still doesn't fit scrolls sideways. A tool that drops a list of choices down (Project
+Units, Schedules, Duplicate View, New Family...) goes through `ribbon::choices`, never `Popup::menu` on its own button: egui keeps one
+popup open, so a popup of a row's own closes the panel's list that holds the row, and with it itself. In a list the choices are a
+submenu of the row; a request to open them at once (UN) opens the panel's list when the tool has no button, and waits for a tab's second
+frame, since its first lays out every tool (`a_tool_with_choices_of_its_own_opens_them_from_a_panels_list`).
 
 Keyboard Shortcuts. Manage > Shortcuts (or KS) opens `shortcuts_window` (`shortcuts.rs`): every shortcut by what it does, from `shortcuts()`
 (`SHORTCUTS`, the fixtures' letters, the commands' aliases), with Add, Edit and Load File. A shortcut is two letters or digits, all that `typed` holds,

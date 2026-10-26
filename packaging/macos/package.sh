@@ -104,6 +104,8 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 # The executable and the icon carry the name Finder shows (CFBundleExecutable, CFBundleIconFile).
 cp "$WORK/bin/bimcraft" "$APP/Contents/MacOS/BIMCraft"
 cp "$ROOT/assets/app-icon/bimcraft.icns" "$APP/Contents/Resources/BIMCraft.icns"
+# The licences, the notice and the fonts' OFL, sealed with the bundle's signature (it is signed below).
+copy_docs "$APP/Contents/Resources"
 sed -e "s/@VERSION@/$VERSION/g" -e "s/@SHORT_VERSION@/$SHORT_VERSION/g" -e "s/@BUILD_SHA@/$BUILD_SHA/g" \
   "$HERE/Info.plist.in" >"$APP/Contents/Info.plist"
 plutil -lint "$APP/Contents/Info.plist"

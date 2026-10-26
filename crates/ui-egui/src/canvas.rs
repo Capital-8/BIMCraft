@@ -1048,7 +1048,7 @@ impl BimApp {
 
     /// The navigation bar of view `id`, at its top right as in Revit: fit, zoom in, zoom out.
     pub(crate) fn nav_bar(&mut self, ui: &mut Ui, rect: Rect, id: Id) {
-        let bar = Rect::from_min_size(rect.right_top() + vec2(-46.0, 14.0), vec2(32.0, 80.0));
+        let bar = Rect::from_min_size(self.nav_corner(rect), vec2(32.0, 80.0));
         ui.painter_at(rect).rect(bar, 6.0, pal().surface, Stroke::new(1.0, pal().border), StrokeKind::Inside);
         ui.scope_builder(UiBuilder::new().max_rect(bar.shrink(3.0)).layout(Layout::top_down(Align::Center)), |ui| {
             ui.spacing_mut().item_spacing.y = 2.0;

@@ -488,7 +488,7 @@ pub(crate) fn group_header(ui: &mut Ui, group: &str, open: bool) -> bool {
         if open { [vec2(-4.0, -2.0), vec2(0.0, 2.0), vec2(4.0, -2.0)] } else { [vec2(-2.0, -4.0), vec2(2.0, 0.0), vec2(-2.0, 4.0)] };
     p.add(Shape::line(chevron.iter().map(|d| c + *d).collect(), Stroke::new(1.5, pal().icon)));
     if response.has_focus() {
-        p.rect_stroke(r, 0.0, Stroke::new(2.0, pal().accent), StrokeKind::Inside);
+        p.rect_stroke(r, 0.0, crate::style::focus_ring(), StrokeKind::Inside);
     }
     response.clicked()
 }
@@ -949,7 +949,7 @@ impl BimApp {
             p.add(Shape::convex_polygon(vec![c + vec2(-4.0, -2.0), c + vec2(4.0, -2.0), c + vec2(0.0, 3.0)], pal().icon, Stroke::NONE));
         }
         if r.has_focus() {
-            p.rect_stroke(rect, 3.0, Stroke::new(2.0, pal().accent), StrokeKind::Inside);
+            p.rect_stroke(rect, 3.0, crate::style::focus_ring(), StrokeKind::Inside);
         }
         let mut picked = None;
         // A component's list holds every family's types, more than a window has room for (issue 64): it scrolls, as tall as

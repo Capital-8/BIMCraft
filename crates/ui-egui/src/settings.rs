@@ -1,8 +1,8 @@
 //! File > Settings (Ctrl+,): the window's own settings, the user's and never a project's. They live in
 //! `settings.json` beside the favorites and the update settings ([`beside`]), which the desktop's `main` hands the app
 //! ([`BimApp::use_settings`]); a window that wasn't given the file (every test's) keeps them for as long as it's open.
-//! What it keeps: the theme and whether the drawing stays light in a dark one, interface language, ribbon, palettes, the window's
-//! size, the background autosave interval, and the colour High Contrast Point Clouds draws scans in.
+//! What it keeps: the theme and whether the drawing stays light in a dark one, the layout, interface language, ribbon, palettes, the
+//! window's size, the background autosave interval, and the colour High Contrast Point Clouds draws scans in.
 //! The pages for what is still to come (performance and graphics) show what they will hold, greyed out.
 
 use std::path::{Path, PathBuf};
@@ -60,6 +60,12 @@ impl Window {
     }
 }
 
+/// Whether the settings file at `path` asks for the system's title bar, as `use_settings` reads it: `main` calls that before the
+/// window opens, and builds the window from `BimApp::system_title_bar`. This reads the file alone, for the tests.
+pub fn system_title_bar_in(path: &Path) -> bool {
+    read(path).and_then(|v| v["system_title_bar"].as_bool()).unwrap_or(false)
+}
+
 /// The window the settings file at `path` keeps, if it keeps one: the app starts at its size.
 pub fn window_in(path: &Path) -> Option<Window> {
     Some(Window::from_json(&read(path)?["window"], Window::default()))
@@ -71,6 +77,8 @@ pub struct Settings {
     pub theme: ThemePreference,
     /// Keep the drawing light inside a dark interface. Only the dark theme has the choice: `from_json` drops it from any other.
     pub light_canvas: bool,
+    /// The Compact layout: the bars and palettes flush to the window's edges, not floating cards.
+    pub compact: bool,
     pub language: Lang,
     pub ribbon_minimized: bool,
     pub docking: Docking,
@@ -80,6 +88,8 @@ pub struct Settings {
     pub window: Window,
     /// What High Contrast Point Clouds fills a view's scans with.
     pub high_contrast: [u8; 3],
+    /// The system's title bar rather than the window's own, where the window can draw its own.
+    pub system_title_bar: bool,
 }
 
 impl Settings {
@@ -92,6 +102,7 @@ impl Settings {
         json!({
             "theme": theme,
             "light_canvas": self.light_canvas,
+            "layout": if self.compact { "compact" } else { "floating" },
             "language": self.language.code(),
             "ribbon_minimized": self.ribbon_minimized,
             "palettes": self.docking.to_json(),
@@ -99,6 +110,7 @@ impl Settings {
             "gpu_3d": self.gpu_3d,
             "window": self.window.to_json(),
             "high_contrast": self.high_contrast,
+            "system_title_bar": self.system_title_bar,
         })
     }
 
@@ -114,6 +126,11 @@ impl Settings {
         Settings {
             theme,
             light_canvas: theme == ThemePreference::Dark && v["light_canvas"].as_bool().unwrap_or(base.light_canvas),
+            compact: match v["layout"].as_str() {
+                Some("compact") => true,
+                Some("floating") => false,
+                _ => base.compact,
+            },
             language: v["language"].as_str().and_then(Lang::from_code).unwrap_or(base.language),
             ribbon_minimized: v["ribbon_minimized"].as_bool().unwrap_or(base.ribbon_minimized),
             docking: if v["palettes"].is_object() { Docking::from_json(&v["palettes"]) } else { base.docking },
@@ -121,6 +138,7 @@ impl Settings {
             gpu_3d: v["gpu_3d"].as_bool().unwrap_or(base.gpu_3d),
             window: Window::from_json(&v["window"], base.window),
             high_contrast: colour(&v["high_contrast"]).unwrap_or(base.high_contrast),
+            system_title_bar: v["system_title_bar"].as_bool().unwrap_or(base.system_title_bar),
         }
     }
 }
@@ -194,12 +212,14 @@ impl BimApp {
         let now = self.settings_now(ThemePreference::System);
         let kept = read(&path).map_or(now.clone(), |v| Settings::from_json(&v, now));
         (self.lang, self.ribbon_min, self.docking) = (kept.language, kept.ribbon_minimized, kept.docking.clone());
+        self.compact = kept.compact;
         self.theme_wanted = Some(kept.theme);
         self.light_canvas = kept.light_canvas;
         self.autosave.interval_minutes = kept.autosave_minutes;
         self.card.wanted = kept.gpu_3d;
         self.window.kept = kept.window;
         self.scan_contrast = kept.high_contrast;
+        self.system_title_bar = kept.system_title_bar;
         self.settings_kept = Some(kept);
         self.settings_path = Some(path);
     }
@@ -213,6 +233,7 @@ impl BimApp {
         Settings {
             theme,
             light_canvas: self.light_canvas,
+            compact: self.compact,
             language: self.lang,
             ribbon_minimized: self.ribbon_min,
             docking: self.docking.clone(),
@@ -220,6 +241,7 @@ impl BimApp {
             gpu_3d: self.card.wanted,
             window: self.window.kept,
             high_contrast: self.scan_contrast,
+            system_title_bar: self.system_title_bar,
         }
     }
 
@@ -297,6 +319,13 @@ impl BimApp {
     fn interface_page(&mut self, ui: &mut Ui, ctx: &Context) {
         heading(ui, "Theme");
         self.theme_choices(ui, false);
+        heading(ui, "Layout");
+        ui.horizontal(|ui| {
+            let tip = "The ribbon, the palettes and the bars as cards floating over the view";
+            ui.radio_value(&mut self.compact, false, t("Floating")).on_hover_text(t(tip));
+            let tip = "The ribbon, the palettes and the bars flush to the window's edges";
+            ui.radio_value(&mut self.compact, true, t("Compact")).on_hover_text(t(tip));
+        });
         heading(ui, "Language");
         ComboBox::from_id_salt("settings-language").selected_text(self.lang.label()).width(200.0).show_ui(ui, |ui| {
             for l in Lang::ALL {
@@ -308,6 +337,17 @@ impl BimApp {
         heading(ui, "Ribbon");
         ui.checkbox(&mut self.ribbon_min, t("Minimize the ribbon to its tabs"))
             .on_hover_text(t("Double-clicking a tab's name does the same; a click on a tab then shows its tools until one is picked"));
+        if self.own_title_bar {
+            heading(ui, "Title bar");
+            let mut system = self.system_title_bar;
+            if ui
+                .checkbox(&mut system, t("Use the system's title bar"))
+                .on_hover_text(t("The system's own title bar and frame, rather than the window's: the app bar then sits under it"))
+                .changed()
+            {
+                self.use_system_title_bar(ctx, system);
+            }
+        }
         heading(ui, "Palettes");
         for p in Palette::ALL {
             let mut on = self.docking.shown(p);

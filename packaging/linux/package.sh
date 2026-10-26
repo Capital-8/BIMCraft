@@ -109,8 +109,8 @@ fi
 # ---- AppImage ----------------------------------------------------------------------------------
 if has appimage; then
   APPDIR="$WORK/BIMCraft.AppDir"
+  # The docs stay: the licences, the notice and the fonts' OFL go with every copy of the executable that holds the fonts.
   cp -R "$STAGE" "$APPDIR"
-  rm -rf "$APPDIR/usr/share/doc"
   ln -s usr/bin/bimcraft "$APPDIR/AppRun"
   cp "$HERE/$APP_ID.desktop" "$APPDIR/$APP_ID.desktop"
   cp "$ROOT/assets/app-icon/hicolor/256x256/apps/$APP_ID.png" "$APPDIR/$APP_ID.png"

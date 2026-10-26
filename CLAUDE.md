@@ -43,7 +43,8 @@ and MCP server, and milestone 2, the egui desktop app, are done. What works and 
   public specifications (IFC4 is ISO 16739). A format with no public specification (Revit's `.rvt` and `.rfa`) may be read
   only under the fence in [docs/rvt-provenance.md](docs/rvt-provenance.md): the code is `crates/rvt`, Apache-2.0 only
   because it holds code ported from rvt-rs, `bimcraft-core` never depends on it, and every module and format finding
-  there names its source. Assets are original or openly licensed; the lettering is drawn in code (`font.rs`).
+  there names its source. Assets are original or openly licensed; the lettering of drawings is drawn in code (`font.rs`), the one exception being the
+  interface font, IBM Plex under the OFL (`assets/fonts`; `NOTICE` and each OFL.txt go in every package).
 - **The core has no UI.** `bimcraft-core` must not depend on a UI toolkit, so front ends stay swappable.
 - **The UI is thin.** `crates/ui-egui` reads `session.model` and changes it only through `Session::execute`, never by editing
   the model. Logic any front end needs (what a plan shows, what's under the cursor) belongs in the core: the canvas draws
@@ -116,7 +117,7 @@ One line per module: what it owns. Read the module's file and, for the areas it 
 
 - `lib.rs`: the app: ribbon, menus, tools, tabs, files. `canvas.rs`: the plan canvas (picks, tools, grips). `orbit.rs`: the 3D view; `gpu.rs` and `gpu.wgsl`: drawing it on the graphics card. `section.rs`, `paper.rs`: sections and sheets. `properties.rs`: the Properties palette. `browser.rs`: the Project Browser. `dock.rs`: docking palettes and floating views. `settings.rs`: File > Settings. `lineweights.rs`, `objectstyles.rs`: Manage > Line Weights and Object Styles. `start.rs`: the start page. `context.rs`: the right-click menu. `dialog.rs`: the file dialogs, on a thread of their own. `window.rs`: the window's size, kept and fitted to its screen. `control.rs`: the control port, agents working on the window's project.
 - `graphics.rs`, `footer.rs`, `phasing.rs`: Visibility/Graphics, the view control bar, Phasing. `inquiry.rs`, `recent.rs`, `autosave.rs`, `updates.rs`, `revit.rs`: Manage > Inquiry, Open Recent, autosave and recovery, the update banner, Revit files.
-- `links.rs`: Link Model. `clouds.rs`: Insert > Point Cloud. `structure.rs`, `mep.rs`: the Structure tab and the discipline tabs. `editor.rs`, `favorites.rs`: the Family Editor and Favorites. `style.rs`: look and feel, light and dark. `icons.rs`: the icons, drawn in code (`--example icon_catalog` exports them). `lang.rs`: every label's Portuguese and Spanish (`WORDS`), `lang/zh.rs` its Chinese. `tests.rs`, `tests/`: the app driven as a user does.
+- `links.rs`: Link Model. `clouds.rs`: Insert > Point Cloud. `structure.rs`, `mep.rs`: the Structure tab and the discipline tabs. `editor.rs`, `favorites.rs`: the Family Editor and Favorites. `style.rs`: look and feel, light and dark, floating cards or compact. `ribbon.rs`: the ribbon's panels, their lists, and folding them to fit. `titlebar.rs`: the window's own title bar and frame. `icons.rs`: the icons, drawn in code (`--example icon_catalog` exports them). `lang.rs`: every label's Portuguese and Spanish (`WORDS`), `lang/zh.rs` its Chinese. `tests.rs`, `tests/`: the app driven as a user does.
 
 `crates/update` (the updater, the only code that phones home; notes: [crates/update/CLAUDE.md](crates/update/CLAUDE.md); area: [updates](docs/areas/updates.md)): `updater.rs` the state the banner draws; `net.rs` HTTPS to GitHub; `detect.rs` which install this is; `install.rs` Windows, `appimage.rs` Linux, `macos.rs` macOS; `exec.rs`, `prefs.rs`, `testing.rs`.
 

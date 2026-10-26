@@ -81,8 +81,8 @@ fn the_crate_is_apache_only_and_carries_the_licence_and_the_notice_apache_asks_f
 
 #[test]
 fn every_package_says_apache_and_ships_the_notice_that_a_build_with_the_reader_owes() {
-    // The root NOTICE is what the packages carry; it must say what the crate's does.
-    assert_eq!(read("NOTICE"), read("crates/rvt/NOTICE"), "the root NOTICE is a copy of the crate's");
+    // The root NOTICE is what the packages carry; it must say what the crate's does, and then what else the desktop owes (the fonts').
+    assert!(read("NOTICE").starts_with(&read("crates/rvt/NOTICE")), "the root NOTICE starts with a copy of the crate's");
     for (file, wants) in [
         ("packaging/linux/nfpm.yaml", "license: Apache-2.0"),
         ("packaging/linux/arch-package.sh", "license=('Apache-2.0')"),
