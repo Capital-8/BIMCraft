@@ -1189,6 +1189,27 @@ fn a_doors_temporary_dimensions_stop_at_the_face_of_a_wall_crossing_its_wall() {
     assert!(h.state().status.error);
 }
 
+#[test]
+fn a_door_placed_or_dragged_near_the_middle_between_the_faces_snaps_to_it() {
+    let mut h = app(&format!("{BOX}\nwall {{\"points\": [[5000, 0], [5000, 6000]], \"type\": \"Interior - 100mm\"}}"));
+    // Between the faces at 100 and 4950 the middle is 2525.
+    shortcut(&mut h, "DR");
+    click(&mut h, P2(2560.0, 0.0));
+    click(&mut h, P2(1000.0, 6000.0));
+    let doors = ids(&h, "door");
+    assert_eq!(field(&h, doors[0], "offset"), json!(2525.0), "snapped to the middle");
+    // The north wall runs west from 8000: x 1000 is 7000 along it, between faces at 3050 and 7900.
+    assert_eq!(field(&h, doors[1], "offset"), json!(7000.0), "far from it, where it was put");
+    // Dragged: to near the middle, x 2525, then on past it.
+    key(&mut h, Key::Escape);
+    click(&mut h, P2(1000.0, 6000.0));
+    drag(&mut h, P2(1000.0, 6000.0), P2(2490.0, 6000.0));
+    assert_eq!(field(&h, doors[1], "offset"), json!(5475.0));
+    drag(&mut h, P2(2525.0, 6000.0), P2(3500.0, 6000.0));
+    let offset = field(&h, doors[1], "offset").as_f64().unwrap();
+    assert!((offset - 4500.0).abs() < 10.0, "free again, as far as a pixel lets the drag say: {offset}");
+}
+
 /// Click the number of a temporary dimension and type another.
 fn retype_dimension(h: &mut Harness<BimApp>, was: &str, now: &str) {
     h.get_by_label(&format!("Temporary dimension {was}")).click();

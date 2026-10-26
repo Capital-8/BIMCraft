@@ -70,7 +70,8 @@ command on a scratch `Session`, made once for each model and each setting. A too
 still reads `session.model`. The Door and Window tools preview with `opening_of`, which the `door` and `window` commands insert too, so a
 sketch is the element the click makes (`render::sketch`). A selected door or window shows two temporary dimensions from its middle
 to the faces of the walls meeting its wall either side of it, or to its wall's ends where none does (`Model::opening_span`), as Revit's
-measure to wall faces; typing one counts from that face.
+measure to wall faces; typing one counts from that face. Placed or dragged alone within `SNAP` px of the middle between those faces, a
+door or window lands on it (`Model::centred`): the click sends that `offset`, the drag slides by what reaches it.
 A selected column or component, and the Column and Component tools' sketches, show up to four: how far it stands from the nearest wall centre
 line or grid east, north, west and south (`Model::clearances`, which finds them in the core; `standing_dimensions` draws them); a typed one runs
 `move` by the difference along that way.

@@ -3418,6 +3418,14 @@ impl Model {
         Some((start, end))
     }
 
+    /// The offset halfway along opening `o`'s stretch of wall (`opening_span`), when `o` stands within `near` mm of it:
+    /// where a door or window snaps as it's placed or dragged.
+    pub fn centred(&self, o: &Opening, near: f64) -> Option<f64> {
+        let (start, end) = self.opening_span(o)?;
+        let middle = (start + end) / 2.0;
+        ((o.offset - middle).abs() <= near).then_some(middle)
+    }
+
     /// The circle a radial dimension measures on `r`: a round column's centre and radius, or a
     /// curved wall's, of its centre line or one of its faces.
     pub fn reference_arc(&self, r: &Reference) -> Result<(P2, f64), String> {

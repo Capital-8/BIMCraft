@@ -138,6 +138,19 @@ fn a_door_stands_between_the_faces_of_the_walls_that_meet_its_wall() {
 }
 
 #[test]
+fn a_door_near_the_middle_between_the_faces_finds_the_middle() {
+    use crate::model::Element;
+    let mut s = Session::new();
+    house(&mut s);
+    run(&mut s, "wall", json!({"points": [[5000, 0], [5000, 6000]], "type": "Interior - 100mm"}));
+    let id = run(&mut s, "door", json!({"at": [2560, 0]}))["id"].as_u64().unwrap();
+    let Some(Element::Door(o)) = s.model.elements.get(id) else { panic!("no door {id}") };
+    // Halfway between 100 and 4950.
+    assert_eq!(s.model.centred(o, 50.0), Some(2525.0));
+    assert_eq!(s.model.centred(o, 30.0), None, "35 away is further than 30");
+}
+
+#[test]
 fn a_views_scale_and_detail_level_are_its_own_set_by_commands_and_kept_in_the_file() {
     let mut s = Session::new();
     house(&mut s);

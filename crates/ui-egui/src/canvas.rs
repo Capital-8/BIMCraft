@@ -508,6 +508,17 @@ pub(crate) fn opening_dimensions(p: &Painter, m: &Model, v: &View, o: &bimcraft_
         .collect()
 }
 
+/// The parameters of the door or window `params` puts down, at the middle of its stretch of wall when it lands within
+/// `SNAP` px of it (`Model::centred`).
+fn centred_opening(m: &Model, v: &View, mut params: Value, door: bool) -> Value {
+    if let Ok(Element::Door(o) | Element::Window(o)) = opening_of(m, &params, door)
+        && let Some(middle) = m.centred(&o, SNAP / v.scale)
+    {
+        params["offset"] = json!(middle);
+    }
+    params
+}
+
 /// A column's or component's temporary dimensions, drawn on `p` beside it: how far it stands from the nearest wall centre
 /// line or grid east, north, west and south (`Model::clearances`), each as which of the four, where its number goes, its
 /// text and the clearance. None for any other element, and for a way with no line or a span too short to draw.
@@ -1006,7 +1017,7 @@ impl BimApp {
         {
             match drag {
                 Drag::Move(from) => {
-                    let by = round(view.mm(q) - from);
+                    let by = self.dragged(&model, &view, from, view.mm(q));
                     if by.length() > 0.0 {
                         self.run("move", json!({"ids": self.selection, "by": point(by)}));
                     }
@@ -1086,7 +1097,7 @@ impl BimApp {
         }
         match (self.canvas.drag, local) {
             (Some(Drag::Move(from)), Some(q)) => {
-                let (a, b) = (view.px(from), view.px(from + round(view.mm(q) - from)));
+                let (a, b) = (view.px(from), view.px(from + self.dragged(&model, &view, from, view.mm(q))));
                 ghost(&p, rect.min, &d, &self.selection, &|q| q + vec2(b.0 - a.0, b.1 - a.1));
             }
             (Some(Drag::Box(from)), Some(q)) => p.extend(box_shapes(rect, from, q)),
@@ -1310,6 +1321,18 @@ impl BimApp {
         p
     }
 
+    /// How far dragging the selection from `from` to `to` moves it: a lone door or window slides to the middle of its
+    /// stretch of wall when it comes within `SNAP` px of it.
+    fn dragged(&self, m: &Model, v: &View, from: P2, to: P2) -> P2 {
+        let by = round(to - from);
+        let &[id] = self.selection.as_slice() else { return by };
+        let Some(Element::Door(o) | Element::Window(o)) = m.elements.get(id) else { return by };
+        let Some(w) = m.wall(o.host).filter(|w| w.arc == 0.0) else { return by };
+        let u = (w.end - w.start).unit();
+        let moved = bimcraft_core::model::Opening { offset: o.offset + by.dot(u), ..o.clone() };
+        m.centred(&moved, SNAP / v.scale).map_or(by, |middle| by + u * (middle - moved.offset))
+    }
+
     fn click(&mut self, m: &Model, (level, key): (Id, Id), v: &View, at: (f32, f32), hovered: Option<Id>, mods: Modifiers) {
         match &self.tool {
             &Tool::Vertex { delete } if self.sketch.is_some() => self.vertex_click(None, v.mm(at), f64::from(PICK) / v.scale, delete),
@@ -1330,8 +1353,9 @@ impl BimApp {
             Tool::SketchLine(_) | Tool::SketchPick => self.tool = Tool::Modify,
             Tool::Modify => self.pick_up(hovered.into_iter().collect(), mods),
             Tool::Door | Tool::Window => {
-                let cat = if matches!(self.tool, Tool::Door) { "door" } else { "window" };
-                let p = self.typed(cat, json!({"at": point(round(v.mm(at))), "level": level}));
+                let door = matches!(self.tool, Tool::Door);
+                let cat = if door { "door" } else { "window" };
+                let p = centred_opening(m, v, self.typed(cat, json!({"at": point(round(v.mm(at))), "level": level})), door);
                 self.run(cat, p);
             }
             Tool::Room => {
@@ -2835,7 +2859,7 @@ impl BimApp {
             Tool::Door | Tool::Window => {
                 let door = matches!(self.tool, Tool::Door);
                 let params = self.typed(if door { "door" } else { "window" }, json!({"at": point(round(v.mm(q))), "level": level}));
-                if let Ok(e) = opening_of(m, &params, door) {
+                if let Ok(e) = opening_of(m, &centred_opening(m, v, params, door), door) {
                     sketched(&e);
                     if let Element::Door(o) | Element::Window(o) = &e {
                         for (at, text, _) in opening_dimensions(p, m, v, o) {
