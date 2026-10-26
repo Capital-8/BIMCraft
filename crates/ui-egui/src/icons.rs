@@ -118,6 +118,7 @@ icon_names! {
     Component,
     LoadFamily,
     Link,
+    PointCloud,
     Parameters,
     Measure,
     Snaps,
@@ -145,6 +146,7 @@ icon_names! {
     NewFile,
     Code,
     Check,
+    Keyboard,
 }
 
 /// A single unfilled contour in grid coordinates, shared by egui and the catalog.
@@ -879,6 +881,14 @@ pub fn outlines(icon: Icon, compact: bool) -> Vec<Outline> {
             g.closed(&[(5.0, 8.0), (13.0, 8.0), (15.0, 10.0), (15.0, 14.0), (13.0, 16.0), (5.0, 16.0), (3.0, 14.0), (3.0, 10.0)]);
             g.closed(&[(11.0, 8.0), (19.0, 8.0), (21.0, 10.0), (21.0, 14.0), (19.0, 16.0), (11.0, 16.0), (9.0, 14.0), (9.0, 10.0)]);
         }
+        Icon::PointCloud => {
+            // A scanned room's corner: the points of its two walls, either side of where they meet.
+            g.line(&[(12.0, 3.0), (12.0, 21.0)]);
+            for (x, y) in [(4.5, 8.0), (4.5, 13.5), (4.5, 19.0), (8.5, 6.5), (8.5, 12.0), (8.5, 17.5)] {
+                g.circle((x, y), 1.2);
+                g.circle((24.0 - x, y), 1.2);
+            }
+        }
         Icon::Parameters => {
             // Three independent parameter sliders with a consistent two-point knob radius.
             g.line(&[(3.0, 6.0), (9.0, 6.0)]);
@@ -1109,6 +1119,18 @@ pub fn outlines(icon: Icon, compact: bool) -> Vec<Outline> {
         Icon::Check => {
             g.line(&[(7.0, 12.0), (10.5, 15.5), (17.0, 9.0)]);
             g.circle((12.0, 12.0), 9.0);
+        }
+        Icon::Keyboard => {
+            g.closed(&[(3.0, 6.0), (21.0, 6.0), (21.0, 18.0), (3.0, 18.0)]);
+            g.line(&[(5.0, 9.0), (7.0, 9.0)]);
+            g.line(&[(9.0, 9.0), (11.0, 9.0)]);
+            g.line(&[(13.0, 9.0), (15.0, 9.0)]);
+            g.line(&[(17.0, 9.0), (19.0, 9.0)]);
+            g.line(&[(5.0, 12.0), (7.0, 12.0)]);
+            g.line(&[(9.0, 12.0), (11.0, 12.0)]);
+            g.line(&[(13.0, 12.0), (15.0, 12.0)]);
+            g.line(&[(17.0, 12.0), (19.0, 12.0)]);
+            g.line(&[(7.0, 15.0), (17.0, 15.0)]);
         }
     }
     g.0

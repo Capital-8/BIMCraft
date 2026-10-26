@@ -110,6 +110,8 @@ struct Pending {
     span: (f64, f64),
     height: f64,
     sill: f64,
+    /// Whether the hole was cut down to what its wall gives, its box overrunning it.
+    clamped: bool,
 }
 
 /// The most two neighbouring holes may overlap and be fitted, as a share of the narrower one: Revit lets windows overlap, BIMCraft
@@ -125,23 +127,74 @@ pub(crate) fn import(cx: &mut Import, f: &Facts, g: &Gathered) {
             let read = (|| -> Result<Pending, String> {
                 let named = candidates(r, &walls);
                 if named.is_empty() {
+                    // A window set in a roof or a floor is a skylight: BIMCraft's windows stand in walls, and it has no opening
+                    // for another plane, so it is left out.
+                    let planes = [crate::roofs::OST_ROOFS, crate::floors::OST_FLOORS, crate::floors::OST_CEILINGS];
+                    if planes.iter().any(|c| f.of_category(*c).any(|o| r.refs.contains(&u64::from(o.id)))) {
+                        return Err("it is set in a roof or a floor (a skylight), and BIMCraft's windows stand in walls".into());
+                    }
                     return Err("its record names no wall".into());
                 }
-                let host = *named
-                    .iter()
-                    .find(|w| !cx.curtain.contains(w))
-                    .ok_or("its host is a curtain wall, which BIMCraft has no element for")?;
-                let host_id = *cx.walls.get(&host).ok_or_else(|| format!("its host wall {host} was left out"))?;
-                let wall = cx.model.wall(host_id).ok_or("its host wall is gone")?.clone();
-                if wall.arc != 0.0 {
-                    return Err(format!("its host wall {host} is curved, and a curved wall's box gives no width"));
+                // The host is the nearest wall the list names (rvt-rs RE-23, RE-85) that the opening fits in; failing one, the
+                // nearest it names, and then the hole is cut down to what that wall gives. A wall whose box cuts the opening
+                // short is the file's own inconsistency: Revit draws the frame a little past the wall's box.
+                let mut first: Option<(u32, bimcraft_core::model::Id, f64, f64, f64, f64)> = None;
+                let mut fits = None;
+                let mut unreadable: Option<String> = None;
+                for host in named.iter().filter(|w| !cx.curtain.contains(w)) {
+                    let Some(host_id) = cx.walls.get(host).copied() else { continue };
+                    let Some(wall) = cx.model.wall(host_id) else { continue };
+                    if wall.arc != 0.0 {
+                        unreadable.get_or_insert(format!("its host wall {host} is curved, and a curved wall's box gives no width"));
+                        continue;
+                    }
+                    let Some((width, offset)) = along(wall.start, wall.end, &r.bbox) else {
+                        unreadable.get_or_insert(format!(
+                            "its host wall {host} runs at an angle, and the box of a door or window in it gives no width"
+                        ));
+                        continue;
+                    };
+                    let height = micron(mm(r.bbox[5]) - mm(r.bbox[2]));
+                    let sill = micron(mm(r.bbox[2]) - cx.model.own_base(wall));
+                    let sill = if (-2.0..2.0).contains(&sill) { 0.0 } else { sill };
+                    let (long, tall) = (wall.start.dist(wall.end), cx.model.top_z(wall) - cx.model.own_base(wall));
+                    let fits_here =
+                        offset - width / 2.0 >= -1.0 && offset + width / 2.0 <= long + 1.0 && sill >= 0.0 && sill + height <= tall + 1.0;
+                    let candidate = (*host, host_id, width, offset, height, sill);
+                    first.get_or_insert(candidate);
+                    if fits_here {
+                        fits = Some(candidate);
+                        break;
+                    }
                 }
-                let (width, offset) = along(wall.start, wall.end, &r.bbox).ok_or_else(|| {
-                    format!("its host wall {host} runs at an angle, and the box of a door or window in it gives no width")
-                })?;
-                let height = micron(mm(r.bbox[5]) - mm(r.bbox[2]));
-                let sill = micron(mm(r.bbox[2]) - cx.model.own_base(&wall));
-                let sill = if (-1.0..0.0).contains(&sill) { 0.0 } else { sill };
+                let (host, host_id, width, mut offset, height, sill) = match fits.or(first) {
+                    Some(c) => c,
+                    None => {
+                        if let Some(why) = unreadable {
+                            return Err(why);
+                        }
+                        return Err(if named.iter().any(|w| !cx.curtain.contains(w)) {
+                            format!("its host wall {} was left out", named[0])
+                        } else {
+                            "its host is a curtain wall, which BIMCraft has no element for".to_string()
+                        });
+                    }
+                };
+                let wall = cx.model.wall(host_id).ok_or("its host wall is gone")?;
+                let (long, tall) = (wall.start.dist(wall.end), cx.model.top_z(wall) - cx.model.own_base(wall));
+                let sill = sill.max(0.0);
+                let overruns = (offset - width / 2.0) < -1.0 || (offset + width / 2.0) > long + 1.0 || sill + height > tall + 1.0;
+                let width = width.min(long);
+                if offset - width / 2.0 < 0.0 {
+                    offset = width / 2.0;
+                }
+                if offset + width / 2.0 > long {
+                    offset = long - width / 2.0;
+                }
+                let height = height.min((tall - sill).max(0.0));
+                if width <= 0.0 || height <= 0.0 {
+                    return Err(format!("its host wall {host} leaves no room for it"));
+                }
                 let name = symbol_name(r, &symbols, g, category).unwrap_or_else(|| format!("Imported {label}"));
                 Ok(Pending {
                     id: r.id,
@@ -151,6 +204,7 @@ pub(crate) fn import(cx: &mut Import, f: &Facts, g: &Gathered) {
                     span: (offset - width / 2.0, offset + width / 2.0),
                     height,
                     sill,
+                    clamped: overruns,
                 })
             })();
             match read {
@@ -204,6 +258,9 @@ pub(crate) fn import(cx: &mut Import, f: &Facts, g: &Gathered) {
             flip_hand: false,
             params: Default::default(),
         };
+        if p.clamped {
+            cx.note("opening", p.id, "its box overruns its wall, and it comes in as far as the wall goes");
+        }
         let (element, label) = if p.door { (Element::Door(opening), "Door") } else { (Element::Window(opening), "Window") };
         let id = cx.model.insert(element);
         cx.from.insert(id, format!("{label} {}", p.id));

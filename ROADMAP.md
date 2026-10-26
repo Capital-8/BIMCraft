@@ -19,7 +19,7 @@ The README lists what the engine, the desktop, the CLI and the MCP server do. Wh
 - **Done lately, so not repeated below:** families (revolves and voids, doors and windows as hosted families, the Family
   Editor), textures by material or from a picture, Paint, favorites kept for every project, and packages for Windows,
   Linux (AppImage, Flatpak, deb, rpm, Arch, tarball, riscv64) and macOS. Auto-update from GitHub releases is done for the Windows installer's copy, an AppImage and the macOS app, though none of it has run on a real system yet.
-- **The file** is `.bimcraft` JSON with a `format` version (3 now): an older file is migrated on open, and a newer one is
+- **The file** is `.bimcraft` JSON with a `format` version (5 now): an older file is migrated on open, and a newer one is
   refused, saying so. A field this version doesn't know (a newer one's, in the same format) is left out and named, and the
   rest opens; commands still refuse a key they don't know.
 - **Ids and GUIDs**, as Revit's ElementId and UniqueId: every element, every library entry (types, materials, families,
@@ -150,7 +150,7 @@ The goal is that BIMCraft fits into a mixed-software office.
 | BCF 3.0 import and export: issues with viewpoints, opened in views | M | |
 | Schedules to XLSX; CSV import of parameters (schedules export to CSV today) | S | |
 | Clash detection between categories (solid intersection), reported as BCF | M | High value once the geometry is there |
-| Point clouds: PTS, XYZ, PLY and LAS import, then E57, shown in 3D, plans and sections, with snaps to their points | L | Public specifications only (ASPRS LAS 1.2 to 1.4, ASTM E2807). A cloud is project data placed by an element, capped and thinned on import, its origin moved so survey coordinates fit. LAZ needs a LASzip port and ReCap's RCP/RCS are closed, so neither comes in. IFC4 has no point cloud in common use, so export leaves them out and says so |
+| Point clouds: PTS, XYZ, PLY, LAS and E57 import, shown in 3D, plans and sections, with snaps to their points | L | Public specifications only (ASPRS LAS 1.2 to 1.4, ASTM E2807). A cloud is project data placed by an element, capped and thinned on import, its origin moved so survey coordinates fit. LAZ needs a LASzip port and ReCap's RCP/RCS are closed, so neither comes in. IFC4 has no point cloud in common use, so export leaves them out and says so |
 
 **Exit criteria**: a project round-trips through IFC with another tool with no loss of supported elements; a consultant's
 DXF and IFC link in and coordinate.

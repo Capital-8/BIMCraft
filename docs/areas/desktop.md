@@ -58,7 +58,8 @@ line or grid east, north, west and south (`Model::clearances`, which finds them 
 `move` by the difference along that way.
 
 A point picked in a plan lands where `snap::snap` says, the core's so every front end agrees: on the end, middle or centre of
-what's drawn (`Scene::of`), where two straight lines (walls, grids; not arcs) cross, the foot of the perpendicular from the last point
+what's drawn (`Scene::of`), where two straight lines (walls, grids; not arcs) cross, else a scan's point where the cut plane cuts it
+([point clouds](point-clouds.md)), the foot of the perpendicular from the last point
 to one, a guide through that point at
 a multiple of `Snaps::angle` from east or from the line before it (where the guide crosses a wall or grid it lands there, and a
 grid point lying on it beats a rounded length), a wall's centre line, else the nearest 10 mm. The desktop's `BimApp::snap` gives
@@ -86,8 +87,9 @@ and `graphics.json` sit beside the favorites (`startup::Files::beside`). `startu
 `--version` or `--help`, which return before it), writes the log's first line and the panic hook, and picks the graphics for this start
 (`Mark`: the choice, and whether the last start finished). A start is marked unfinished until its window has stayed up for `SURVIVE` (15 s)
 or the app is closed the ordinary way (`startup::up`, `closed`); one that dies without a word, as a graphics driver can make it, leaves the
-mark, and the next start takes the next choice on `LADDER` (wgpu's own, Vulkan, DirectX 12, OpenGL: Windows only), keeping the first that
-survives. An error from `run_native` leaves the mark too, is logged, and on Windows shown in a message box (`startup::tell`: its words are
+mark, and the next start takes the next choice on `LADDER` (wgpu's own, DirectX 12, Vulkan, OpenGL: Windows only), keeping the first that
+survives. `graphics.json` keeps the backend's name (`{"backend": "DirectX 12", "starting": false}`), never its place on the ladder, so
+reordering the ladder cannot change what a kept mark means; 0.8.0's marks (`"choice"`, a place on the old order) are read through that order. An error from `run_native` leaves the mark too, is logged, and on Windows shown in a message box (`startup::tell`: its words are
 rows in `WORDS`). `WGPU_BACKEND` set by the user switches all of it off. A new way for the start to fail goes through `startup::note`, not `eprintln!` alone.
 
 Tags. A `Tag` names an element at a `host` by a `label`: the name of one of the fields its category's schedule has (`schedule::field_text` reads it
@@ -109,3 +111,12 @@ or Delete Door (else the label). A click runs `undo` or `redo` with `count`.
 
 Tabs. The open ribbon tab and the open view tab mould out of what they open: `rule_under_tabs` draws the rule under a row of tabs
 but for the open one, whose sides run down into the surface below. A view's × is part of its tab (`tab_button_with`'s `room`).
+
+Keyboard Shortcuts. Manage > Shortcuts (or KS) opens `shortcuts_window` (`shortcuts.rs`): every shortcut by what it does, from `shortcuts()`
+(`SHORTCUTS`, the fixtures' letters, the commands' aliases), with Add, Edit and Load File. A shortcut is two letters or digits, all that `typed` holds,
+and a custom one is tried before the defaults. Each name in `ACTIONS` is a tool or command the window runs (`execute_shortcut_action`), and a key never
+carries Revit's name for a tool BIMCraft lacks (Sun Settings, Detail and Model Line, Split Face, Brace, Beam System, Reference Plane, the duct tools): it waits
+for the tool. Load File reads JSON (`{"WA": "Wall"}`), Revit's `<Shortcut CommandName=… Shortcuts="WA#W1">` lines, or `KEY - Name` lines, up to 64 KiB;
+a description is an action only by its whole name in one of the interface's languages (`resolve_action`), and a key that is not two characters, names no action or
+is another action's is skipped and counted in the message. Custom shortcuts last while the window is open. Match Properties (MA) is the `match_properties`
+command; with one element selected the window remembers its type for the next one drawn, with several it gives the others of the first's category its type.

@@ -4,7 +4,7 @@
 //! command (`modify`, or `type` from the Type Properties dialog), so it is checked, rolled back
 //! when it breaks a rule, and undone like any other change.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use bimcraft_core::element_json;
@@ -276,6 +276,15 @@ fn rows(category: &str) -> &'static [Row] {
             ("Other", "start", "Start", Point),
             ("Other", "end", "End", Point),
         ],
+        "pointcloud" => &[
+            ("Constraints", "level", "Level", Level),
+            ("Constraints", "offset", "Offset", Length),
+            ("Identity Data", "cloud", "Scan", Shown),
+            ("Identity Data", "source", "File", Shown),
+            ("Identity Data", "points", "Points", Shown),
+            ("Other", "at", "Origin", Point),
+            ("Other", "angle", "Angle", Number),
+        ],
         "link" => &[
             ("Identity Data", "name", "Name", Text),
             ("Identity Data", "path", "File", Shown),
@@ -383,6 +392,7 @@ fn icon(category: &str) -> Icon {
         "text" => Icon::Text,
         "spot" => Icon::Spot,
         "view3d" => Icon::View3D,
+        "pointcloud" => Icon::PointCloud,
         _ => Icon::Plan,
     }
 }
@@ -942,12 +952,18 @@ impl BimApp {
             p.rect_stroke(rect, 3.0, Stroke::new(2.0, pal().accent), StrokeKind::Inside);
         }
         let mut picked = None;
+        // A component's list holds every family's types, more than a window has room for (issue 64): it scrolls, as tall as
+        // the room on the selector's roomier side.
+        let window = ui.ctx().content_rect();
+        let room = (window.bottom() - rect.bottom()).max(rect.top() - window.top()) - 16.0;
         Popup::menu(&r).width(rect.width()).show(|ui| {
-            for n in &names {
-                if ui.selectable_label(current.as_ref() == Some(n), n).clicked() {
-                    picked = Some(n.clone());
+            egui::ScrollArea::vertical().max_height(room.max(100.0)).show(ui, |ui| {
+                for n in &names {
+                    if ui.selectable_label(current.as_ref() == Some(n), n).clicked() {
+                        picked = Some(n.clone());
+                    }
                 }
-            }
+            });
         });
         let pair = picked.as_ref().and_then(|n| pairs.iter().find(|p| label(p) == *n)).cloned();
         match (picked, subject) {
@@ -1970,13 +1986,14 @@ impl BimApp {
             ui.add_space(6.0);
             ui.label(RichText::new(t("Object Snaps")).strong());
             let s = &mut self.snaps;
-            let kinds: [(&mut bool, Snap, &str); 6] = [
+            let kinds: [(&mut bool, Snap, &str); 7] = [
                 (&mut s.endpoint, Snap::Endpoint, "The ends of walls, grids and what else is drawn, and the points picked so far"),
                 (&mut s.midpoint, Snap::Midpoint, "The middle of a wall, along its arc"),
                 (&mut s.intersection, Snap::Intersection, "Where two walls or grids cross"),
                 (&mut s.centre, Snap::Centre, "The centre of a curved wall, a column or a component"),
                 (&mut s.perpendicular, Snap::Perpendicular, "The foot of the perpendicular from the last point to a wall or grid"),
                 (&mut s.nearest, Snap::Nearest, "A wall's centre line, so a wall drawn on it meets it"),
+                (&mut s.cloud, Snap::Point, "A scan's points where the plan's cut plane cuts it, to trace what was measured"),
             ];
             for (on, kind, tip) in kinds {
                 ui.checkbox(on, t(kind.name())).on_hover_text(t(tip));
@@ -2621,43 +2638,6 @@ impl BimApp {
         }
         if !(close || r.should_close()) {
             self.schedule_dialog = Some(d);
-        }
-    }
-
-    /// Keyboard Shortcuts (KS): each shortcut by what it does, as Revit's dialog lists them.
-    pub(crate) fn shortcuts_window(&mut self, ctx: &Context) {
-        if !self.show_shortcuts {
-            return;
-        }
-        let mut by_name: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
-        for (letters, name) in crate::shortcuts() {
-            by_name.entry(t(name)).or_default().push(letters);
-        }
-        let rows: Vec<(&str, Vec<&str>)> = by_name.into_iter().collect();
-        let mut close = false;
-        let r = Modal::new(UiId::new("shortcuts")).show(ctx, |ui| {
-            ui.label(RichText::new(t("Keyboard Shortcuts")).heading());
-            ui.add_space(6.0);
-            ScrollArea::vertical().max_height(480.0).show(ui, |ui| {
-                // In two columns, each running down, as a reference card.
-                ui.horizontal_top(|ui| {
-                    for (k, part) in rows.chunks(rows.len().div_ceil(2).max(1)).enumerate() {
-                        Grid::new(("shortcuts", k)).num_columns(2).striped(true).spacing(vec2(24.0, 4.0)).show(ui, |ui| {
-                            for (name, letters) in part {
-                                ui.label(*name);
-                                ui.monospace(letters.join(", "));
-                                ui.end_row();
-                            }
-                        });
-                        ui.add_space(24.0);
-                    }
-                });
-            });
-            ui.add_space(8.0);
-            ui.with_layout(Layout::right_to_left(Align::Min), |ui| close = ui.button(t("Close")).clicked());
-        });
-        if close || r.should_close() {
-            self.show_shortcuts = false;
         }
     }
 }
