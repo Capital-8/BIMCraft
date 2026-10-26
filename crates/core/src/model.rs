@@ -1601,7 +1601,7 @@ pub struct Model {
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub images: BTreeMap<String, Picture>,
     /// The scans its point clouds place, by name.
-    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty", deserialize_with = "crate::cloud::deserialize_scans")]
     pub clouds: BTreeMap<String, Cloud>,
     /// Its families, by name: what components place.
     #[serde(default)]

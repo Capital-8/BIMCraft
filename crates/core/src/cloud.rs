@@ -459,6 +459,52 @@ impl<'de> Deserialize<'de> for Cloud {
     }
 }
 
+/// A project file's scans (`Model::clouds`), read no further than a project may hold: the entry past [`MAX_CLOUDS`] is
+/// refused before its data is unpacked, and so is the one that would take the points past [`MAX_CLOUD_POINTS`], since
+/// unpacking is where the memory goes (a few kilobytes of zeros inflate to tens of megabytes) and `Model::check` only runs after.
+pub(crate) fn deserialize_scans<'de, D: serde::Deserializer<'de>>(d: D) -> Result<std::collections::BTreeMap<String, Cloud>, D::Error> {
+    scans_within(d, MAX_CLOUDS, MAX_CLOUD_POINTS)
+}
+
+fn scans_within<'de, D: serde::Deserializer<'de>>(
+    d: D,
+    most: usize,
+    points: usize,
+) -> Result<std::collections::BTreeMap<String, Cloud>, D::Error> {
+    use serde::de::{Error, MapAccess, Visitor};
+    struct Scans {
+        most: usize,
+        points: usize,
+    }
+    impl<'de> Visitor<'de> for Scans {
+        type Value = std::collections::BTreeMap<String, Cloud>;
+
+        fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.write_str("a map of scans")
+        }
+
+        fn visit_map<A: MapAccess<'de>>(self, mut a: A) -> Result<Self::Value, A::Error> {
+            let (mut scans, mut held) = (Self::Value::new(), 0_usize);
+            while let Some(name) = a.next_key::<String>()? {
+                if scans.len() >= self.most {
+                    return Err(A::Error::custom(format!("the file holds more than {} scans, all a project may hold", self.most)));
+                }
+                let cloud: Cloud = a.next_value()?;
+                held = held.saturating_add(cloud.len());
+                if held > self.points {
+                    return Err(A::Error::custom(format!(
+                        "the file's scans hold more than {} points, all a project may hold",
+                        self.points
+                    )));
+                }
+                scans.insert(name, cloud);
+            }
+            Ok(scans)
+        }
+    }
+    d.deserialize_map(Scans { most, points })
+}
+
 /// The points of a file of `format`, or what's wrong with it.
 pub fn read(bytes: &[u8], format: Format, o: &Options) -> Result<Scan, String> {
     if !(o.scale.is_finite() && o.scale > 0.0) {
@@ -1277,5 +1323,34 @@ mod tests {
         // Data that unpacks past what a cloud may hold stops at it.
         let e = inflate(&crate::commands::base64(&deflate(&vec![0; 1000])), 999).unwrap_err();
         assert!(e.contains("more than 999"), "{e}");
+    }
+
+    /// A project file's `clouds` object: `n` scans of two points, then `tail` (more entries, as JSON members).
+    fn scans_text(n: usize, tail: &str) -> String {
+        let scan = read(b"0 0 0\n1 0 0\n", Format::Xyz, &Options::default()).unwrap();
+        let one = serde_json::to_string(&Cloud::new("a.xyz", scan).unwrap()).unwrap();
+        let members: Vec<String> = (0..n).map(|i| format!("\"s{i}\":{one}")).collect();
+        format!("{{{}{}{tail}}}", members.join(","), if n > 0 && !tail.is_empty() { "," } else { "" })
+    }
+
+    fn scans_in(text: &str, most: usize, points: usize) -> Result<usize, String> {
+        scans_within(&mut serde_json::Deserializer::from_str(text), most, points).map(|m| m.len()).map_err(|e| e.to_string())
+    }
+
+    #[test]
+    fn a_project_file_holds_no_more_scans_or_points_than_a_project_may_and_says_so_before_unpacking_them() {
+        assert_eq!(scans_in(&scans_text(2, ""), 2, 4), Ok(2));
+        assert_eq!(scans_in("{}", 2, 4), Ok(0));
+        // The entry past the count is never looked at: its data would be an error of another kind.
+        let e = scans_in(&scans_text(2, "\"s2\":{\"points\":\"!!!\"}"), 2, 100).unwrap_err();
+        assert!(e.contains("more than 2 scans"), "{e}");
+        // The scan that takes the points past the budget is the one refused; the ones before it were within it.
+        let e = scans_in(&scans_text(3, ""), 16, 5).unwrap_err();
+        assert!(e.contains("more than 5 points"), "{e}");
+        assert_eq!(scans_in(&scans_text(2, ""), 16, 4), Ok(2));
+        // The real caps are the project's.
+        assert_eq!(scans_in(&scans_text(MAX_CLOUDS, ""), MAX_CLOUDS, MAX_CLOUD_POINTS), Ok(MAX_CLOUDS));
+        // Something that isn't a map of scans is no map of scans.
+        assert!(scans_in("[1]", 2, 4).is_err() && scans_in("{\"s\":1}", 2, 4).is_err());
     }
 }

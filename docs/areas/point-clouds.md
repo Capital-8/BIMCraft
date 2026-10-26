@@ -27,7 +27,9 @@ GUID): its points and colours shared behind an `Arc`, the file it came from, and
 it as `CloudFile`, the points as little-endian `f32` and the colours as bytes, each deflated and in base64, packed once and kept
 (`Cloud::file`); coming back, every check `Cloud::new` makes is made again, and what unpacks past `MAX_CLOUD_POINTS` stops there.
 A project holds up to `MAX_CLOUDS` scans and `MAX_CLOUD_POINTS` points among them (`Model::check`), so the `point_cloud` command
-thins a new one to what the others leave.
+thins a new one to what the others leave. A project file is held to the same while it is read, not after: `Model::clouds` reads
+through `cloud::deserialize_scans`, which refuses the entry past the count, and the scan that takes the points past the budget,
+before unpacking the next (unpacking is where the memory goes, and the file is read twice, by the lenient walk and the strict read).
 
 A survey's stations come in as one scan, as ReCap gathers a project's scans and Revit links the project: `path` may be a list of
 up to `MAX_STATIONS` files. Each is read with an even share of what the project leaves, and `cloud::merge` puts them about the

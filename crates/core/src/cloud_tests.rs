@@ -506,3 +506,29 @@ fn a_snap_on_a_big_scan_looks_only_near_the_cursor() {
     let each = started.elapsed() / 100;
     assert!(each < std::time::Duration::from_millis(5), "{each:?} a snap");
 }
+
+/// A project of `n` two-point scans, as it is written to a file.
+fn project_file(n: usize) -> Value {
+    let mut s = Session::new();
+    let path = scan("file", "dot.xyz", "0 0 0\n1 0 0\n");
+    for i in 0..n {
+        run(&mut s, "point_cloud", json!({"path": path, "name": format!("dot {i}")}));
+    }
+    serde_json::from_str(&s.model.to_json().unwrap()).unwrap()
+}
+
+#[test]
+fn a_project_file_with_too_many_scans_is_refused_before_the_extra_one_is_unpacked() {
+    use crate::model::Model;
+    for n in [0, 1, 3, MAX_CLOUDS] {
+        let (m, left_out) = Model::read(&project_file(n).to_string()).unwrap();
+        assert_eq!((m.clouds.len(), left_out.len()), (n, 0));
+    }
+    // One past the cap, its data nonsense: the error is the cap's, since the data was never looked at.
+    let mut file = project_file(MAX_CLOUDS);
+    file["clouds"]["zzz"] = json!({"nonsense": 1});
+    for e in [Model::read(&file.to_string()).map(|_| ()), Model::from_json(&file.to_string()).map(|_| ())] {
+        let e = e.unwrap_err();
+        assert!(e.contains("scans") && e.contains(&MAX_CLOUDS.to_string()), "{e}");
+    }
+}
