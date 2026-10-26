@@ -1470,6 +1470,8 @@ fn draw_plan(m: &Model, plan: impl Key, view: View, up: bool, k: f32, n: f64, ti
     let crop = m.crop_of(key).filter(|_| !up);
     // Cropped, annotation shows whole while its anchor is inside the crop, and not at all outside it.
     let inside = |p: P2| crop.is_none_or(|[lo, hi]| (lo.0..=hi.0).contains(&p.0) && (lo.1..=hi.1).contains(&p.1));
+    // Every room of the level is found among the same lines, which take each wall's joins and heights to find.
+    let bounding = std::cell::OnceCell::new();
     for (&id, e) in m.elements.iter().filter(|(id, _)| shown(**id)) {
         d.owner = Some(id);
         match e {
@@ -1480,7 +1482,8 @@ fn draw_plan(m: &Model, plan: impl Key, view: View, up: bool, k: f32, n: f64, ti
                 }
             }
             Element::Room(r) if r.level == level && inside(r.point) && !up => {
-                let area = m.room_region(r).map_or_else(
+                let lines = bounding.get_or_init(|| m.bounding_lines(level));
+                let area = geom::region_at(lines, r.point, TOL).map_or_else(
                     || m.language.word("NOT ENCLOSED").to_string(),
                     |g| {
                         let (area, unit) = m.units.area(g.area());

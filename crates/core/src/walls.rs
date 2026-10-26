@@ -236,20 +236,31 @@ fn arms(m: &Model, id: Id, at_end: bool, index: Option<&Index>) -> (Vec<Arm>, bo
             _ => None,
         })),
     };
+    // Where they meet is asked first: whether they overlap in height takes both walls' heights, under any roof or floor
+    // they're attached to.
     for (other, o) in candidates {
-        if other == id || !stacked(m, w, o) {
+        if other == id {
             continue;
         }
         if o.start.dist(node) <= TOL {
-            arms.push(arm(m, o, false, false));
+            if stacked(m, w, o) {
+                arms.push(arm(m, o, false, false));
+            }
         } else if o.end.dist(node) <= TOL {
-            arms.push(arm(m, o, true, false));
+            if stacked(m, w, o) {
+                arms.push(arm(m, o, true, false));
+            }
         } else {
             // A wall it ends on: the node within its thickness, between its ends.
             let ax = Axis::of(o);
             let (s, across) = ax.project(node);
             let (ext, int) = faces(m, o);
-            if s > TOL && s < ax.length() - TOL && (int - TOL..=ext + TOL).contains(&across) && ax.distance(node, across) <= TOL {
+            if s > TOL
+                && s < ax.length() - TOL
+                && (int - TOL..=ext + TOL).contains(&across)
+                && ax.distance(node, across) <= TOL
+                && stacked(m, w, o)
+            {
                 let (t, (e, i), c) = (ax.tangent(s), (ax.at(s, ext), ax.at(s, int)), ax.at(s, (ext + int) / 2.0));
                 arms.push(Arm { mine: false, way: t, ccw: e, cw: i, centre: c, thick: ext - int });
                 arms.push(Arm { mine: false, way: t * -1.0, ccw: i, cw: e, centre: c, thick: ext - int });
