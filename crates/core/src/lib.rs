@@ -59,6 +59,8 @@ pub mod walls;
 pub use commands::{command_of, element_json, floor_outline, opening_of, roof_footprint, run_category_of, runs_of, stood_of};
 
 #[cfg(test)]
+mod detail_tests;
+#[cfg(test)]
 mod line_tests;
 #[cfg(test)]
 mod mep_tests;

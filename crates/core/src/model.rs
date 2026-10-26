@@ -2166,6 +2166,21 @@ impl Model {
                 }
             }
         }
+        // A detail group's members are elements too, held by their type, and are looked into the same way.
+        if let Some(Value::Object(groups)) = v.get_mut("detail_groups") {
+            for (name, group) in groups.iter_mut() {
+                let Some(Value::Array(members)) = group.get_mut("members") else { continue };
+                for (i, member) in members.iter_mut().enumerate() {
+                    let Some(e) = member.get_mut("element") else { continue };
+                    let mut bare = e.clone();
+                    let category = bare.as_object_mut().and_then(|o| o.remove("category"));
+                    for p in lenient::element(category.as_ref().and_then(Value::as_str).unwrap_or(""), &bare) {
+                        lenient::remove(e, &p);
+                        left_out.push(format!("/detail_groups/{}/members/{i}/element{p}", lenient::escaped(name)));
+                    }
+                }
+            }
+        }
         if v.is_object() {
             v["elements"] = Value::Object(serde_json::Map::new());
             let found = lenient::unknown::<Model>(&v);
@@ -3728,6 +3743,8 @@ impl Model {
         let mut placed: BTreeMap<Guid, Guid> = BTreeMap::new();
         // Openings by host wall: (start, end, id) along it.
         let mut spans: BTreeMap<Guid, Vec<(f64, f64, Id)>> = BTreeMap::new();
+        // The members each view's detail groups and repeating details place.
+        let mut members_placed: BTreeMap<Guid, usize> = BTreeMap::new();
         for (&id, e) in &self.elements {
             let who = format!("{} {id}", e.category());
             let level_ok = |l: Guid| self.level(l).map(|_| ()).ok_or(format!("{who}: level {} doesn't exist", self.shown(l)));
@@ -3991,10 +4008,11 @@ impl Model {
                     view_ok(g.view, true)?;
                     point(&who, g.at)?;
                     coord(&format!("{who} angle"), g.angle)?;
-                    if !self.detail_groups.contains_key(&g.type_name) {
+                    let Some(t) = self.detail_groups.get(&g.type_name) else {
                         let there: Vec<&str> = self.detail_groups.keys().map(String::as_str).collect();
                         return Err(format!("{who}: there's no detail group `{}` (there are: {})", g.type_name, there.join(", ")));
-                    }
+                    };
+                    placing(&who, &mut members_placed, g.view, t.members.len())?;
                 }
                 Element::RepeatingDetail(r) => {
                     view_ok(r.view, true)?;
@@ -4009,10 +4027,11 @@ impl Model {
                             crate::groups::MAX_REPEATS
                         ));
                     }
-                    if !self.detail_groups.contains_key(&r.type_name) {
+                    let Some(t) = self.detail_groups.get(&r.type_name) else {
                         let there: Vec<&str> = self.detail_groups.keys().map(String::as_str).collect();
                         return Err(format!("{who}: there's no detail group `{}` (there are: {})", r.type_name, there.join(", ")));
-                    }
+                    };
+                    placing(&who, &mut members_placed, r.view, t.members.len().saturating_mul(r.count()))?;
                 }
                 Element::PointCloud(pc) => {
                     if !self.clouds.contains_key(&pc.cloud) {
@@ -4425,6 +4444,21 @@ fn size(what: &str, v: f64) -> Result<(), String> {
 fn point(who: &str, p: P2) -> Result<(), String> {
     coord(&format!("{who} x"), p.0)?;
     coord(&format!("{who} y"), p.1)
+}
+
+/// `n` more members placed in `view` (by a detail group or a repeating detail), of the `placed` already: an error naming
+/// `who` when the view would draw more than [`crate::groups::MAX_PLACED`] of them.
+fn placing(who: &str, placed: &mut BTreeMap<Guid, usize>, view: Guid, n: usize) -> Result<(), String> {
+    let total = placed.entry(view).or_default();
+    *total = total.saturating_add(n);
+    match *total > crate::groups::MAX_PLACED {
+        true => Err(format!(
+            "{who}: its view would draw {total} group members (a group places each of its type's members, a repeating detail \
+             once for each repeat); a view draws up to {}, so use fewer repeats or a smaller group",
+            crate::groups::MAX_PLACED
+        )),
+        false => Ok(()),
+    }
 }
 
 /// A crop region from its corner `a` to `b`: finite, and `a` south-west of `b` (in a section, below

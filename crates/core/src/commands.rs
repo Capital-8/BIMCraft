@@ -956,7 +956,8 @@ pub static ALL: &[Command] = &[
         &[],
         "{type, start: [x,y], end: [x,y], spacing, mirrored?, view?} detail group `type` repeated along the line from \
          `start` to `end`, every `spacing` mm from `start` (at most 2000 of them), each turned along the line, as Revit's \
-         Repeating Detail Component: brick coursing, blocking, batt ties. Returns {id, count}",
+         Repeating Detail Component: brick coursing, blocking, batt ties. A view draws up to 10000 group members in all (a \
+         repeat places each member of the type again), so a type of 100 members repeats up to 100 times. Returns {id, count}",
         repeating_detail,
     ),
     edit(
@@ -7071,6 +7072,20 @@ fn line_style(s: &mut Session, p: &Value) -> R {
         };
         if let Some((id, _)) = m.elements.iter().find(|(_, e)| lineworked(e)) {
             return Err(bad(c, format!("view {id} draws an edge in `{name}` with Linework; take it off first")));
+        }
+        // What a filled region or a detail group's member is drawn in: the style is kept, and the error says where.
+        let uses = |e: &Element| match e {
+            Element::DetailLine(l) => l.style == name,
+            Element::FilledRegion(r) => {
+                r.line_style.as_deref() == Some(name.as_str()) || r.sketch.iter().any(|l| l.style.as_deref() == Some(name.as_str()))
+            }
+            _ => false,
+        };
+        if let Some((id, _)) = m.elements.iter().find(|(_, e)| matches!(e, Element::FilledRegion(_)) && uses(e)) {
+            return Err(bad(c, format!("filled region {id} is bounded in `{name}`; give it another line style first")));
+        }
+        if let Some((group, _)) = m.detail_groups.iter().find(|(_, g)| g.members.iter().any(|x| uses(&x.element))) {
+            return Err(bad(c, format!("detail group `{group}` has a member drawn in `{name}`; ungroup it and change that member first")));
         }
         return Ok(json!({"deleted": name}));
     }

@@ -12,6 +12,11 @@ use crate::model::{Element, heading};
 /// The most members a group type holds.
 pub const MAX_MEMBERS: usize = 10_000;
 
+/// The most members a view's detail groups and repeating details place in all: each group places its type's members, each
+/// repeat of a repeating detail places them again, and a view draws every one whenever it is drawn. At 10,000 even big
+/// hatched regions take about half a second to draw (a debug build; 200,000 took 6 s and 30 million primitives).
+pub const MAX_PLACED: usize = 10_000;
+
 /// A detail group type: what each one placed draws.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -81,6 +86,10 @@ pub fn placed(m: &crate::model::Model, g: &DetailGroup) -> Vec<Element> {
         .filter_map(|x| {
             let mut e = crate::commands::transform("detail group", m, x.element.clone(), 0, &mo, &none).ok()?;
             set_view(&mut e, g.view);
+            // A mirror leaves a note reading the way it did (`transform`), but the group's own turn still turns it.
+            if let (Element::Text(n), Element::Text(was), true) = (&mut e, &x.element, g.mirrored) {
+                n.angle = (was.angle + g.angle) % 360.0;
+            }
             Some(e)
         })
         .collect()
@@ -129,6 +138,11 @@ impl RepeatingDetail {
         let angle = along.1.atan2(along.0).to_degrees();
         let u = if len > 0.0 { along * (1.0 / len) } else { P2(1.0, 0.0) };
         Some((0..n as usize).map(|k| (self.start + u * (k as f64 * self.spacing), angle)).collect())
+    }
+
+    /// How many times it repeats: none, past [`MAX_REPEATS`].
+    pub fn count(&self) -> usize {
+        self.places().map_or(0, |p| p.len())
     }
 
     /// Its groups, each as one placed.

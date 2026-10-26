@@ -121,8 +121,19 @@ origin, an angle and `mirrored`; `groups::placed` gives its members as elements 
 all owned by the group, so it picks, moves, rotates and mirrors as one. `ungroup` (UG) puts those elements back in the view;
 `group_type` renames a type (its groups follow) or deletes it while nothing is of it. A `RepeatingDetail` places a group
 along a line every `spacing` from its start, each turned along it (at most `MAX_REPEATS`), as Revit's Repeating Detail
-Component does with a detail component. On the desktop, Annotate > Detail has Detail Group, Repeating Detail and Create
-Group, and the right-click menu has Create Group and Ungroup.
+Component does with a detail component. A view draws every member of every group and repeat in it each time, so
+`Model::check` caps what one view places: a group counts its type's members, a repeating detail its members once for each
+repeat, and `MAX_PLACED` (10,000) is the most in a view (of big hatched regions it takes about half a second to draw in a debug
+build; the 200,000 it once allowed took 6 s and 30 million primitives). A member note keeps its own angle under a pure mirror
+(it still reads the right way round) and turns with the group's angle. The file holds a group's members as elements, and
+`Model::read` leaves out of them what this build doesn't know, as it does for any element
+(`/detail_groups/<name>/members/<i>/element/...`). Deleting a line style that a filled region or a group's member is drawn in
+is refused with the region's or the group's name. On the desktop, Annotate > Detail has Detail Group, Repeating Detail and
+Create Group, and the right-click menu has Create Group and Ungroup.
+
+A project with any of this (line styles and patterns, fill patterns, region types, detail lines, regions, groups, repeating
+details, sketches) is file format 6. A build that reads up to 5 would fail on it with a serde error, so 6 makes it say that the
+file is from a newer BIMCraft. Nothing in a file of 5 changes, so `Model::migrate` has no step for 5 to 6.
 
 The Options Bar's Offset puts a line, an arc or a polyline beside the points clicked; a rectangle, a polygon or a circle grows
 by it as a whole (`grown`, its corners joined), and a spline or an ellipse takes none (`Shape::offsets`). Modify's Offset takes
