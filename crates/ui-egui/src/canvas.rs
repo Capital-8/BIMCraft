@@ -25,7 +25,7 @@ use serde_json::{Value, json};
 use crate::icons::Icon;
 use crate::lang::{t, tf};
 use crate::properties::number;
-use crate::style::pal;
+use crate::style::{canvas_pal, pal};
 use crate::{BimApp, Sheet, Status, Tool, icon_button, top_params};
 
 /// How near the cursor an element is picked, in px.
@@ -366,8 +366,8 @@ pub(crate) fn paint(p: &Painter, at: Place, d: &Drawing, selected: &[Id], hovere
     let color = |c: Rgb| if at.paper { Color32::from_rgb(c.0, c.1, c.2) } else { color(c) };
     for (prim, owner) in d.prims.iter().zip(&d.owners) {
         let accent = match *owner {
-            Some(id) if selected.contains(&id) => Some((pal().accent, pal().select_fill)),
-            Some(id) if Some(id) == hovered => Some((pal().hover, pal().hover_fill)),
+            Some(id) if selected.contains(&id) => Some((pal().accent, canvas_pal().select_fill)),
+            Some(id) if Some(id) == hovered => Some((pal().hover, canvas_pal().hover_fill)),
             _ => None,
         };
         match prim {
@@ -1098,7 +1098,7 @@ impl BimApp {
         }
         let [lo, hi] = shown;
         let ring = [lo, P2(hi.0, lo.1), hi, P2(lo.0, hi.1)].map(at).to_vec();
-        let mut shapes = vec![Shape::closed_line(ring, Stroke::new(1.0, if held.is_some() { pal().accent } else { pal().muted }))];
+        let mut shapes = vec![Shape::closed_line(ring, Stroke::new(1.0, if held.is_some() { pal().accent } else { canvas_pal().muted }))];
         if modify {
             for g in geom::edge_grips(shown) {
                 let r = Rect::from_center_size(at(g), vec2(9.0, 9.0));

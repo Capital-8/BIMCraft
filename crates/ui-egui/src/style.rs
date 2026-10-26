@@ -82,15 +82,25 @@ pub fn pal() -> &'static Palette {
     if dark() { &DARK } else { &LIGHT }
 }
 
+/// Whether the interface is dark this frame (the chrome around the drawing; the drawing's own is [`canvas_dark`]).
 pub fn dark() -> bool {
     DARK_ON.with(Cell::get)
 }
 
+/// Whether the drawing (a plan, a section, the 3D view) is dark this frame: it is where the interface is, unless the user kept
+/// the canvas light inside a dark interface.
 pub fn canvas_dark() -> bool {
     CANVAS_DARK.with(Cell::get)
 }
 
-/// Draw this frame in the theme egui shows: the system's, unless the user picked one.
+/// The colours the drawing paints with where they must read on its own ground (the fills of what is selected or hovered, a crop
+/// region's outline): the dark palette on a dark canvas, the light one on a light canvas, whatever the interface around it is.
+pub fn canvas_pal() -> &'static Palette {
+    if canvas_dark() { &DARK } else { &LIGHT }
+}
+
+/// Draw this frame in the theme egui shows: the system's, unless the user picked one; with `light_canvas`, the drawing stays light
+/// in a dark one.
 pub fn follow(ctx: &Context, light_canvas: bool) {
     DARK_ON.with(|d| d.set(ctx.theme() == Theme::Dark));
     CANVAS_DARK.with(|d| d.set(dark() && !light_canvas));

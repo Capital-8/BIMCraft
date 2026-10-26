@@ -69,6 +69,7 @@ pub fn window_in(path: &Path) -> Option<Window> {
 #[derive(Clone, Debug, PartialEq)]
 pub struct Settings {
     pub theme: ThemePreference,
+    /// Keep the drawing light inside a dark interface. Only the dark theme has the choice: `from_json` drops it from any other.
     pub light_canvas: bool,
     pub language: Lang,
     pub ribbon_minimized: bool,
@@ -112,7 +113,7 @@ impl Settings {
         };
         Settings {
             theme,
-            light_canvas: v["light_canvas"].as_bool().unwrap_or(base.light_canvas),
+            light_canvas: theme == ThemePreference::Dark && v["light_canvas"].as_bool().unwrap_or(base.light_canvas),
             language: v["language"].as_str().and_then(Lang::from_code).unwrap_or(base.language),
             ribbon_minimized: v["ribbon_minimized"].as_bool().unwrap_or(base.ribbon_minimized),
             docking: if v["palettes"].is_object() { Docking::from_json(&v["palettes"]) } else { base.docking },

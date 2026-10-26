@@ -4972,6 +4972,7 @@ mod control;
 mod dialog;
 mod dock;
 mod gpu;
+mod light_canvas;
 mod lineweights;
 mod links;
 mod mep;
