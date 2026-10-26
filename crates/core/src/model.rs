@@ -63,7 +63,11 @@ pub const CEILING_CUT: f64 = 2300.0;
 pub const CEILING_HEIGHT: f64 = 2600.0;
 /// The steepest slope a floor or a roof may have, degrees.
 pub const MAX_SLOPE: f64 = 75.0;
-/// The version of the project file this build writes, and the newest it reads. 5: a project holds scans (`clouds`, library
+/// The version of the project file this build writes, and the newest it reads. 6: a project holds detailing (library kinds
+/// `line-pattern`, `line-style`, `fill-pattern`, `filled-region-type` and `detail-group`; the elements `line`, `region`,
+/// `detailgroup` and `repeatingdetail`; sketch parts; the model keys `line_styles`, `fill_patterns` and `region_types`);
+/// nothing in a file of 5 changes, but a build that reads up to 5 would answer one of 6 with a serde error ("isn't a kind of
+/// library entry", "unknown variant"), not "saved by a newer BIMCraft". 5: a project holds scans (`clouds`, library
 /// entries of kind `Cloud`) and point clouds place them; nothing in a file of 4 changes, but a build that reads up to 4 would
 /// answer one of 5 with a serde error, not "saved by a newer BIMCraft". 4: a line weight is a pen (0 to 16), not
 /// pixels of a sheet's drawing. 3: a type's layers and a family's forms and
@@ -71,7 +75,7 @@ pub const MAX_SLOPE: f64 = 75.0;
 /// 2: the library has ids and GUIDs too
 /// (`library`), and what names a library entry holds its GUID. 1: elements have GUIDs, ids six digits, and what points at
 /// an element holds its GUID. None (0): a file from before.
-pub const FORMAT: u32 = 5;
+pub const FORMAT: u32 = 6;
 /// How far past the model a level reaches without an extent of its own, mm.
 pub const LEVEL_PAST: f64 = 1000.0;
 
@@ -2206,6 +2210,8 @@ impl Model {
         }
         self.next_id = self.next_id.max(FIRST_ID);
         // 4 to 5 (scans, and the point clouds that place them) has no step: a file of 4 holds none of it, or holds it as 5 does.
+        // 5 to 6 (detailing: lines, regions, groups, repeating details, line and fill styles) has none either: a file of 5 holds
+        // none of it, so reading it as 6 changes nothing.
         self.format = FORMAT;
     }
 
