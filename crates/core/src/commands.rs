@@ -984,12 +984,13 @@ pub static ALL: &[Command] = &[
         "Size a Storm Drain",
         "{kind: downpipe|horizontal, area?, rainfall?, flow?, outlet?: edge|funnel, gutter?, length?, slope?, inside?} a storm drain as \
          NBR 10844 asks. The flow is `flow` (L/min), or the rain on `area` (m², as the standard counts a roof) at `rainfall` (mm/h; \
-         150, what it allows for up to 100 m²): Q = I·A/60. A `downpipe` (condutor vertical) takes the inner diameter of the \
+         150 by default, which the standard allows for up to 100 m² only: above that `rainfall` is required): Q = I·A/60. A `downpipe` (condutor vertical) takes the inner diameter of the \
          standard's Figure 3 abacuses by Q, the water depth in the gutter `gutter` (50 to 100 mm), its `length` (mm, 0.3 m or more) \
          and the gutter's `outlet` (edge: sharp-edged, the default; funnel); 70 mm inside at least. A `horizontal` drain takes \
          Manning at two thirds full (n 0.011, the standard's Table 4) at its `slope` (a fraction, 0.005 at least): the inner \
          diameter it needs, and with `inside` (mm) whether that pipe carries the flow. Off the abacuses (more than 150 mm inside) \
-         nothing is read. It changes nothing",
+         nothing is read. A key that does not apply to the `kind`, or `flow` together with `area`, is an error. It has no shortcut: \
+Revit has no tool for it. It changes nothing",
         storm_size,
     ),
     other(
@@ -3160,11 +3161,29 @@ fn storm_size(_: &mut Session, p: &Value) -> R {
     if kind.is_empty() {
         return Err(bad(c, "`kind` (downpipe or horizontal) is required"));
     }
+    let mine: &[&str] = if kind == "downpipe" { &["outlet", "gutter", "length"] } else { &["slope", "inside"] };
+    if let Some(key) = ["outlet", "gutter", "length", "slope", "inside"].into_iter().find(|k| o.contains_key(*k) && !mine.contains(k)) {
+        return Err(bad(c, format!("`{key}` does not apply to a {kind}")));
+    }
+    if !absent(p.get("flow")) {
+        if let Some(key) = ["area", "rainfall"].into_iter().find(|k| o.contains_key(*k)) {
+            return Err(bad(c, format!("`{key}` and `flow` are two ways to give the flow: give one")));
+        }
+    }
     let outlet = Outlet::parse(choice(c, p, "outlet", &["edge", "funnel"], "edge")?).unwrap_or(Outlet::Edge);
     let flow = if absent(p.get("flow")) {
         let area = within(c, p, "area", 0.0, 0.0, 1.0e7)?;
         if area <= 0.0 {
             return Err(bad(c, "`area` (m², the roof that drains) or `flow` (L/min) is required"));
+        }
+        if area > storm::DEFAULT_RAIN_MAX_AREA && absent(p.get("rainfall")) {
+            return Err(bad(
+                c,
+                format!(
+                    "`rainfall` (mm/h, from the standard's table for the place and return period) is required above {} m²: the default {DEFAULT_RAIN} mm/h is for smaller roofs",
+                    storm::DEFAULT_RAIN_MAX_AREA
+                ),
+            ));
         }
         storm::design_flow(within(c, p, "rainfall", DEFAULT_RAIN, f64::MIN_POSITIVE, 1000.0)?, area)
     } else {

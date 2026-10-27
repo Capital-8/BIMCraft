@@ -100,6 +100,9 @@ fn off_the_chart_nothing_is_read() {
     assert_eq!(pipe(Outlet::Edge, 1000.0, 70.0, 0.2), Err(Off::Length));
     assert_eq!(pipe(Outlet::Edge, 2700.0, 50.0, 3.0), Err(Off::Diameter));
     assert_eq!(pipe(Outlet::Edge, 1000.0, f64::NAN, 3.0), Err(Off::Depth));
+    // between a shorter curve that is off the chart and the next that is not: an error, never the H curve alone
+    assert_eq!(pipe(Outlet::Edge, 2400.0, 100.0, 0.45), Err(Off::Diameter));
+    assert!(pipe(Outlet::Edge, 2400.0, 100.0, 0.6).is_ok_and(|d| near(d.diameter, 145.9, 0.1)), "the next curve is on the chart");
 }
 
 #[test]
@@ -153,10 +156,14 @@ mod command {
             (json!({"kind": "downpipe", "gutter": 70, "length": 3000}), "area"),
             (json!({"kind": "downpipe", "area": 100, "gutter": 40, "length": 3000}), "50"),
             (json!({"kind": "downpipe", "area": 100, "gutter": 70, "length": 100}), "0.3"),
-            (json!({"kind": "downpipe", "area": 9000, "gutter": 50, "length": 3000}), "150"),
+            (json!({"kind": "downpipe", "area": 9000, "rainfall": 150, "gutter": 50, "length": 3000}), "150 mm inside"),
+            (json!({"kind": "downpipe", "area": 300, "gutter": 70, "length": 3000}), "rainfall"),
+            (json!({"kind": "downpipe", "area": 100, "flow": 500, "gutter": 70, "length": 3000}), "two ways"),
+            (json!({"kind": "downpipe", "area": 100, "gutter": 70, "length": 3000, "slope": 0.01}), "does not apply"),
+            (json!({"kind": "horizontal", "area": 100, "slope": 0.01, "gutter": 70}), "does not apply"),
             (json!({"kind": "horizontal", "area": 100}), "slope"),
             (json!({"kind": "horizontal", "area": 100, "slope": 0.001}), "0.5"),
-            (json!({"kind": "horizontal", "area": 100, "slope": 0.01, "outlet": "tap"}), "outlet"),
+            (json!({"kind": "horizontal", "area": 100, "slope": 0.01, "outlet": "tap"}), "does not apply"),
             (json!({"kind": "horizontal", "area": 100, "slope": 0.01, "pipe": 1}), "pipe"),
             (json!("x"), "object"),
         ] {
