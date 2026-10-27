@@ -3,8 +3,8 @@
 On the roadmap under 0.9 Interoperability, as Revit's Import CAD and Link CAD: a consultant's or a surveyor's DXF drawing
 brought into a project and drawn under the model in the plans of a level, to trace walls over and to check against. A project
 holds each drawing once, an import element places it, plans draw and snap to it, and the desktop brings one in (Insert > Import
-CAD, Link CAD). DWG has no public specification and no permissively licensed reader, so a `.dwg` is refused with a message that
-says to save it as DXF; DXF export, exploding an import into detail lines (which waits on detail lines, issue #58), and
+CAD, Link CAD). DWG isn't read yet (a later change can read it through a DWG library), so a `.dwg` is refused with a message
+that says to save it as DXF; DXF export, exploding an import into detail lines (which waits on detail lines, issue #58), and
 images and PDFs as underlays are still to come.
 
 ## The reader
