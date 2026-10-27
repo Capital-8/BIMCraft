@@ -101,6 +101,42 @@ fn a_selected_or_hovered_element_is_filled_in_the_canvas_palette_not_the_interfa
     assert!(fills.contains(&LIGHT.hover_fill), "the hovered wall: {fills:?}");
 }
 
+/// The colours of every solid stroke the last frame painted: a path's, a segment's.
+fn strokes(h: &Harness<BimApp>) -> Vec<Color32> {
+    fn walk(s: &Shape, out: &mut Vec<Color32>) {
+        match s {
+            Shape::Path(p) => out.extend(match p.stroke.color {
+                ColorMode::Solid(c) => Some(c),
+                _ => None,
+            }),
+            Shape::LineSegment { stroke, .. } => out.push(stroke.color),
+            Shape::Vec(v) => v.iter().for_each(|s| walk(s, out)),
+            _ => {}
+        }
+    }
+    let mut out = Vec::new();
+    h.output().shapes.iter().for_each(|c| walk(&c.shape, &mut out));
+    out
+}
+
+#[test]
+fn a_selected_or_hovered_element_is_stroked_in_the_canvas_palette_and_the_two_are_told_apart_on_a_light_canvas() {
+    let mut h = app(BOX);
+    let (south, east) = (P2(4000.0, 0.0), h.state().screen(P2(8000.0, 3000.0)));
+    pick_look(&mut h, "Dark UI, Light Canvas");
+    click(&mut h, south);
+    h.hover_at(east);
+    h.run();
+    let ink = strokes(&h);
+    // The dark palette's blues are for a dark ground: on white the hover one held 2.5:1.
+    assert!(ink.contains(&LIGHT.accent), "the selected wall's outline: the light palette's accent");
+    assert!(ink.contains(&LIGHT.hover), "the hovered wall's outline: the light palette's hover");
+    let (fills, _) = painted(&h);
+    let apart = |a: Color32, b: Color32| (i32::from(a.r()) - i32::from(b.r())).abs() + (i32::from(a.g()) - i32::from(b.g())).abs();
+    assert!(fills.contains(&LIGHT.select_fill) && fills.contains(&LIGHT.hover_fill));
+    assert!(apart(LIGHT.select_fill, LIGHT.hover_fill) > 30, "a glance tells the selected wall's tint from the hovered one's");
+}
+
 #[test]
 fn the_crop_regions_outline_is_drawn_for_the_canvas_not_the_interface() {
     let mut h = app(BOX);

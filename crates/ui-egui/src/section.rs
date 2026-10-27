@@ -15,7 +15,7 @@ use serde_json::json;
 
 use crate::canvas::{PICK, Place, click_modifiers, color, paint};
 use crate::orbit::{rgb, scene_of};
-use crate::style::pal;
+use crate::style::canvas_pal;
 use crate::{BimApp, Status, Tool};
 
 /// What a picture is of: the model, the view, its framing in pixels, the elements tinted, and
@@ -61,8 +61,8 @@ impl BimApp {
         let tints: Vec<(Id, Rgb)> = self
             .selection
             .iter()
-            .map(|id| (*id, rgb(pal().accent)))
-            .chain(hovered.filter(|h| !self.selection.contains(h)).map(|h| (h, rgb(pal().hover))))
+            .map(|id| (*id, rgb(canvas_pal().accent)))
+            .chain(hovered.filter(|h| !self.selection.contains(h)).map(|h| (h, rgb(canvas_pal().hover))))
             .collect();
         let scene = scene_of(&mut self.orbit.scene, &model);
         let cut = &mut self.cut;

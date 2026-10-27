@@ -57,9 +57,9 @@ const fn rgb(c: u32) -> Color32 {
 
 pub const LIGHT: Palette = Palette {
     accent: rgb(0x2678DA),
-    accent_ink: rgb(0x2064B5),
-    hover: rgb(0x5B9BE6),
-    select_fill: rgb(0xD6E6FA),
+    accent_ink: rgb(0x1B5AA5),
+    hover: rgb(0x4A90E2),
+    select_fill: rgb(0xBFD8F7),
     hover_fill: rgb(0xE2EAF6),
     text: rgb(0x262A32),
     muted: rgb(0x636873),
@@ -385,6 +385,35 @@ mod tests {
                 }
             }
         }
+        assert!(fails.is_empty(), "{fails:#?}");
+    }
+
+    /// What the drawing paints on its paper, from the canvas's palette: what a click would pick (hover) and what is picked are
+    /// two colours a glance tells apart, in the fill and in the stroke (at least 35 apart in red, green and blue: the light
+    /// palette's were 13 apart in the fill), and each stroke holds 3:1 on the paper (WCAG 1.4.11).
+    #[test]
+    fn on_the_canvas_hover_and_selection_are_told_apart_and_their_strokes_hold_3_to_1_on_the_paper() {
+        let apart = |a: Color32, b: Color32| {
+            let d = |x: u8, y: u8| (f32::from(x) - f32::from(y)).powi(2);
+            (d(a.r(), b.r()) + d(a.g(), b.g()) + d(a.b(), b.b())).sqrt()
+        };
+        let mut fails = Vec::new();
+        for (canvas, p) in [("light", &LIGHT), ("dark", &DARK)] {
+            CANVAS_DARK.with(|d| d.set(canvas == "dark"));
+            let paper = crate::canvas::color(bimcraft_core::render::PAPER);
+            for (what, a, b) in [("fills", p.hover_fill, p.select_fill), ("strokes", p.hover, p.accent)] {
+                if apart(a, b) < 35.0 {
+                    fails.push(format!("{canvas} canvas: hover and selection {what} are {:.0} apart", apart(a, b)));
+                }
+            }
+            for (what, stroke) in [("hover", p.hover), ("selection", p.accent)] {
+                let c = contrast(stroke, paper);
+                if c < 3.0 {
+                    fails.push(format!("{canvas} canvas: the {what} stroke is {c:.2}:1 on the paper, under 3:1"));
+                }
+            }
+        }
+        CANVAS_DARK.with(|d| d.set(false));
         assert!(fails.is_empty(), "{fails:#?}");
     }
 }
