@@ -615,11 +615,16 @@ impl Model {
                 if let Err(problems) = solve(&lines_of(ring, &[]))
                     && !problems.iter().all(|p| matches!(p, Problem::NoArea { .. }))
                 {
-                    return Err(format!(
-                        "{} {id}: its {name} isn't a simple outline: {}; redraw it with `edit_boundary`",
-                        e.category(),
-                        say(&problems, &|i| format!("edge {i}"))
-                    ));
+                    let said = say(&problems, &|i| format!("edge {i}"));
+                    // A command that made it has nothing to redraw (the engine takes it back): it is told to give a simple one.
+                    return Err(match before.elements.get(id) {
+                        Some(_) => format!("{} {id}: its {name} isn't a simple outline: {said}; redraw it with `edit_boundary`", e.category()),
+                        None => format!(
+                            "{}: its {name} isn't a simple outline: {said}; give a simple `boundary` or `sketch` \
+                             (walls, or boxes of walls, that touch at a corner enclose no simple outline of their own)",
+                            e.category()
+                        ),
+                    });
                 }
             }
         }
@@ -1295,6 +1300,27 @@ mod command_tests {
         assert!(s.execute("modify", &json!({"id": h, "boundary": slit})).unwrap_err().contains("simple"));
         // A simple one is as before.
         run(&mut s, "modify", json!({"id": f, "boundary": [[0, 0], [5000, 0], [5000, 3000], [0, 3000]]}));
+    }
+
+    #[test]
+    fn a_floor_over_boxes_of_walls_that_touch_at_a_corner_says_what_to_give_instead_of_naming_nothing() {
+        let mut s = Session::new();
+        for x in [0, 4000] {
+            run(&mut s, "wall", json!({"points": [[x, x], [x + 4000, x], [x + 4000, x + 4000], [x, x + 4000]], "closed": true}));
+        }
+        let before = s.model.clone();
+        let e = s.execute("floor", &json!({})).unwrap_err();
+        // Nothing was made, so nothing is named, and `edit_boundary` has nothing to edit.
+        assert!(!e.contains("floor 1") && !e.contains("edit_boundary"), "{e}");
+        assert!(e.contains("boundary"), "{e}");
+        assert_eq!(s.model, before);
+        // The same words for a boundary that is given and not simple.
+        let e = s.execute("floor", &json!({"boundary": [[0, 0], [4000, 4000], [4000, 0], [0, 2000]]})).unwrap_err();
+        assert!(!e.contains("floor 1") && !e.contains("edit_boundary"), "{e}");
+        // And a floor that is there is still sent to `edit_boundary` when a change breaks it.
+        let f = run(&mut s, "floor", json!({"boundary": [[0, 0], [4000, 0], [4000, 4000], [0, 4000]]}))["id"].clone();
+        let e = s.execute("modify", &json!({"id": f, "boundary": BOW})).unwrap_err();
+        assert!(e.contains(&format!("floor {f}")) && e.contains("edit_boundary"), "{e}");
     }
 
     /// A bow tie inside a 4 m square, for a hole.
