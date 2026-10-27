@@ -989,8 +989,12 @@ pub static ALL: &[Command] = &[
          built) it replies the system type and the fire reserve (m³). With `type` (Tabela 2; 4 comes as 4-40 or 4-65 by its nozzle) \
          it replies the design flow, that of the two most unfavourable jets (`hydrants`, 2 by default), and the head at the nozzle; \
          with `inside` (mm) it also replies the speed (5 m/s at most), the Hazen-Williams head loss over `length` (m) of the \
-         `material` (Tabela 1), the head needed at the start of the pipe with its `rise` (m, up) and, with `nominal` (mm), whether the \
-         pipe is big enough (DN 65; DN 50 for types 1 and 2). It changes nothing",
+         `material` (Tabela 1), the head needed at the start of the pipe with its `rise` (mm, up) and, with `nominal` (mm), whether \
+         the pipe is big enough (DN 65; DN 50 for types 1 and 2). `length` and `rise` are in millimetres. `need_mca` is the nozzle \
+         head + the head loss of the straight pipe + the rise: it leaves out the hose, the fittings and the pressure at the source \
+         (`need_covers` says so), and `ok` is only the nozzle head within 100 mca, the speed and the pipe's size (`ok_covers`), not \
+         a verdict on the design. A `type` that contradicts `column` and `area` is an error. `region` is SP, the only one: this is the \
+         São Paulo rule, and no other state's. It has no shortcut: Revit has no tool for it. It changes nothing",
         hydrant_size,
     ),
     other(
@@ -3182,9 +3186,15 @@ fn hydrant_size(_: &mut Session, p: &Value) -> R {
     use crate::hydrant::{self, MATERIALS, MAX_NOZZLE_HEAD, MAX_SPEED, TYPE_KEYS};
     let c = "hydrant_size";
     let o = p.as_object().ok_or_else(|| bad(c, "params must be an object"))?;
-    const KEYS: &[&str] = &["column", "area", "type", "hydrants", "inside", "nominal", "material", "length", "rise"];
+    const KEYS: &[&str] = &["region", "column", "area", "type", "hydrants", "inside", "nominal", "material", "length", "rise"];
     if let Some(key) = o.keys().find(|k| !KEYS.contains(&k.as_str())) {
         return Err(bad(c, format!("unknown parameter `{key}`")));
+    }
+    if string(c, p, "region")?.is_some_and(|r| r != "SP") {
+        return Err(bad(
+            c,
+            "`region` must be SP: only IT 22/2025 of the Corpo de Bombeiros of São Paulo is covered, no other state's rule",
+        ));
     }
     let round = |x: f64, k: f64| (x * k).round() / k + 0.0;
     let (has_column, has_area) = (!absent(p.get("column")), !absent(p.get("area")));
@@ -3218,7 +3228,19 @@ fn hydrant_size(_: &mut Session, p: &Value) -> R {
             None => return Err(bad(c, "`type` (1, 2, 3, 4-40, 4-65 or 5) or `column` and `area` is required")),
         }
     } else {
-        Some(choice(c, p, "type", TYPE_KEYS, "")?.to_string())
+        let key = choice(c, p, "type", TYPE_KEYS, "")?;
+        if let (Some((t, _)), Some(row)) = (system, hydrant::kind(key)) {
+            if row.1 != t {
+                return Err(bad(
+                    c,
+                    format!(
+                        "`type` {key} contradicts `column` {} and `area`, which give type {t}: give one, or make them agree",
+                        p["column"]
+                    ),
+                ));
+            }
+        }
+        Some(key.to_string())
     };
     let Some(key) = key else { return Ok(Value::Object(out)) };
     let hydrants = within(c, p, "hydrants", 2.0, 1.0, 1000.0)?;
@@ -3242,8 +3264,8 @@ fn hydrant_size(_: &mut Session, p: &Value) -> R {
     let inside = within(c, p, "inside", 0.0, f64::MIN_POSITIVE, 5000.0)?;
     let material = choice(c, p, "material", &MATERIALS.iter().map(|m| m.0).collect::<Vec<_>>(), "steel")?;
     let cf = hydrant::hazen_c(material).unwrap_or(120.0);
-    let length = within(c, p, "length", 0.0, 0.0, 1.0e6)?;
-    let rise = within(c, p, "rise", 0.0, -1000.0, 1000.0)?;
+    let length = within(c, p, "length", 0.0, 0.0, MAX_COORD)? / 1000.0;
+    let rise = within(c, p, "rise", 0.0, -MAX_COORD, MAX_COORD)? / 1000.0;
     let (v, j) = (hydrant::speed(flow, inside), hydrant::hazen_j(flow, cf, inside));
     let loss = j * length;
     let speed_ok = v <= MAX_SPEED + 1e-9;
@@ -3253,6 +3275,10 @@ fn hydrant_size(_: &mut Session, p: &Value) -> R {
     out.insert("head_loss_m_per_m".into(), json!(round(j, 1.0e5)));
     out.insert("loss_mca".into(), json!(round(loss, 100.0)));
     out.insert("need_mca".into(), json!(round(t.6 + loss + rise, 100.0)));
+    out.insert(
+        "need_covers".into(),
+        json!("nozzle head + head loss of the straight pipe + rise: not the hose, the fittings or the pressure at the source"),
+    );
     if !absent(p.get("nominal")) {
         let nominal = within(c, p, "nominal", 0.0, f64::MIN_POSITIVE, 5000.0)?;
         let size_ok = nominal + 1e-9 >= hydrant::min_nominal(&key);
@@ -3260,6 +3286,10 @@ fn hydrant_size(_: &mut Session, p: &Value) -> R {
         out.insert("size_ok".into(), json!(size_ok));
     }
     out.insert("ok".into(), json!(ok));
+    out.insert(
+        "ok_covers".into(),
+        json!("nozzle head within 100 mca, speed within 5 m/s and the pipe's size only: it is not a verdict on the design"),
+    );
     Ok(Value::Object(out))
 }
 

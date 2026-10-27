@@ -9,6 +9,10 @@
 //!   `J = 605 Q^1.85 C^-1.85 D^-4.87 10^4` (m/m, Q in L/min, D the inner diameter in mm).
 //! - Item 4.8.3: the design flow is that of the two most unfavourable jets; 4.8.11 and 4.8.12 limit the speed to 5 m/s; 4.8.8 the
 //!   head at a nozzle to 100 mca; 4.11.6 the smallest pipe to DN 65 (DN 50 for types 1 and 2).
+//!
+//! This is the rule of São Paulo only (IT 22/2025 of the CBPMESP); no other state's. The band edges of Tabela 3 are taken as
+//! inclusive above (`area <= 2500` is the first band); that reading is to be confirmed against the IT. What `need_mca` covers is
+//! the nozzle head, the straight pipe's loss and the rise: no hose or fitting loss, and it checks no pressure at the source.
 
 /// One system type of Tabela 2: (key, type, nozzle DN mm, hose DN mm, hose length m, one jet L/min, head mca).
 pub const TYPES: &[(&str, u8, f64, f64, f64, f64, f64)] = &[
