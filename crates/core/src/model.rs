@@ -3381,6 +3381,51 @@ impl Model {
         })
     }
 
+    /// The stretch of its wall's location line a door or window stands in, as distances along it: from the nearest face,
+    /// on either side of its middle, of a wall that meets its wall (crossing it, or joined to it from either side) on the
+    /// plan of its wall's level, else from the wall's start and to its end. What its temporary dimensions measure to, as
+    /// Revit's do to wall faces. None on a curved wall.
+    pub fn opening_span(&self, o: &Opening) -> Option<(f64, f64)> {
+        let host = self.wall(o.host).filter(|w| w.arc == 0.0)?;
+        let axis = walls::Axis::of(host);
+        let length = axis.length();
+        if length <= TOL {
+            return None;
+        }
+        let (a, b) = (axis.at(0.0, 0.0), axis.at(length, 0.0));
+        let along = |p: P2| (p - a).dot(b - a) / length;
+        // A wall joined to it ends at its location line or at one of its faces.
+        let (ext, int) = walls::faces(self, host);
+        let reach = ext.abs().max(int.abs()) + TOL;
+        let hits: Vec<f64> = self
+            .elements
+            .with_guids()
+            .filter_map(|(_, id, e)| match e {
+                Element::Wall(w) if id != o.host && w.arc == 0.0 && self.cut_by(w, host.level) => Some(w),
+                _ => None,
+            })
+            .flat_map(|w| {
+                let (axis, (ext, int)) = (walls::Axis::of(w), walls::faces(self, w));
+                [ext, int].map(|off| (axis.at(0.0, off), axis.at(axis.length(), off)))
+            })
+            .filter_map(|(p, q)| {
+                let hit = geom::line_intersection(a, b, p, q)?;
+                (geom::dist_to_segment(hit, p, q) <= reach).then(|| along(hit))
+            })
+            .collect();
+        let start = hits.iter().copied().filter(|&t| t < o.offset).fold(0.0, f64::max);
+        let end = hits.iter().copied().filter(|&t| t > o.offset).fold(length, f64::min);
+        Some((start, end))
+    }
+
+    /// The offset halfway along opening `o`'s stretch of wall (`opening_span`), when `o` stands within `near` mm of it:
+    /// where a door or window snaps as it's placed or dragged.
+    pub fn centred(&self, o: &Opening, near: f64) -> Option<f64> {
+        let (start, end) = self.opening_span(o)?;
+        let middle = (start + end) / 2.0;
+        ((o.offset - middle).abs() <= near).then_some(middle)
+    }
+
     /// The circle a radial dimension measures on `r`: a round column's centre and radius, or a
     /// curved wall's, of its centre line or one of its faces.
     pub fn reference_arc(&self, r: &Reference) -> Result<(P2, f64), String> {

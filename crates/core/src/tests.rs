@@ -114,6 +114,43 @@ fn a_point_knows_how_far_it_stands_from_the_nearest_wall_centre_line_or_grid_eac
 }
 
 #[test]
+fn a_door_stands_between_the_faces_of_the_walls_that_meet_its_wall() {
+    use crate::model::Element;
+    let mut s = Session::new();
+    house(&mut s);
+    let span = |s: &mut Session, at: [i32; 2]| {
+        let id = run(s, "door", json!({"at": at}))["id"].as_u64().unwrap();
+        let Some(Element::Door(o)) = s.model.elements.get(id) else { panic!("no door {id}") };
+        let span = s.model.opening_span(o);
+        run(s, "delete", json!({"ids": [id]}));
+        span
+    };
+    // Between the inner faces of the west and east walls, 200 thick on the corners of its location line.
+    assert_eq!(span(&mut s, [2000, 0]), Some((100.0, 7900.0)));
+    // A wall crossing the room stops it at its nearer face; one whose line only would cross, short of the wall, doesn't.
+    run(&mut s, "wall", json!({"points": [[5000, 0], [5000, 6000]], "type": "Interior - 100mm"}));
+    run(&mut s, "wall", json!({"points": [[3000, 3000], [3000, 6000]], "type": "Interior - 100mm"}));
+    assert_eq!(span(&mut s, [2000, 0]), Some((100.0, 4950.0)));
+    assert_eq!(span(&mut s, [6500, 0]), Some((5050.0, 7900.0)));
+    // A wall meeting it from outside, up to its face, counts too.
+    run(&mut s, "wall", json!({"points": [[1000, -2000], [1000, -100]], "type": "Interior - 100mm"}));
+    assert_eq!(span(&mut s, [2000, 0]), Some((1050.0, 4950.0)));
+}
+
+#[test]
+fn a_door_near_the_middle_between_the_faces_finds_the_middle() {
+    use crate::model::Element;
+    let mut s = Session::new();
+    house(&mut s);
+    run(&mut s, "wall", json!({"points": [[5000, 0], [5000, 6000]], "type": "Interior - 100mm"}));
+    let id = run(&mut s, "door", json!({"at": [2560, 0]}))["id"].as_u64().unwrap();
+    let Some(Element::Door(o)) = s.model.elements.get(id) else { panic!("no door {id}") };
+    // Halfway between 100 and 4950.
+    assert_eq!(s.model.centred(o, 50.0), Some(2525.0));
+    assert_eq!(s.model.centred(o, 30.0), None, "35 away is further than 30");
+}
+
+#[test]
 fn a_views_scale_and_detail_level_are_its_own_set_by_commands_and_kept_in_the_file() {
     let mut s = Session::new();
     house(&mut s);

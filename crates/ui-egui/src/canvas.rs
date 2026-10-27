@@ -481,13 +481,15 @@ fn dimension_line(p: &Painter, a: Pos2, b: Pos2, n: Vec2, off: f32) -> Pos2 {
     a + along / 2.0 + n * (off + 11.0)
 }
 
-/// An opening's temporary dimensions, drawn on `p` beside its host wall: from the wall's start to the middle of the
-/// opening and from there to the wall's end, each as where its number goes, its text, and its length in mm. None on a
-/// curved wall, and for a span too short to draw.
-/// ponytail: measured along the wall's location line to its ends; Revit stops at the nearest wall crossing it.
+/// An opening's temporary dimensions, drawn on `p` beside its host wall: from the face of the wall meeting its wall
+/// before it (or the wall's start) to the middle of the opening, and from there to the next face (or the wall's end)
+/// (`Model::opening_span`), each as where its number goes, its text, and its length in mm. None on a curved wall, and for
+/// a span too short to draw.
 pub(crate) fn opening_dimensions(p: &Painter, m: &Model, v: &View, o: &bimcraft_core::model::Opening) -> Vec<(Pos2, String, f64)> {
-    let Some(w) = m.wall(o.host).filter(|w| w.arc == 0.0) else { return Vec::new() };
-    let (origin, c) = (p.clip_rect().min, Axis::of(w).at(o.offset, 0.0));
+    let (Some(w), Some((start, end))) = (m.wall(o.host).filter(|w| w.arc == 0.0), m.opening_span(o)) else { return Vec::new() };
+    let axis = Axis::of(w);
+    let (origin, c) = (p.clip_rect().min, axis.at(o.offset, 0.0));
+    let (from, to) = (axis.at(start, 0.0), axis.at(end, 0.0));
     let screen = |q: P2| pos(origin, v.px(q));
     let (a, b) = (screen(w.start), screen(w.end));
     let chord = b - a;
@@ -499,11 +501,22 @@ pub(crate) fn opening_dimensions(p: &Painter, m: &Model, v: &View, o: &bimcraft_
     let mid = a + chord / 2.0;
     let n = if (mid + n - p.clip_rect().center()).length() < (mid - n - p.clip_rect().center()).length() { -n } else { n };
     let off = (m.thickness(w) / 2.0 * v.scale) as f32 + 18.0;
-    [(w.start, c), (c, w.end)]
+    [(from, c), (c, to)]
         .into_iter()
         .filter(|(s, e)| screen(*s).distance(screen(*e)) >= 24.0)
         .map(|(s, e)| (dimension_line(p, screen(s), screen(e), n, off), m.units.length(s.dist(e)), s.dist(e)))
         .collect()
+}
+
+/// The parameters of the door or window `params` puts down, at the middle of its stretch of wall when it lands within
+/// `SNAP` px of it (`Model::centred`).
+fn centred_opening(m: &Model, v: &View, mut params: Value, door: bool) -> Value {
+    if let Ok(Element::Door(o) | Element::Window(o)) = opening_of(m, &params, door)
+        && let Some(middle) = m.centred(&o, SNAP / v.scale)
+    {
+        params["offset"] = json!(middle);
+    }
+    params
 }
 
 /// A column's or component's temporary dimensions, drawn on `p` beside it: how far it stands from the nearest wall centre
@@ -1004,7 +1017,7 @@ impl BimApp {
         {
             match drag {
                 Drag::Move(from) => {
-                    let by = round(view.mm(q) - from);
+                    let by = self.dragged(&model, &view, from, view.mm(q));
                     if by.length() > 0.0 {
                         self.run("move", json!({"ids": self.selection, "by": point(by)}));
                     }
@@ -1084,7 +1097,7 @@ impl BimApp {
         }
         match (self.canvas.drag, local) {
             (Some(Drag::Move(from)), Some(q)) => {
-                let (a, b) = (view.px(from), view.px(from + round(view.mm(q) - from)));
+                let (a, b) = (view.px(from), view.px(from + self.dragged(&model, &view, from, view.mm(q))));
                 ghost(&p, rect.min, &d, &self.selection, &|q| q + vec2(b.0 - a.0, b.1 - a.1));
             }
             (Some(Drag::Box(from)), Some(q)) => p.extend(box_shapes(rect, from, q)),
@@ -1308,6 +1321,18 @@ impl BimApp {
         p
     }
 
+    /// How far dragging the selection from `from` to `to` moves it: a lone door or window slides to the middle of its
+    /// stretch of wall when it comes within `SNAP` px of it.
+    fn dragged(&self, m: &Model, v: &View, from: P2, to: P2) -> P2 {
+        let by = round(to - from);
+        let &[id] = self.selection.as_slice() else { return by };
+        let Some(Element::Door(o) | Element::Window(o)) = m.elements.get(id) else { return by };
+        let Some(w) = m.wall(o.host).filter(|w| w.arc == 0.0) else { return by };
+        let u = (w.end - w.start).unit();
+        let moved = bimcraft_core::model::Opening { offset: o.offset + by.dot(u), ..o.clone() };
+        m.centred(&moved, SNAP / v.scale).map_or(by, |middle| by + u * (middle - moved.offset))
+    }
+
     fn click(&mut self, m: &Model, (level, key): (Id, Id), v: &View, at: (f32, f32), hovered: Option<Id>, mods: Modifiers) {
         match &self.tool {
             &Tool::Vertex { delete } if self.sketch.is_some() => self.vertex_click(None, v.mm(at), f64::from(PICK) / v.scale, delete),
@@ -1328,8 +1353,9 @@ impl BimApp {
             Tool::SketchLine(_) | Tool::SketchPick => self.tool = Tool::Modify,
             Tool::Modify => self.pick_up(hovered.into_iter().collect(), mods),
             Tool::Door | Tool::Window => {
-                let cat = if matches!(self.tool, Tool::Door) { "door" } else { "window" };
-                let p = self.typed(cat, json!({"at": point(round(v.mm(at))), "level": level}));
+                let door = matches!(self.tool, Tool::Door);
+                let cat = if door { "door" } else { "window" };
+                let p = centred_opening(m, v, self.typed(cat, json!({"at": point(round(v.mm(at))), "level": level})), door);
                 self.run(cat, p);
             }
             Tool::Room => {
@@ -2534,18 +2560,17 @@ impl BimApp {
         out
     }
 
-    /// A selected door's or window's two temporary dimensions: how far its middle stands from its wall's start, and from
-    /// its end. Typing one moves it along the wall; the other follows.
+    /// A selected door's or window's two temporary dimensions: how far its middle stands from the faces of the walls
+    /// meeting its wall either side of it, or its wall's ends. Typing one moves it along the wall; the other follows.
     fn opening_dimension(&mut self, ui: &mut Ui, m: &Model, v: &View, rect: Rect, id: Id, o: &bimcraft_core::model::Opening) {
-        let Some(w) = m.wall(o.host) else { return };
-        let length = Axis::of(w).length();
+        let Some((start, end)) = m.opening_span(o) else { return };
         let p = ui.painter_at(rect);
         for (n, (middle, text, _)) in opening_dimensions(&p, m, v, o).into_iter().enumerate() {
             let size = p.layout_no_wrap(text.clone(), FontId::proportional(12.0), pal().accent).size() + vec2(10.0, 4.0);
             let Some(typed) = self.dimension_number(ui, Rect::from_center_size(middle, size), (id, n), &text) else { continue };
             match typed.map(|t| (m.units.parse(&t), t)) {
-                Some((Some(len), _)) if (0.0..=length).contains(&len) => {
-                    let offset = if n == 0 { len } else { length - len };
+                Some((Some(len), _)) if (0.0..=end - start).contains(&len) => {
+                    let offset = if n == 0 { start + len } else { end - len };
                     if (offset - o.offset).abs() > 1e-6 {
                         self.run("modify", json!({"id": id, "offset": offset}));
                     }
@@ -2834,7 +2859,7 @@ impl BimApp {
             Tool::Door | Tool::Window => {
                 let door = matches!(self.tool, Tool::Door);
                 let params = self.typed(if door { "door" } else { "window" }, json!({"at": point(round(v.mm(q))), "level": level}));
-                if let Ok(e) = opening_of(m, &params, door) {
+                if let Ok(e) = opening_of(m, &centred_opening(m, v, params, door), door) {
                     sketched(&e);
                     if let Element::Door(o) | Element::Window(o) = &e {
                         for (at, text, _) in opening_dimensions(p, m, v, o) {
