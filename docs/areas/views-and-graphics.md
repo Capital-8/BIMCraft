@@ -131,8 +131,11 @@ along a line every `spacing` from its start, each turned along it (at most `MAX_
 Component does with a detail component. A view draws every member of every group and repeat in it each time, so
 `Model::check` caps what one view places: a group counts its type's members, a repeating detail its members once for each
 repeat, and `MAX_PLACED` (10,000) is the most in a view (measured with the probe `probe_the_cost_of_the_most_hatched_regions_a_view_may_place`,
-10,000 hatched regions take 0.11 s to draw at 3 m across and 0.5 s at 30 m across, 2.8 million primitives, the same in a dev
-build, where the core is built at opt-level 2, and in release; the 200,000 it once allowed took 6 s and 30 million primitives). A member note keeps its own angle under a pure mirror
+10,000 hatched regions take about 0.1 s to draw at 3 m across and 0.5 s at 30 m across, 2.8 million primitives, on a machine that
+is not busy, in a dev build (the core is built at opt-level 2 there) and in release alike, and up to 0.29 s and 1.10 s in the dev
+build on a busy one; the 200,000 it once allowed took 6 s and 30 million primitives). A placed member that is a huge circle costs
+more (the probe `probe_the_cost_of_placed_members_that_are_huge_circles`: 8,192 points each, about 0.2 ms to draw and 3 to 5 ms to
+rasterize, 8 ms on a busy machine), so a view at the cap of them can take a minute or more to render; the cap stays. A member note keeps its own angle under a pure mirror
 (it still reads the right way round) and turns with the group's angle. The file holds a group's members as elements, and
 `Model::read` leaves out of them what this build doesn't know, as it does for any element
 (`/detail_groups/<name>/members/<i>/element/...`). Deleting a line style that a filled region or a group's member is drawn in

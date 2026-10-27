@@ -323,6 +323,32 @@ fn probe_the_cost_of_the_most_hatched_regions_a_view_may_place() {
     }
 }
 
+/// What placed members that are huge circles cost a plan to draw and to rasterize, each: a curve is drawn through up to
+/// `MAX_DRAWN` points wherever it is, so `MAX_PLACED` of them take a long while to render, a figure `MAX_PLACED` and the docs
+/// quote (`cargo test -p bimcraft-core --lib probe_ -- --ignored --nocapture`).
+#[test]
+#[ignore = "a probe: cargo test -p bimcraft-core --lib probe_ -- --ignored --nocapture"]
+fn probe_the_cost_of_placed_members_that_are_huge_circles() {
+    for count in [100, 400, 800] {
+        let mut s = Session::new();
+        run(&mut s, "wall", json!({"points": [[0, 0], [8000, 0], [8000, 6000], [0, 6000]], "closed": true}));
+        let circle = id_of(&run(&mut s, "detail_line", json!({"centre": [0, 0], "radius": 5e8})));
+        run(&mut s, "create_group", json!({"ids": [circle], "name": "Huge"}));
+        let r = run(&mut s, "repeating_detail", json!({"type": "Huge", "start": [0, 0], "end": [count - 1, 0], "spacing": 1}));
+        let at = std::time::Instant::now();
+        let d = crate::render::plan(&s.model, 100000, 1600, 1000);
+        let drawn = at.elapsed();
+        let _ = crate::render::png(&d);
+        let took = at.elapsed();
+        eprintln!(
+            "{} placed huge circles: drawn in {drawn:?}, and rasterized {took:?}, {:?} each, {} prims",
+            r["count"],
+            took / count,
+            d.prims.len()
+        );
+    }
+}
+
 #[test]
 fn a_cloud_round_a_huge_circle_is_drawn_without_listing_its_scallops_first() {
     // A span asks for the scallops that fit it, and never more than the most a curve may be cut into (plus the one that
