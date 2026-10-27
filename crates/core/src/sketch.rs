@@ -571,7 +571,7 @@ pub fn check(who: &str, lines: &[SketchLine]) -> Result<(), String> {
 /// (what to call each kind), a shaft's boundary. Every list of rings an element holds is here: one left out is a list a
 /// command can put a bow tie in.
 fn rings_of(e: &Element) -> Option<Rings<'_>> {
-    let (boundary, holes): (&[P2], Vec<(&'static str, &[Vec<P2>])>) = match e {
+    let (boundary, holes): (&[P2], Holes) = match e {
         Element::Floor(f) => (&f.boundary, vec![("opening", &f.openings)]),
         Element::Ceiling(c) => (&c.boundary, vec![("opening", &c.openings)]),
         Element::Roof(r) if r.extrusion.is_none() => (&r.boundary, vec![("courtyard", &r.courtyards), ("opening", &r.openings)]),
@@ -581,11 +581,14 @@ fn rings_of(e: &Element) -> Option<Rings<'_>> {
     Some(Rings { boundary, holes })
 }
 
-/// An element's outline and its lists of holes, each with what its holes are called.
+/// Lists of holes, each with what its holes are called.
+type Holes<'a> = Vec<(&'static str, &'a [Vec<P2>])>;
+
+/// An element's outline and its lists of holes.
 #[derive(PartialEq)]
 struct Rings<'a> {
     boundary: &'a [P2],
-    holes: Vec<(&'static str, &'a [Vec<P2>])>,
+    holes: Holes<'a>,
 }
 
 impl Model {
