@@ -527,6 +527,7 @@ pub fn in_sketch(m: &Model, sk: Sketch<'_>, p: P2, reach: Reach, from: &[P2], sq
     if m.plan_level(sk.view).is_some() {
         let level = m.guid(m.plan_level(sk.view).unwrap_or(sk.view));
         let edge = |ring: &[P2]| geom::ring_edges(ring).map(|(a, b)| geom::dist_to_segment(p, a, b)).fold(f64::INFINITY, f64::min);
+        let edges = |outline: &[P2], holes: &[Vec<P2>]| holes.iter().map(|h| edge(h)).fold(edge(outline), f64::min);
         let mut near: Vec<(f64, Id)> = m
             .elements
             .iter()
@@ -536,8 +537,9 @@ pub fn in_sketch(m: &Model, sk: Sketch<'_>, p: P2, reach: Reach, from: &[P2], sq
                     let d = crate::walls::Axis::of(w).distance(p, 0.0);
                     (d <= window && m.cut_by(w, sk.view)).then_some((d, *id))
                 }
-                Element::Floor(f) if f.level == level => Some((edge(&f.boundary), *id)),
-                Element::Ceiling(c) if c.level == level => Some((edge(&c.boundary), *id)),
+                // Near an edge of its outline or of any opening: a big slab's hole in its middle is far from its outer edge.
+                Element::Floor(f) if f.level == level => Some((edges(&f.boundary, &f.openings), *id)),
+                Element::Ceiling(c) if c.level == level => Some((edges(&c.boundary, &c.openings), *id)),
                 _ => None,
             })
             .filter(|(d, _)| *d <= window)
@@ -1103,6 +1105,25 @@ mod tests {
         assert_eq!(sketch(100000).kind, Kind::Free);
         // The outline's corner, where the walls' faces meet, a wall thickness out from the centre lines.
         assert_eq!(sketch(view).kind, Kind::Endpoint);
+    }
+
+    #[test]
+    fn a_sketch_snaps_to_the_edges_of_an_opening_far_from_its_floors_outer_edge_too() {
+        // A 20 m floor with a metre-wide opening at its middle, the cursor 9.5 m from the nearest outer edge.
+        let mut s = Session::new();
+        s.script(
+            r#"floor {"boundary": [[0,0],[20000,0],[20000,20000],[0,20000]], "openings": [[[9500,9500],[10500,9500],[10500,10500],[9500,10500]]]}
+               ceiling {"boundary": [[0,0],[20000,0],[20000,20000],[0,20000]], "openings": [[[9500,9500],[10500,9500],[10500,10500],[9500,10500]]]}"#,
+        )
+        .unwrap();
+        let sketch = |p, o: &Snaps| in_sketch(&s.model, Sketch { view: 100000, lines: &[], editing: None }, p, REACH, &[], false, o);
+        let f = sketch(P2(9800.0, 10530.0), &Snaps::only(Kind::Nearest));
+        assert_eq!((f.kind, f.at), (Kind::Nearest, P2(9800.0, 10500.0)), "{f:?}");
+        let f = sketch(P2(10030.0, 10520.0), &Snaps::only(Kind::Midpoint));
+        assert_eq!((f.kind, f.at), (Kind::Midpoint, P2(10000.0, 10500.0)), "{f:?}");
+        // The opening's corner, as before, and the outer edge, near it.
+        assert_eq!(sketch(P2(10520.0, 10530.0), &Snaps::default()).kind, Kind::Endpoint);
+        assert_eq!(sketch(P2(5000.0, 30.0), &Snaps::only(Kind::Nearest)).kind, Kind::Nearest);
     }
 
     #[test]
