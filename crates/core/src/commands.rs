@@ -3167,10 +3167,10 @@ fn storm_size(_: &mut Session, p: &Value) -> R {
     if let Some(key) = ["outlet", "gutter", "length", "slope", "inside"].into_iter().find(|k| o.contains_key(*k) && !mine.contains(k)) {
         return Err(bad(c, format!("`{key}` does not apply to a {kind}")));
     }
-    if !absent(p.get("flow")) {
-        if let Some(key) = ["area", "rainfall"].into_iter().find(|k| o.contains_key(*k)) {
-            return Err(bad(c, format!("`{key}` and `flow` are two ways to give the flow: give one")));
-        }
+    if !absent(p.get("flow"))
+        && let Some(key) = ["area", "rainfall"].into_iter().find(|k| o.contains_key(*k))
+    {
+        return Err(bad(c, format!("`{key}` and `flow` are two ways to give the flow: give one")));
     }
     let outlet = Outlet::parse(choice(c, p, "outlet", &["edge", "funnel"], "edge")?).unwrap_or(Outlet::Edge);
     let flow = if absent(p.get("flow")) {
