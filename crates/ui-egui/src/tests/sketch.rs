@@ -265,3 +265,41 @@ fn with_an_offset_left_on_the_options_bar_a_rectangle_stays_joined_and_a_spline_
     let r = ids(&h, "region");
     assert_eq!(r.len(), 1, "{}", h.state().status.text);
 }
+
+#[test]
+fn leaving_the_sketchs_plan_takes_the_window_back_and_keeps_the_tool_it_was_drawing_with() {
+    let mut h = app(&format!("{BOX}\nsection {{\"start\": [-1000, 3000], \"end\": [9000, 3000]}}"));
+    let (plan, section) = (h.state().sheet, ids(&h, "section")[0]);
+    press(&mut h, "Annotate");
+    press(&mut h, "Filled Region");
+    press(&mut h, "Rectangle");
+    assert!(matches!(h.state().tool, Tool::SketchLine(_)));
+    // A tab or the Project Browser opens another view: the window goes back to the plan, and the sketch goes on with its tool.
+    h.state_mut().open_sheet(Sheet::Section(section));
+    h.run();
+    assert_eq!(h.state().sheet, plan, "back in the plan");
+    assert!(h.state().sketch.is_some());
+    assert!(matches!(h.state().tool, Tool::SketchLine(_)), "{:?}: the tool is the sketch's, not Modify", h.state().tool);
+    assert_eq!(h.state().shape(), crate::draw::Shape::Rectangle, "and so is the shape");
+}
+
+#[test]
+fn a_project_put_in_the_sessions_place_under_a_sketch_or_a_dialog_takes_both_with_it() {
+    let mut h = app(BOX);
+    press(&mut h, "Annotate");
+    press(&mut h, "Filled Region");
+    press(&mut h, "Rectangle");
+    click(&mut h, P2(1000.0, 1000.0));
+    click(&mut h, P2(3000.0, 3000.0));
+    let model = h.state().session.model.clone();
+    h.state_mut().fill_patterns_dialog = Some(crate::fillpatterns::FillPatternsDialog::new(&model));
+    h.run();
+    // New, through the session as a script or a test does (the control port turns an agent's New away): another project.
+    h.state_mut().session.execute("new", &json!({})).unwrap();
+    h.run();
+    assert!(h.state().sketch.is_none(), "the sketch was of the old project");
+    assert!(h.state().fill_patterns_dialog.is_none(), "so was the dialog's draft");
+    assert!(h.query_by_label("Finish Edit Mode").is_none());
+    assert_eq!(h.state().tool, Tool::Modify);
+    assert!(ids(&h, "region").is_empty());
+}

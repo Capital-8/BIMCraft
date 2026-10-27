@@ -192,8 +192,8 @@ impl Sketch {
         };
         for (i, l) in self.lines.iter().enumerate() {
             let (width, colour) = match () {
-                () if self.picked.contains(&i) || lit.contains(&i) => (3.0, pal().accent),
-                () if hovered == Some(i) => (3.0, pal().hover),
+                () if self.picked.contains(&i) || lit.contains(&i) => (3.0, canvas_pal().accent),
+                () if hovered == Some(i) => (3.0, canvas_pal().hover),
                 () if self.wrong.contains(&i) => (3.0, canvas_pal().error),
                 () => (2.0, SKETCH),
             };

@@ -21,7 +21,7 @@ use serde_json::json;
 
 use crate::canvas::{click_modifiers, color};
 use crate::icons::Icon;
-use crate::style::pal;
+use crate::style::{canvas_pal, pal};
 use crate::{BimApp, Status, Tool, icon_button};
 
 /// What a picture is of: the model, the camera, the elements tinted, whether the theme is dark, and whether the card drew it.
@@ -258,8 +258,8 @@ impl BimApp {
             hover.filter(|_| (modify || demolish || paint || unpaint) && o.drag.is_none()).and_then(|at| pick(&o.picker, at)).map(|h| h.id);
         let tints: Vec<(Id, Rgb)> = selection
             .iter()
-            .map(|id| (*id, rgb(pal().accent)))
-            .chain(hovered.filter(|id| !selection.contains(id)).map(|id| (id, rgb(pal().hover))))
+            .map(|id| (*id, rgb(canvas_pal().accent)))
+            .chain(hovered.filter(|id| !selection.contains(id)).map(|id| (id, rgb(canvas_pal().hover))))
             .collect();
         let dark = crate::style::canvas_dark();
         if !matches!(&o.shown, Some((m, c, t, k, g)) if Arc::ptr_eq(m, &model) && *c == cam && *t == tints && *k == dark && *g == mesh.is_some())

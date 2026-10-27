@@ -315,3 +315,55 @@ fn edit_type_keeps_annotation_boundary_styles_and_pattern_placement_and_imports_
     assert_eq!((p.target, p.lines.len()), (Target::Model, 2));
     assert_eq!(p.lines[1].spacing, 200.0);
 }
+
+#[test]
+fn a_pan_or_a_zoom_of_a_section_with_a_region_over_it_draws_the_picture_once_a_frame() {
+    let square = r#"[[[1000,1000],[4000,1000]],[[4000,1000],[4000,4000]],[[4000,4000],[1000,4000]],[[1000,4000],[1000,1000]]]"#;
+    let mut h = app(&format!(
+        "{BOX}\nsection {{\"start\": [-1000, 3000], \"end\": [9000, 3000]}}\nfilled_region_type {{\"name\": \"Tiles\", \"foreground\": \"Tile 300\"}}"
+    ));
+    let section = ids(&h, "section")[0];
+    let sketch: Value = serde_json::from_str(square).unwrap();
+    h.state_mut()
+        .session
+        .execute("filled_region", &json!({"view": section, "type": "Tiles", "line_style": null, "sketch": sketch}))
+        .unwrap();
+    browse(&mut h, "Section 1");
+    h.run();
+    let drawn = |h: &Harness<BimApp>| h.state().cut.pictures;
+    let still = drawn(&h);
+    assert!(still >= 1, "the section's picture was drawn");
+    h.run();
+    assert_eq!(drawn(&h), still, "a still window draws nothing again");
+    // The frames after a wheel notch, which egui spreads over several: a picture each, and one only.
+    let centre = pos2(640.0, 400.0);
+    h.hover_at(centre);
+    h.run();
+    h.event(Event::MouseWheel {
+        unit: MouseWheelUnit::Point,
+        delta: vec2(0.0, 120.0),
+        phase: TouchPhase::Move,
+        modifiers: Modifiers::NONE,
+    });
+    let mut zoom = Vec::new();
+    for _ in 0..10 {
+        let before = drawn(&h);
+        h.step();
+        zoom.push(drawn(&h) - before);
+    }
+    assert!(zoom.iter().filter(|n| **n > 0).count() >= 2, "the wheel zoomed over a few frames: {zoom:?}");
+    assert!(zoom.iter().all(|n| *n <= 1), "a frame of the zoom drew the picture {zoom:?} times");
+    // A pan, by the middle button, frame by frame.
+    h.run();
+    let to = centre + vec2(80.0, 40.0);
+    h.event(Event::PointerButton { pos: centre, button: PointerButton::Middle, pressed: true, modifiers: Modifiers::NONE });
+    h.step();
+    let mut pan = Vec::new();
+    for at in [centre + vec2(20.0, 10.0), centre + vec2(50.0, 25.0), to] {
+        let before = drawn(&h);
+        h.hover_at(at);
+        h.step();
+        pan.push(drawn(&h) - before);
+    }
+    assert!(pan.iter().all(|n| *n == 1), "each frame of the pan drew the picture once: {pan:?}");
+}

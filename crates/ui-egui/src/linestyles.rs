@@ -17,7 +17,7 @@ use serde_json::{Value, json};
 use crate::graphics::pen_name;
 use crate::lang::{t, tf};
 use crate::renames::{self, Row};
-use crate::style::pal;
+use crate::style::{ERROR_HEIGHT, boxed_text, dialog_room, dialog_row, pal};
 use crate::{BimApp, Status};
 
 /// The dialog's tabs.
@@ -156,13 +156,14 @@ fn sample(ui: &mut Ui, segments: &[Segment], width: f32, k: f32) {
     }
 }
 
-/// The styles: a row each, its name, pen, colour and pattern, and its Delete; then New Style.
-fn styles_tab(ui: &mut Ui, d: &mut LineStylesDialog) {
+/// The styles: a row each, its name, pen, colour and pattern, and its Delete; then New Style. The rows scroll in what the window
+/// has left over `below`, the dialog's own notes and buttons.
+fn styles_tab(ui: &mut Ui, d: &mut LineStylesDialog, below: f32) {
     ui.label(t("What detail lines draw in: a pen, a colour and a line pattern."));
     ui.add_space(4.0);
     let names: Vec<(usize, String)> = d.live().map(|(i, p)| (i, p.name.clone())).collect();
     let mut delete = None;
-    ScrollArea::vertical().max_height(420.0).show(ui, |ui| {
+    ScrollArea::vertical().max_height(dialog_room(ui, below + dialog_row(ui))).show(ui, |ui| {
         Grid::new("line-styles").striped(true).num_columns(5).show(ui, |ui| {
             for h in ["Name", "Line Weight", "Colour", "Pattern", ""] {
                 ui.label(RichText::new(t(h)).strong());
@@ -202,30 +203,36 @@ fn styles_tab(ui: &mut Ui, d: &mut LineStylesDialog) {
     }
 }
 
-/// The patterns: a row each, its name, a sample of it, Edit and Delete; under them, the segments of the one open.
-fn patterns_tab(ui: &mut Ui, d: &mut LineStylesDialog) {
+/// The patterns: a row each, its name, a sample of it, Edit and Delete; under them, the segments of the one open. The rows scroll
+/// in what the window has left over `below` (the dialog's own notes and buttons) and the row of New Pattern; when a pattern's
+/// segments are open, the list and they share it.
+fn patterns_tab(ui: &mut Ui, d: &mut LineStylesDialog, below: f32) {
     ui.label(t("Dashes, dots and spaces, mm on paper, so a pattern reads the same at any scale."));
     ui.add_space(4.0);
     let mut delete = None;
-    Grid::new("line-patterns").striped(true).num_columns(4).show(ui, |ui| {
-        for h in ["Name", "Sample", "", ""] {
-            ui.label(RichText::new(t(h)).strong());
-        }
-        ui.end_row();
-        for (i, p) in d.patterns.iter_mut().enumerate().filter(|(i, _)| !d.gone[*i]) {
-            let who = p.name.clone();
-            name_field(ui, &mut p.name, tf("{}: Name", &[&who]));
-            sample(ui, &p.segments, 160.0, 6.0);
-            let r = ui.selectable_label(d.open == Some(i), t("Edit"));
-            r.widget_info(|| WidgetInfo::selected(WidgetType::SelectableLabel, true, d.open == Some(i), tf("{}: Edit", &[&who])));
-            if r.clicked() {
-                d.open = Some(i);
-            }
-            if named_button(ui, t("Delete"), tf("{}: Delete", &[&who])) {
-                delete = Some(i);
+    let room = dialog_room(ui, below + dialog_row(ui));
+    let editor = if d.open.is_some_and(|i| d.patterns.get(i).is_some()) { room / 2.0 } else { 0.0 };
+    ScrollArea::vertical().id_salt("line-patterns-rows").max_height(room - editor).show(ui, |ui| {
+        Grid::new("line-patterns").striped(true).num_columns(4).show(ui, |ui| {
+            for h in ["Name", "Sample", "", ""] {
+                ui.label(RichText::new(t(h)).strong());
             }
             ui.end_row();
-        }
+            for (i, p) in d.patterns.iter_mut().enumerate().filter(|(i, _)| !d.gone[*i]) {
+                let who = p.name.clone();
+                name_field(ui, &mut p.name, tf("{}: Name", &[&who]));
+                sample(ui, &p.segments, 160.0, 6.0);
+                let r = ui.selectable_label(d.open == Some(i), t("Edit"));
+                r.widget_info(|| WidgetInfo::selected(WidgetType::SelectableLabel, true, d.open == Some(i), tf("{}: Edit", &[&who])));
+                if r.clicked() {
+                    d.open = Some(i);
+                }
+                if named_button(ui, t("Delete"), tf("{}: Delete", &[&who])) {
+                    delete = Some(i);
+                }
+                ui.end_row();
+            }
+        });
     });
     if let Some(i) = delete {
         d.gone[i] = true;
@@ -247,44 +254,48 @@ fn patterns_tab(ui: &mut Ui, d: &mut LineStylesDialog) {
     ui.separator();
     ui.label(RichText::new(tf("Segments of {}", &[&p.name])).strong());
     let mut remove = None;
-    Grid::new("line-pattern-segments").num_columns(3).show(ui, |ui| {
-        let last = p.segments.len();
-        for (i, s) in p.segments.iter_mut().enumerate() {
-            let n = (i + 1).to_string();
-            if i % 2 == 0 {
-                let dot = matches!(s, Segment::Dot);
-                let shown = t(if dot { "Dot" } else { "Dash" });
-                let label = tf("Segment {}", &[&n]);
-                let c = ComboBox::from_id_salt(("segment", i)).selected_text(shown).width(90.0).show_ui(ui, |ui| {
-                    if ui.selectable_label(!dot, t("Dash")).clicked() && dot {
-                        *s = Segment::Dash(3.0);
-                    }
-                    if ui.selectable_label(dot, t("Dot")).clicked() {
-                        *s = Segment::Dot;
-                    }
-                });
-                c.response.widget_info(|| WidgetInfo::labeled(WidgetType::ComboBox, true, label.clone()));
-            } else {
-                ui.label(t("Space"));
-            }
-            match s {
-                Segment::Dash(l) | Segment::Space(l) => {
-                    let label = tf("Segment {} Length", &[&n]);
-                    let r = ui.add(DragValue::new(l).range(MIN_SEGMENT..=MAX_SEGMENT).speed(0.05).suffix(" mm"));
-                    r.widget_info(|| WidgetInfo::labeled(WidgetType::DragValue, true, label.clone()));
+    // The separator and heading above and the Add Segment button below are not the rows' room.
+    let rows = (editor - 3.0 * dialog_row(ui)).max(60.0);
+    ScrollArea::vertical().id_salt("line-pattern-segment-rows").max_height(rows).show(ui, |ui| {
+        Grid::new("line-pattern-segments").num_columns(3).show(ui, |ui| {
+            let last = p.segments.len();
+            for (i, s) in p.segments.iter_mut().enumerate() {
+                let n = (i + 1).to_string();
+                if i % 2 == 0 {
+                    let dot = matches!(s, Segment::Dot);
+                    let shown = t(if dot { "Dot" } else { "Dash" });
+                    let label = tf("Segment {}", &[&n]);
+                    let c = ComboBox::from_id_salt(("segment", i)).selected_text(shown).width(90.0).show_ui(ui, |ui| {
+                        if ui.selectable_label(!dot, t("Dash")).clicked() && dot {
+                            *s = Segment::Dash(3.0);
+                        }
+                        if ui.selectable_label(dot, t("Dot")).clicked() {
+                            *s = Segment::Dot;
+                        }
+                    });
+                    c.response.widget_info(|| WidgetInfo::labeled(WidgetType::ComboBox, true, label.clone()));
+                } else {
+                    ui.label(t("Space"));
                 }
-                Segment::Dot => {
+                match s {
+                    Segment::Dash(l) | Segment::Space(l) => {
+                        let label = tf("Segment {} Length", &[&n]);
+                        let r = ui.add(DragValue::new(l).range(MIN_SEGMENT..=MAX_SEGMENT).speed(0.05).suffix(" mm"));
+                        r.widget_info(|| WidgetInfo::labeled(WidgetType::DragValue, true, label.clone()));
+                    }
+                    Segment::Dot => {
+                        ui.label("");
+                    }
+                }
+                // A pair goes together, so the pattern stays a mark then a space.
+                if i % 2 == 1 && last > 2 && named_button(ui, t("Delete"), tf("Segment {}: Delete", &[&n])) {
+                    remove = Some(i - 1);
+                } else {
                     ui.label("");
                 }
+                ui.end_row();
             }
-            // A pair goes together, so the pattern stays a mark then a space.
-            if i % 2 == 1 && last > 2 && named_button(ui, t("Delete"), tf("Segment {}: Delete", &[&n])) {
-                remove = Some(i - 1);
-            } else {
-                ui.label("");
-            }
-            ui.end_row();
-        }
+        });
     });
     if let Some(i) = remove {
         p.segments.drain(i..i + 2);
@@ -354,13 +365,16 @@ impl BimApp {
                 }
             });
             ui.separator();
+            // Under the tab: the error, then OK, Cancel and Apply. What the window has left over them is the tab's, so that on a
+            // small one the buttons stay in reach and the rows scroll.
+            let below = d.error.as_ref().map_or(0.0, |_| ERROR_HEIGHT + 6.0) + 8.0 + dialog_row(ui);
             if d.tab == 0 {
-                styles_tab(ui, &mut d);
+                styles_tab(ui, &mut d, below);
             } else {
-                patterns_tab(ui, &mut d);
+                patterns_tab(ui, &mut d, below);
             }
             if let Some(error) = &d.error {
-                ui.colored_label(pal().error, error);
+                boxed_text(ui, "line-styles-error", pal().error, error, ERROR_HEIGHT);
             }
             ui.add_space(8.0);
             ui.with_layout(Layout::right_to_left(Align::Min), |ui| {

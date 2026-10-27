@@ -367,8 +367,8 @@ pub(crate) fn paint(p: &Painter, at: Place, d: &Drawing, selected: &[Id], hovere
     let color = |c: Rgb| if at.paper { Color32::from_rgb(c.0, c.1, c.2) } else { color(c) };
     for (prim, owner) in d.prims.iter().zip(&d.owners) {
         let accent = match *owner {
-            Some(id) if selected.contains(&id) => Some((pal().accent, canvas_pal().select_fill)),
-            Some(id) if Some(id) == hovered => Some((pal().hover, canvas_pal().hover_fill)),
+            Some(id) if selected.contains(&id) => Some((canvas_pal().accent, canvas_pal().select_fill)),
+            Some(id) if Some(id) == hovered => Some((canvas_pal().hover, canvas_pal().hover_fill)),
             _ => None,
         };
         match prim {
@@ -1074,7 +1074,7 @@ impl BimApp {
             }
         }
         p.extend(crop);
-        let rooms = hovered.iter().map(|id| (*id, pal().hover)).chain(self.selection.iter().map(|id| (*id, pal().accent)));
+        let rooms = hovered.iter().map(|id| (*id, canvas_pal().hover)).chain(self.selection.iter().map(|id| (*id, canvas_pal().accent)));
         for (id, accent) in rooms {
             if let Some(Element::Room(r)) = model.elements.get(id)
                 && let Some(g) = model.room_region(r)

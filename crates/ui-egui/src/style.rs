@@ -11,7 +11,7 @@ use std::sync::Arc;
 use egui::epaint::text::VariationCoords;
 use egui::{
     Color32, Context, CornerRadius, FontData, FontDefinitions, FontFamily, FontId, Frame, Margin, Shadow, Stroke, TextStyle, Theme,
-    ThemePreference, vec2,
+    ThemePreference, Ui, vec2,
 };
 
 /// A theme's colours.
@@ -57,9 +57,9 @@ const fn rgb(c: u32) -> Color32 {
 
 pub const LIGHT: Palette = Palette {
     accent: rgb(0x2678DA),
-    accent_ink: rgb(0x2064B5),
-    hover: rgb(0x5B9BE6),
-    select_fill: rgb(0xD6E6FA),
+    accent_ink: rgb(0x1B5AA5),
+    hover: rgb(0x4A90E2),
+    select_fill: rgb(0xBFD8F7),
     hover_fill: rgb(0xE2EAF6),
     text: rgb(0x262A32),
     muted: rgb(0x636873),
@@ -203,6 +203,33 @@ pub fn card(outer: [bool; 4]) -> Frame {
 /// A card's shadow: close and soft.
 pub fn card_shadow() -> Shadow {
     Shadow { offset: [0, 2], blur: 8, spread: 0, color: pal().shadow }
+}
+
+/// What a dialog leaves of the window's height round its frame, so it never touches the window's edges.
+const DIALOG_MARGIN: f32 = 48.0;
+
+/// The tallest what a dialog says about why it was refused is, in the box that scrolls ([`boxed_text`]).
+pub const ERROR_HEIGHT: f32 = 40.0;
+
+/// The height a dialog gives a part of it that scrolls: the window's, less the dialog's frame, what `ui` has drawn so far, and
+/// `below`, what the dialog draws under that part (its notes, its row of buttons: [`dialog_row`] is one). Never under a few rows, so
+/// a window too small for a dialog scrolls it, and its buttons stay in reach.
+pub fn dialog_room(ui: &Ui, below: f32) -> f32 {
+    let used = ui.cursor().top() - ui.min_rect().top();
+    (ui.ctx().content_rect().height() - DIALOG_MARGIN - used - below).max(80.0)
+}
+
+/// The height of a row of buttons or fields in a dialog, with the gap above it.
+pub fn dialog_row(ui: &Ui) -> f32 {
+    ui.spacing().interact_size.y + ui.spacing().item_spacing.y
+}
+
+/// `text` in `colour` in a box at most `height` tall that scrolls, for what a dialog says in itself and whose length it cannot
+/// know (a core message, a long list of what an import left out).
+pub fn boxed_text(ui: &mut Ui, id: &str, colour: Color32, text: &str, height: f32) {
+    egui::ScrollArea::vertical().id_salt(id).max_height(height).show(ui, |ui| {
+        ui.colored_label(colour, text);
+    });
 }
 
 /// The lettering at a weight heavier than the body's: a title, a tab. The body's until the window has it.
@@ -358,6 +385,35 @@ mod tests {
                 }
             }
         }
+        assert!(fails.is_empty(), "{fails:#?}");
+    }
+
+    /// What the drawing paints on its paper, from the canvas's palette: what a click would pick (hover) and what is picked are
+    /// two colours a glance tells apart, in the fill and in the stroke (at least 35 apart in red, green and blue: the light
+    /// palette's were 13 apart in the fill), and each stroke holds 3:1 on the paper (WCAG 1.4.11).
+    #[test]
+    fn on_the_canvas_hover_and_selection_are_told_apart_and_their_strokes_hold_3_to_1_on_the_paper() {
+        let apart = |a: Color32, b: Color32| {
+            let d = |x: u8, y: u8| (f32::from(x) - f32::from(y)).powi(2);
+            (d(a.r(), b.r()) + d(a.g(), b.g()) + d(a.b(), b.b())).sqrt()
+        };
+        let mut fails = Vec::new();
+        for (canvas, p) in [("light", &LIGHT), ("dark", &DARK)] {
+            CANVAS_DARK.with(|d| d.set(canvas == "dark"));
+            let paper = crate::canvas::color(bimcraft_core::render::PAPER);
+            for (what, a, b) in [("fills", p.hover_fill, p.select_fill), ("strokes", p.hover, p.accent)] {
+                if apart(a, b) < 35.0 {
+                    fails.push(format!("{canvas} canvas: hover and selection {what} are {:.0} apart", apart(a, b)));
+                }
+            }
+            for (what, stroke) in [("hover", p.hover), ("selection", p.accent)] {
+                let c = contrast(stroke, paper);
+                if c < 3.0 {
+                    fails.push(format!("{canvas} canvas: the {what} stroke is {c:.2}:1 on the paper, under 3:1"));
+                }
+            }
+        }
+        CANVAS_DARK.with(|d| d.set(false));
         assert!(fails.is_empty(), "{fails:#?}");
     }
 }

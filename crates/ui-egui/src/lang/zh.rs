@@ -2018,6 +2018,8 @@ pub(super) const WORDS: &[[&str; 2]] = &[
     ["{} family {}: {}", "{} 线族 {}：{}"],
     ["Patterns from a PAT file, AutoCAD's and Revit's", "来自 PAT 文件的图案（AutoCAD 与 Revit 的）"],
     ["These patterns to a PAT file, but the solid ones", "将这些图案导出为 PAT 文件（实心除外）"],
+    ["{} pattern imported.", "已导入 {} 个图案。"],
+    ["{} pattern imported; left out: {}", "已导入 {} 个图案；未导入：{}"],
     ["{} patterns imported.", "已导入 {} 个图案。"],
     ["{} patterns imported; left out: {}", "已导入 {} 个图案；未导入：{}"],
     ["Fill patterns exported to {}", "填充图案已导出到 {}"],
