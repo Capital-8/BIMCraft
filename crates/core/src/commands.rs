@@ -7655,18 +7655,12 @@ fn filled_region(s: &mut Session, p: &Value) -> R {
     let profile = sketch::solve(&lines)
         .map_err(|e| bad(c, format!("the sketch doesn't close into loops: {}", sketch::say(&e, &sketch::namer(&lines)))))?;
     let view = view_param(c, m, p, true)?;
-    // Solid Black, in the project's language, or its first type.
+    // Solid Black, in the project's language or in English, or its first type.
     let type_name = match name_param(c, p, "type")? {
         Some(n) => n,
-        None => {
-            let solid = m.language.word(crate::fills::SOLID_BLACK);
-            m.region_types
-                .get_key_value(solid)
-                .map(|(k, _)| k)
-                .or(m.region_types.keys().next())
-                .cloned()
-                .ok_or_else(|| bad(c, "the project has no filled region type; make one first"))?
-        }
+        None => crate::fills::default_region_type(&m.region_types, m.language)
+            .cloned()
+            .ok_or_else(|| bad(c, "the project has no filled region type; make one first"))?,
     };
     // Thin Lines unless told; null (or "Invisible") draws none.
     let line_style = match p.get("line_style") {

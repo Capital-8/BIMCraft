@@ -2611,7 +2611,7 @@ impl Model {
     /// with, else the first by name.
     pub fn default_type(&self, category: &str) -> Option<&str> {
         let preferred = match crate::commands::category(category).as_str() {
-            "region" => self.language.word(fills::SOLID_BLACK),
+            "region" => return fills::default_region_type(&self.region_types, self.language).map(String::as_str),
             "wall" | "floor" => "Generic - 200mm",
             "door" => "Single 900 x 2100",
             "column" => "Rectangular 400 x 400",

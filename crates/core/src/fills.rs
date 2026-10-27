@@ -412,6 +412,12 @@ pub fn default_region_types() -> BTreeMap<String, FilledRegionType> {
     region_types(Language::English)
 }
 
+/// The type a filled region takes unless told another, of `types` in `language`: Solid Black by the name the language gives it,
+/// else by its English name (the types of a file from before they were named in a language), else the first.
+pub fn default_region_type(types: &BTreeMap<String, FilledRegionType>, language: Language) -> Option<&String> {
+    [language.word(SOLID_BLACK), SOLID_BLACK].into_iter().find_map(|n| types.get_key_value(n).map(|(k, _)| k)).or_else(|| types.keys().next())
+}
+
 pub fn is_default_region_types(t: &BTreeMap<String, FilledRegionType>) -> bool {
     *t == default_region_types()
 }
@@ -582,6 +588,37 @@ mod tests {
         run(&mut s, "filled_region", json!({"sketch": lines(0.0, 0.0, 1000.0), "type": "Earth"}));
         let e = s.execute("filled_region_type", &json!({"name": "Earth", "delete": true})).unwrap_err();
         assert!(e.contains("is of `Earth`"), "{e}");
+    }
+
+    #[test]
+    fn a_region_with_no_type_takes_solid_black_in_a_file_from_before_the_types_were_named_in_its_language() {
+        for (language, solid) in [(Language::Portuguese, "Preto sólido"), (Language::Spanish, "Negro sólido")] {
+            // A new project of the language names its types in it; a file written before the types were (format 5, with no
+            // line or fill styles) reads with the English ones, whatever its language.
+            let fresh = crate::model::Model::new_in("p", language);
+            assert!(fresh.region_types.contains_key(solid), "{solid}");
+            assert_eq!(default_region_type(&fresh.region_types, language).map(String::as_str), Some(solid));
+            let file = fresh.to_json().unwrap();
+            let mut v: Value = serde_json::from_str(&file).unwrap();
+            let keys = ["line_styles", "line_patterns", "fill_patterns", "region_types"];
+            for key in keys {
+                assert!(v.as_object_mut().and_then(|o| o.remove(key)).is_some(), "{key}");
+            }
+            v["format"] = json!(5);
+            let (m, left_out) = crate::model::Model::read(&v.to_string()).unwrap();
+            assert!(left_out.is_empty(), "{left_out:?}");
+            assert!(m.region_types.contains_key(SOLID_BLACK) && !m.region_types.contains_key(solid));
+            let mut s = Session::new();
+            s.reset(m, None);
+            let id = run(&mut s, "filled_region", json!({"sketch": lines(0.0, 0.0, 1000.0)}))["id"].as_u64().unwrap();
+            let Some(Element::FilledRegion(r)) = s.model.elements.get(id) else { panic!("no region") };
+            assert_eq!(r.type_name, SOLID_BLACK, "{language:?}");
+            assert_eq!(s.model.default_type("region"), Some(SOLID_BLACK));
+        }
+        // Without Solid Black by either name, the first.
+        let mut types = default_region_types();
+        types.remove(SOLID_BLACK);
+        assert_eq!(default_region_type(&types, Language::English).map(String::as_str), types.keys().next().map(String::as_str));
     }
 
     #[test]
