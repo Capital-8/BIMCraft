@@ -6,8 +6,10 @@
 //!   flush-tank WC is in it), `Q = 0.3 √ΣP` (L/s), never more than the sum of the fixtures' own
 //!   design flows; and `sum`, every fixture at once.
 //! - Head loss by the universal (Darcy-Weisbach) equation, the friction factor by Colebrook, water at 20 °C. A fitting counts as
-//!   the equivalent length of a maker's table of rigid PVC (PVC soldável, outside diameter DN, walls of NBR 5648). The maker, document
-//!   and page of that table are to be named here by whoever holds the catalogue, as `conduit/tables.rs` does for its own.
+//!   the equivalent length of Tigre's table "Perdas de carga localizadas - Sua equivalência em metros de tubulação de PVC rígido"
+//!   (Manual Técnico Tigre, 2021_10, Apêndices, page 199 of the PDF; DE 20 to 110 mm). `LE` takes its columns Joelho 90°, Joelho 45°,
+//!   Tê 90° passagem direita, Tê 90° saída de lado, Registro de gaveta aberto, Registro de globo aberto and Válvula de retenção tipo
+//!   leve; all 63 numbers were compared with the page by program, with no difference.
 //! - Speed 3 m/s at most (the standard lets a pipe go faster where water hammer and noise are shown not to matter); at least
 //!   10 kPa dynamic at a point of use.
 
