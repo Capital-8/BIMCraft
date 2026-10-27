@@ -22,7 +22,8 @@ any other, so a hand-edited file never leaves the menu with no choice picked). `
 `style::canvas_dark` controls canvas ink, fill and background conversion, and the section/3D image cache keys. Both software
 and GPU 3D painters use the canvas background. What the drawing paints in a palette (the fill of what is selected or hovered,
 a crop region's outline) takes it from `style::canvas_pal`, which follows the canvas, not `pal`, which follows the interface:
-`DARK`'s fills are near-black on a white drawing. A scan is dimmed only on a dark canvas (`canvas_dark`), so a dark interface
+`DARK`'s fills are near-black on a white drawing. A light canvas has a palette of its own (`CANVAS_LIGHT`: a deeper hover stroke and
+selection tint than the interface's `LIGHT`, which keeps the tints it always had, so the plain Light window's chrome is unchanged). A scan is dimmed only on a dark canvas (`canvas_dark`), so a dark interface
 around a light drawing leaves it as it is.
 
 New and Open (`BimApp::reopened`) keep the look: a new `BimApp` would run `style::apply` again, which sets the theme
@@ -209,8 +210,8 @@ in a language with long words can take a row or two more than it reserved: the d
 
 The window is on one project, the `uid` of the model it was built on (`BimApp::project`): a model of another `uid` in the session's place (a script's or an embedder's
 New or Open; the control port turns an agent's away, `bridge::REFUSED`) starts the window over (`reopened`), so a sketch or a dialog's draft of the old project cannot be
-finished into the new one. Hover and selection are drawn in the canvas's palette, not the interface's (`canvas_pal`): on a light canvas inside a dark interface the dark palette's
-blues were 2.5:1 on white; `style`'s tests keep the two told apart and 3:1 on the paper. A section's picture is drawn first and once a frame, and the drawing over it
+finished into the new one, and gives the new project a recovery copy of its own (`autosave_document`; the old project's copy stays until the new one is written, since nobody was asked about its changes). Hover and selection are drawn in the canvas's palette, not the interface's (`canvas_pal`): on a light canvas inside a dark interface the dark palette's
+blues were 2.5:1 on white; `style`'s tests keep the two told apart and 3:1 on the paper in `CANVAS_LIGHT`, and keep `LIGHT`'s tints as they were. A section's picture is drawn first and once a frame, and the drawing over it
 (`render::section_over`) takes its regions' ink from that picture (`Cut::draw`), so a pan or a zoom costs one picture; a hover that changes along with the view draws it a
 second time.
 
@@ -219,7 +220,7 @@ Trim/Extend (`forget_picks`), a sketch's picks are dropped when its lines change
 dropped when the shape changes. A fillet that does not fit keeps its two lines picked and spends the digits; a click that sizes the arc clears them. A number of the
 Options Bar that the shape in hand takes and cannot read (`options_error`) is red and makes nothing. A sketch keeps the lines as they were before each change
 (`Sketch::track`), so Ctrl+Z takes back a fillet, a trim or a grip move whole; it belongs to the plan it began in, and the window comes back to that plan until Finish or
-Cancel Edit Mode. egui draws a Dot (a dash of a hundredth of a millimetre) about a pixel and a half long, so it shows; `a_dot_of_a_hundredth_of_a_millimetre_still_draws_about_a_pixel_on_the_canvas`
+Cancel Edit Mode (`BimApp::sketch_plan`; a plan whose level was deleted is nowhere to come back to, and holds neither the window nor the tool: a view that cannot use the tool takes Modify, as for no sketch). egui draws a Dot (a dash of a hundredth of a millimetre) about a pixel and a half long, so it shows; `a_dot_of_a_hundredth_of_a_millimetre_still_draws_about_a_pixel_on_the_canvas`
 fails if that changes.
 
 Limits of the annotation stack, left as they are: the desktop has no group type rename, delete or edit (the `group_type` command does them), and a group taken
@@ -228,4 +229,6 @@ detail groups and repeating details are placed in plans only; Properties' Group 
 curves, not commands, so an agent draws the curves they would make. A sketch's Trim, Offset, Split, Fillet, Join, Vertex and Convert Spline (`sketch_modify` and its neighbours
 in `draw.rs`) act on the sketch the window holds with the core's `draw` and `curves` functions and are not commands, so the CLI and MCP cannot reach them. The Align tool on a
 pattern asks `Model::align_pattern` where the pattern then starts and sends the answer through `modify`, saying the core's refusal when it gives one. The patterns list is not virtualized: rows off the screen paint
-no swatch, but each still lays out its widgets. A sketch's Ctrl+Z takes back at most the last 100 changes (`sketch::UNDO`); an older one is forgotten.
+no swatch, but each still lays out its widgets. A sketch's Ctrl+Z takes back at most the last 100 changes (`sketch::UNDO`); an older one is forgotten. The window tells a replaced project by its `uid`, so
+`open` of the very file the window already holds, put in the session's place by a script or an embedder, is not noticed: the file keeps its `uid`, and a sketch or a dialog's draft survives it
+(the core's `Session` counts its replacements in a private `resets`; a public reader of that count would let the window see this one too).

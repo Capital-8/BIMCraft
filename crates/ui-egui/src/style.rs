@@ -57,9 +57,9 @@ const fn rgb(c: u32) -> Color32 {
 
 pub const LIGHT: Palette = Palette {
     accent: rgb(0x2678DA),
-    accent_ink: rgb(0x1B5AA5),
-    hover: rgb(0x4A90E2),
-    select_fill: rgb(0xBFD8F7),
+    accent_ink: rgb(0x2064B5),
+    hover: rgb(0x5B9BE6),
+    select_fill: rgb(0xD6E6FA),
     hover_fill: rgb(0xE2EAF6),
     text: rgb(0x262A32),
     muted: rgb(0x636873),
@@ -79,6 +79,10 @@ pub const LIGHT: Palette = Palette {
     app_bar_hover: rgb(0x4A4F59),
     shadow: Color32::from_rgba_premultiplied(9, 10, 12, 46),
 };
+
+/// The light palette where the drawing paints on its white paper: a deeper hover stroke (3.3:1 on the paper; the interface's is 2.9:1)
+/// and a deeper selection tint, so a glance tells hover from selection. The interface keeps [`LIGHT`]'s tints, the drawing alone has these.
+pub const CANVAS_LIGHT: Palette = Palette { hover: rgb(0x4A90E2), select_fill: rgb(0xBFD8F7), ..LIGHT };
 
 pub const DARK: Palette = Palette {
     accent: rgb(0x3A88EE),
@@ -160,9 +164,9 @@ pub fn canvas_dark() -> bool {
 }
 
 /// The colours the drawing paints with where they must read on its own ground (the fills of what is selected or hovered, a crop
-/// region's outline): the dark palette on a dark canvas, the light one on a light canvas, whatever the interface around it is.
+/// region's outline): the dark palette on a dark canvas, [`CANVAS_LIGHT`] on a light canvas, whatever the interface around it is.
 pub fn canvas_pal() -> &'static Palette {
-    if canvas_dark() { &DARK } else { &LIGHT }
+    if canvas_dark() { &DARK } else { &CANVAS_LIGHT }
 }
 
 /// How the window is drawn beyond the theme: what the user kept on the View tab and in Settings.
@@ -388,6 +392,13 @@ mod tests {
         assert!(fails.is_empty(), "{fails:#?}");
     }
 
+    /// The plain Light interface keeps the tints it has always had: the ribbon's pressed buttons, the open view tab and the selected
+    /// rows draw `select_fill`, `hover` and `accent_ink`. Only the drawing asked for deeper ones, and those are `CANVAS_LIGHT`'s.
+    #[test]
+    fn the_light_interface_keeps_its_tints() {
+        assert_eq!((LIGHT.accent_ink, LIGHT.hover, LIGHT.select_fill), (rgb(0x2064B5), rgb(0x5B9BE6), rgb(0xD6E6FA)));
+    }
+
     /// What the drawing paints on its paper, from the canvas's palette: what a click would pick (hover) and what is picked are
     /// two colours a glance tells apart, in the fill and in the stroke (at least 35 apart in red, green and blue: the light
     /// palette's were 13 apart in the fill), and each stroke holds 3:1 on the paper (WCAG 1.4.11).
@@ -398,8 +409,9 @@ mod tests {
             (d(a.r(), b.r()) + d(a.g(), b.g()) + d(a.b(), b.b())).sqrt()
         };
         let mut fails = Vec::new();
-        for (canvas, p) in [("light", &LIGHT), ("dark", &DARK)] {
+        for canvas in ["light", "dark"] {
             CANVAS_DARK.with(|d| d.set(canvas == "dark"));
+            let p = canvas_pal();
             let paper = crate::canvas::color(bimcraft_core::render::PAPER);
             for (what, a, b) in [("fills", p.hover_fill, p.select_fill), ("strokes", p.hover, p.accent)] {
                 if apart(a, b) < 35.0 {

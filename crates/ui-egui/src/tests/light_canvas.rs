@@ -3,7 +3,7 @@
 
 use super::*;
 use crate::settings::Settings;
-use crate::style::{DARK, LIGHT};
+use crate::style::{CANVAS_LIGHT, DARK, LIGHT};
 use egui::epaint::ColorMode;
 use egui::{Color32, ImageData, Shape, ThemePreference};
 use egui_kittest::kittest::NodeT;
@@ -97,8 +97,8 @@ fn a_selected_or_hovered_element_is_filled_in_the_canvas_palette_not_the_interfa
     h.hover_at(east);
     h.run();
     let (fills, _) = painted(&h);
-    assert!(fills.contains(&LIGHT.select_fill), "the selected wall: {fills:?}");
-    assert!(fills.contains(&LIGHT.hover_fill), "the hovered wall: {fills:?}");
+    assert!(fills.contains(&CANVAS_LIGHT.select_fill), "the selected wall: {fills:?}");
+    assert!(fills.contains(&CANVAS_LIGHT.hover_fill), "the hovered wall: {fills:?}");
 }
 
 /// The colours of every solid stroke the last frame painted: a path's, a segment's.
@@ -130,11 +130,14 @@ fn a_selected_or_hovered_element_is_stroked_in_the_canvas_palette_and_the_two_ar
     let ink = strokes(&h);
     // The dark palette's blues are for a dark ground: on white the hover one held 2.5:1.
     assert!(ink.contains(&LIGHT.accent), "the selected wall's outline: the light palette's accent");
-    assert!(ink.contains(&LIGHT.hover), "the hovered wall's outline: the light palette's hover");
+    assert!(ink.contains(&CANVAS_LIGHT.hover), "the hovered wall's outline: the canvas's own hover");
     let (fills, _) = painted(&h);
     let apart = |a: Color32, b: Color32| (i32::from(a.r()) - i32::from(b.r())).abs() + (i32::from(a.g()) - i32::from(b.g())).abs();
-    assert!(fills.contains(&LIGHT.select_fill) && fills.contains(&LIGHT.hover_fill));
-    assert!(apart(LIGHT.select_fill, LIGHT.hover_fill) > 30, "a glance tells the selected wall's tint from the hovered one's");
+    assert!(fills.contains(&CANVAS_LIGHT.select_fill) && fills.contains(&CANVAS_LIGHT.hover_fill));
+    assert!(
+        apart(CANVAS_LIGHT.select_fill, CANVAS_LIGHT.hover_fill) > 30,
+        "a glance tells the selected wall's tint from the hovered one's"
+    );
 }
 
 #[test]

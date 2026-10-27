@@ -424,13 +424,19 @@ impl BimApp {
             self.drawing.fillet.retain(|(l, _)| matches!(l, draw::Picked::Element(_)));
             self.drawing.trim = None;
         }
-        let plan = sk.plan;
-        // (A plan that is gone, its level deleted, is nowhere to go back to.)
-        let there = matches!(plan, Sheet::Plan(key) | Sheet::Ceiling(key) if self.session.model.plan_level(key).is_some());
-        if self.sheet != plan && there {
+        if let Some(plan) = self.sketch_plan()
+            && self.sheet != plan
+        {
             self.open_sheet(plan);
             self.status = Status { text: t("Finish or cancel the sketch before leaving its plan.").into(), error: true };
         }
+    }
+
+    /// The plan the sketch began in, while it is there to go back to (a plan whose level was deleted is nowhere, and holds neither the
+    /// window nor its tool).
+    pub(crate) fn sketch_plan(&self) -> Option<Sheet> {
+        let plan = self.sketch.as_ref()?.plan;
+        matches!(plan, Sheet::Plan(key) | Sheet::Ceiling(key) if self.session.model.plan_level(key).is_some()).then_some(plan)
     }
 
     /// Ctrl+Z while sketching: the last change to the lines taken back (a line drawn, a trim, a fillet, a grip moved).

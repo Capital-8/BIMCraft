@@ -27,6 +27,7 @@ type Shot = (Arc<Model>, Id, View, Vec<(Id, Rgb)>, bool);
 pub struct Cut {
     /// How many times a picture was drawn (by the core, for the drawing over it or for the texture): a tick of the test that a
     /// pan or a zoom draws it once.
+    #[cfg(test)]
     pub(crate) pictures: usize,
     image: Option<Image>,
     texture: Option<TextureHandle>,
@@ -37,7 +38,10 @@ impl Cut {
     /// The picture of section `id` through `pixels` with `tints` on the elements they name, into the texture, of `model`.
     #[allow(clippy::too_many_arguments)]
     fn draw(&mut self, ctx: &Context, model: &Arc<Model>, scene: &Scene, id: Id, pixels: View, tints: Vec<(Id, Rgb)>, dark: bool) {
-        self.pictures += 1;
+        #[cfg(test)]
+        {
+            self.pictures += 1;
+        }
         if let Some(image) = render::section_image(model, scene, id, pixels, &tints) {
             // A hidden-line picture, so dark as the drawing over it is.
             let (rgba, _) = image.rgba.as_chunks::<4>();
@@ -78,7 +82,10 @@ impl BimApp {
         let d = match &self.cut.image {
             Some(image) => render::section_over(&model, id, view, image),
             None => {
-                self.cut.pictures += 1;
+                #[cfg(test)]
+                {
+                    self.cut.pictures += 1;
+                }
                 render::section(&model, id, view)
             }
         };
