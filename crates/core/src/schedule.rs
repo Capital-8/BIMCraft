@@ -433,13 +433,30 @@ const OWN: &[(&str, usize, &[Own])] = &[
     ("level", 2, &[("Elevation", Kind::Length, From::Key("elevation")), NAME, COUNT]),
 ];
 
+/// The fields of what schedules aren't of: annotation, views and sheets, what Filter on a selection goes by
+/// (`selection::common`) and a tag may show. Each one's count is 0: no schedule shows them.
+const MORE: &[(&str, usize, &[Own])] = &[
+    ("line", 0, &[("Line Style", Kind::Text, From::Key("style")), LENGTH]),
+    ("region", 0, &[TYPE, ("Line Style", Kind::Text, From::Key("line_style"))]),
+    ("detailgroup", 0, &[TYPE]),
+    ("repeatingdetail", 0, &[TYPE, LENGTH]),
+    ("text", 0, &[("Text", Kind::Text, From::Key("text"))]),
+    ("tag", 0, &[("Text", Kind::Text, From::Key("text"))]),
+    ("dimension", 0, &[("Kind", Kind::Text, From::Key("kind"))]),
+    ("grid", 0, &[NAME]),
+    ("section", 0, &[NAME]),
+    ("elevation", 0, &[NAME]),
+    ("sheet", 0, &[("Number", Kind::Text, From::Key("number")), NAME]),
+    ("viewport", 0, &[("Title", Kind::Text, From::Key("title"))]),
+];
+
 /// The categories schedules are of, as `OWN` lists them.
 pub fn categories() -> Vec<&'static str> {
     OWN.iter().map(|(c, _, _)| *c).collect()
 }
 
 fn own(cat: &str) -> (usize, &'static [Own]) {
-    OWN.iter().find(|(c, _, _)| *c == cat).map_or((0, &[][..]), |(_, n, f)| (*n, *f))
+    OWN.iter().chain(MORE).find(|(c, _, _)| *c == cat).map_or((0, &[][..]), |(_, n, f)| (*n, *f))
 }
 
 /// Whether `name` is one of category `cat`'s own fields.

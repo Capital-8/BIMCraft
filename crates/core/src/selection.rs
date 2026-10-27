@@ -125,6 +125,24 @@ mod tests {
     }
 
     #[test]
+    fn annotation_has_its_parameters_too_a_line_its_line_style() {
+        let mut s = Session::new();
+        let line = |s: &mut Session, style: &str| {
+            s.execute("detail_line", &json!({"start": [0, 0], "end": [1000, 0], "style": style})).unwrap()["id"].as_u64().unwrap()
+        };
+        let lines = [line(&mut s, "Thin Lines"), line(&mut s, "Wide Lines"), line(&mut s, "Thin Lines")];
+        let fields: Vec<String> = common(&s.model, &lines).into_iter().map(|(n, _)| n).collect();
+        assert!(fields.iter().any(|f| f == "Line Style") && fields.iter().any(|f| f == "Length"), "{fields:?}");
+        assert_eq!(kept(&s.model, &lines, "Line Style", &["Wide Lines".into()]), [lines[1]]);
+        let sketch = json!([[[0, 0], [1000, 0]], [[1000, 0], [1000, 1000]], [[1000, 1000], [0, 0]]]);
+        let region = s.execute("filled_region", &json!({"sketch": sketch})).unwrap()["id"].as_u64().unwrap();
+        let g = groups(&s.model, &[region], "Type");
+        assert_eq!(g.iter().map(|g| g.value.as_str()).collect::<Vec<_>>(), ["Solid Black"]);
+        let text = s.execute("text", &json!({"at": [0, 0], "text": "hi"})).unwrap()["id"].as_u64().unwrap();
+        assert_eq!(groups(&s.model, &[text], "Text")[0].value, "hi");
+    }
+
+    #[test]
     fn the_command_lists_the_groups_and_what_is_kept_and_changes_nothing() {
         let (mut s, walls, door) = house();
         let (steps, before) = (s.history().len(), s.model.clone());

@@ -1484,6 +1484,7 @@ pub(super) const WORDS: &[[&str; 2]] = &[
     ["Inquiry", "查询"],
     ["Select by ID", "按 ID 选择"],
     ["Check All", "全部勾选"],
+    ["Title", "标题"],
     ["Filter Selection", "过滤选择集"],
     ["Check None", "全部不选"],
     ["Total selected items: {}", "选中图元总数：{}"],

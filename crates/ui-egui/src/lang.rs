@@ -2755,6 +2755,7 @@ const WORDS: &[[&str; 3]] = &[
     ["Inquiry", "Consulta", "Consulta"],
     ["Select by ID", "Selecionar por ID", "Seleccionar por ID"],
     ["Check All", "Marcar todos", "Seleccionar todo"],
+    ["Title", "Título", "Título"],
     ["Filter Selection", "Filtrar seleção", "Filtrar selección"],
     ["Check None", "Desmarcar todos", "No seleccionar ninguno"],
     ["Count", "Contagem", "Recuento"],
