@@ -929,6 +929,34 @@ mod tests {
     }
 
     #[test]
+    fn what_a_drawing_could_not_draw_is_in_the_notes_of_every_reply_that_draws_it() {
+        let mut s = Session::new();
+        run(&mut s, "wall", json!({"points": [[0, 0], [6000, 0]], "height": 3000}));
+        let elevation = run(&mut s, "elevation", json!({"facing": "south"}))["id"].as_u64().unwrap();
+        let Some(Element::Elevation(e)) = s.model.elements.get(elevation) else { panic!("no elevation") };
+        let start = e.start;
+        // 32 families of lines 4 mm apart: the view is 0.29 px to the mm, so they are 1.2 px apart, and far more than a view holds.
+        let families: Vec<Value> = (0..32).map(|i| json!({"angle": f64::from(i) * 5.6, "spacing": 4})).collect();
+        run(&mut s, "fill_pattern", json!({"name": "Mesh", "target": "model", "lines": families}));
+        run(&mut s, "filled_region_type", json!({"name": "Meshed", "foreground": "Mesh"}));
+        let sketch = lines(-200.0 - start.0, -600.0, 6600.0);
+        run(&mut s, "filled_region", json!({"view": elevation, "type": "Meshed", "line_style": null, "sketch": sketch}));
+        let said = |r: &Value| r["notes"][0].as_str().is_some_and(|n| n.contains("more lines"));
+        // The elevation's reply says it, as the plan's does.
+        let r = run(&mut s, "render", json!({"view": elevation, "width": 4096, "height": 2048}));
+        assert!(said(&r), "{r}");
+        // And the sheet's, as a PNG and as a PDF.
+        let sheet = run(&mut s, "sheet", json!({}))["id"].as_u64().unwrap();
+        run(&mut s, "place", json!({"sheet": "A101", "view": elevation, "at": [200, 150], "scale": 1}));
+        let r = run(&mut s, "render", json!({"view": sheet}));
+        assert!(said(&r), "the sheet as a PNG: {}", r["notes"]);
+        let path = std::env::temp_dir().join(format!("bimcraft-notes-{}.pdf", std::process::id()));
+        let r = run(&mut s, "render", json!({"view": sheet, "path": path}));
+        let _ = std::fs::remove_file(&path);
+        assert!(said(&r), "the sheet as a PDF: {}", r["notes"]);
+    }
+
+    #[test]
     fn a_dense_pattern_over_an_outline_of_thousands_of_corners_is_refused_in_time() {
         let p = FillPattern { target: Target::Model, lines: (0..32).map(|i| HatchLine::simple(f64::from(i) * 5.0, 20.0)).collect() };
         let ring: Vec<P2> = (0..10_000)

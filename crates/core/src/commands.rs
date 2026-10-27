@@ -1059,7 +1059,9 @@ pub static ALL: &[Command] = &[
         "{view?: a level's, section's or elevation's name or id, a sheet's number, or {3D}, ceiling?, width?, height?, path?, \
          azimuth?, elevation?} a level's floor plan (with `ceiling`, its reflected ceiling plan, looking up from 2300 mm), a section, an elevation, a sheet (at 5 px a paper mm), or the 3D view seen from \
          `azimuth` degrees round from east (counter-clockwise) and `elevation` degrees up (by default from the south-east, \
-         30° up), as a PNG (pngBase64), or written to a path: .png, .svg for a plan, .pdf for a sheet",
+         30° up), as a PNG (pngBase64), or written to a path: .png, .svg for a plan, .pdf for a sheet. A plan, section, \
+         elevation or sheet that could not draw something as asked (a fill pattern too dense for the view, more ink behind \
+         a region than is kept above it) says so in the reply's `notes`",
         render_view,
     ),
     edit(
@@ -2159,8 +2161,8 @@ fn render_view(s: &mut Session, p: &Value) -> R {
         _ => None,
     });
     if let Some((id, name, kind)) = cut {
-        let png = render::section_png(m, id, render::section_fit(m, id, w3, h3)).map_err(|e| bad(c, e))?;
-        return png_reply(c, p, png, json!({"width": w3, "height": h3, "view": name, "kind": kind}));
+        let (png, notes) = render::section_png_noted(m, id, render::section_fit(m, id, w3, h3)).map_err(|e| bad(c, e))?;
+        return png_reply(c, p, png, with_notes(json!({"width": w3, "height": h3, "view": name, "kind": kind}), &notes));
     }
     // A sheet, by number, name or id, unless a level is called that.
     let level = match view {
@@ -2177,10 +2179,10 @@ fn render_view(s: &mut Session, p: &Value) -> R {
     });
     if let Some((id, number, size)) = paper_of {
         let d = sheet::draw(m, id).ok_or_else(|| bad(c, format!("sheet {number} can't be drawn")))?;
-        let info = with_notes(json!({"width": d.view.width, "height": d.view.height, "view": number, "kind": "sheet"}), &d);
+        let info = with_notes(json!({"width": d.view.width, "height": d.view.height, "view": number, "kind": "sheet"}), &d.notes);
         if let Some(path) = string(c, p, "path")?.filter(|path| ext(Path::new(path)) == "pdf") {
             std::fs::write(&path, pdf::pdf(&[(&d, size)])).map_err(|e| bad(c, format!("{path}: {e}")))?;
-            return Ok(json!({"path": path, "view": info["view"], "kind": "sheet"}));
+            return Ok(with_notes(json!({"path": path, "view": info["view"], "kind": "sheet"}), &d.notes));
         }
         return png_reply(c, p, render::png(&d)?, info);
     }
@@ -2193,19 +2195,19 @@ fn render_view(s: &mut Session, p: &Value) -> R {
         Some(path) => {
             let path = PathBuf::from(path);
             write_plan(&d, &path)?;
-            Ok(with_notes(json!({"path": path, "width": w, "height": h, "view": level_name(m, level), "kind": kind}), &d))
+            Ok(with_notes(json!({"path": path, "width": w, "height": h, "view": level_name(m, level), "kind": kind}), &d.notes))
         }
         None => Ok(with_notes(
             json!({"pngBase64": base64(&render::png(&d)?), "width": w, "height": h, "view": level_name(m, level), "kind": kind}),
-            &d,
+            &d.notes,
         )),
     }
 }
 
 /// `reply` with what the drawing could not draw as asked (`notes`), when it could not.
-fn with_notes(mut reply: Value, d: &render::Drawing) -> Value {
-    if !d.notes.is_empty() {
-        reply["notes"] = json!(d.notes);
+fn with_notes(mut reply: Value, notes: &[String]) -> Value {
+    if !notes.is_empty() {
+        reply["notes"] = json!(notes);
     }
     reply
 }

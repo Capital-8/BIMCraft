@@ -1259,12 +1259,17 @@ fn section_in(m: &Model, id: impl Key, view: View, k: f32, n: f64, picture: Opti
 
 /// Section or elevation `id` through `view`, as a PNG: its picture, and its drawing over it.
 pub fn section_png(m: &Model, id: impl Key, view: View) -> Result<Vec<u8>, String> {
+    section_png_noted(m, id, view).map(|(png, _)| png)
+}
+
+/// [`section_png`], and what its drawing could not draw as asked ([`Drawing::notes`]).
+pub fn section_png_noted(m: &Model, id: impl Key, view: View) -> Result<(Vec<u8>, Vec<String>), String> {
     let image = section_image(m, &Scene::new(m), id, view, &[]).ok_or_else(|| format!("{id} is not a section or an elevation"))?;
     let size = tiny_skia::IntSize::from_wh(image.width, image.height).ok_or("the image size is out of range")?;
     let drawing = section_over(m, id, view, &image);
     let mut pm = Pixmap::from_vec(image.rgba, size).ok_or("the image size is out of range")?;
     paint(&mut pm, &drawing);
-    pm.encode_png().map_err(|e| e.to_string())
+    Ok((pm.encode_png().map_err(|e| e.to_string())?, drawing.notes))
 }
 
 /// The plan of `level` as `view` shows it: what a canvas that pans and zooms draws.
