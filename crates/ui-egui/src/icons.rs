@@ -117,6 +117,8 @@ icon_names! {
     LoadFamily,
     Link,
     PointCloud,
+    ImportCad,
+    LinkCad,
     Parameters,
     Measure,
     Snaps,
@@ -1011,6 +1013,21 @@ pub fn outlines(icon: Icon, compact: bool) -> Vec<Outline> {
                 g.circle((x, y), 1.2);
                 g.circle((24.0 - x, y), 1.2);
             }
+        }
+        Icon::ImportCad => {
+            // A drawing's sheet, its corner folded, with a plan's room and partition on it.
+            g.closed(&[(4.0, 3.0), (15.0, 3.0), (20.0, 8.0), (20.0, 21.0), (4.0, 21.0)]);
+            g.line(&[(15.0, 3.0), (15.0, 8.0), (20.0, 8.0)]);
+            g.closed(&[(7.0, 11.0), (17.0, 11.0), (17.0, 18.0), (7.0, 18.0)]);
+            g.line(&[(12.0, 11.0), (12.0, 14.5)]);
+        }
+        Icon::LinkCad => {
+            // The drawing's sheet, and a chain's link through its foot.
+            g.line(&[(17.0, 12.0), (17.0, 7.0), (13.0, 3.0), (4.0, 3.0), (4.0, 17.0), (6.5, 17.0)]);
+            g.line(&[(13.0, 3.0), (13.0, 7.0), (17.0, 7.0)]);
+            g.line(&[(7.0, 7.0), (13.0, 7.0)]);
+            g.line(&[(7.0, 10.0), (14.0, 10.0)]);
+            g.closed(&[(10.0, 14.0), (19.0, 14.0), (21.0, 16.5), (19.0, 19.0), (10.0, 19.0), (8.0, 16.5)]);
         }
         Icon::Parameters => {
             // Three independent parameter sliders with a consistent two-point knob radius.

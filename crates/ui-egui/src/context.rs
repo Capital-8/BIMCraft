@@ -29,6 +29,8 @@ pub(crate) enum Action {
     CreateGroup,
     Ungroup,
     Delete,
+    /// The linked CAD drawings selected, read again from their files.
+    ReloadCad,
 }
 
 impl Action {
@@ -49,6 +51,7 @@ impl Action {
             Action::CreateGroup => "Create Group",
             Action::Ungroup => "Ungroup",
             Action::Delete => "Delete",
+            Action::ReloadCad => "Reload CAD",
         }
     }
 
@@ -126,6 +129,9 @@ impl BimApp {
             if groupable || self.group_selected() {
                 groups.push(vec![Item::new(Action::CreateGroup, groupable), Item::new(Action::Ungroup, self.group_selected())]);
             }
+            if !self.linked_cads().is_empty() {
+                groups.push(vec![Item::new(Action::ReloadCad, true)]);
+            }
             // What the view on screen hides and paints.
             if self.graphic_view().is_some() {
                 groups.push(vec![
@@ -161,7 +167,29 @@ impl BimApp {
             Action::CreateGroup => self.create_group(),
             Action::Ungroup => self.ungroup(),
             Action::Delete => self.delete(),
+            Action::ReloadCad => {
+                for cad in self.linked_cads() {
+                    self.run("reload_cad", serde_json::json!({"cad": cad}));
+                }
+            }
         }
+    }
+
+    /// The linked CAD drawings the selection places, when all it holds are imports of linked drawings; else none.
+    fn linked_cads(&self) -> Vec<String> {
+        let m = &self.session.model;
+        let mut names = Vec::new();
+        for id in &self.selection {
+            match m.elements.get(*id) {
+                Some(bimcraft_core::model::Element::CadImport(ci)) if m.cads.get(&ci.cad).is_some_and(|c| c.path().is_some()) => {
+                    if !names.contains(&ci.cad) {
+                        names.push(ci.cad.clone());
+                    }
+                }
+                _ => return Vec::new(),
+            }
+        }
+        names
     }
 
     /// The menu on a view's `response`, doing what's chosen from it.
