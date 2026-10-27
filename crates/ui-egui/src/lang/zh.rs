@@ -2045,6 +2045,15 @@ pub(super) const WORDS: &[[&str; 2]] = &[
         "Only a polyline or a spline takes a vertex, and a line keeps its two ends.",
         "只有多段线和样条曲线可以添加顶点，直线保留其两个端点。",
     ],
+    ["Section Box", "剖面框"],
+    [
+        "Section Box: cut the 3D view to a box, each face moved by its grip in the view or typed here (BX)",
+        "剖面框：将三维视图剪切到一个框内，每个面可在视图中拖动其夹点移动，或在此输入 (BX)",
+    ],
+    ["North", "北"],
+    ["South", "南"],
+    ["East", "东"],
+    ["West", "西"],
 ];
 
 /// The core's words (`bimcraft_core::language`) that the window shows too, in English and Simplified Chinese: after [`WORDS`], which wins.

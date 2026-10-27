@@ -344,6 +344,7 @@ const PLAN: &[Row] = &[
     ("Extents", "id", "Associated Level", LevelName),
     ("Extents", "elevation", "Level Elevation", Length),
     ("Extents", "crop", "Crop View", Crop),
+    ("Extents", "section_box", "Section Box", Flag),
     ("View Range", "view_range.top", "Top", Limit("Level Above")),
     ("View Range", "view_range.cut", "Cut Plane", Length),
     ("View Range", "view_range.bottom", "Bottom", Length),
@@ -355,6 +356,7 @@ const PLAN_VIEW: &[Row] = &[
     ("Identity Data", "name", "View Name", Text),
     ("Extents", "level", "Associated Level", LevelName),
     ("Extents", "crop", "Crop View", Crop),
+    ("Extents", "section_box", "Section Box", Flag),
     ("View Range", "view_range.top", "Top", Limit("Level Above")),
     ("View Range", "view_range.cut", "Cut Plane", Length),
     ("View Range", "view_range.bottom", "Bottom", Length),
@@ -917,6 +919,9 @@ impl BimApp {
         // A view's graphics: the template it follows, and its overrides.
         let view_shown = matches!(subject, Subject::Plan(_) | Subject::CeilingPlan | Subject::View3D)
             || (matches!(subject, Subject::Element(_)) && self.selection.is_empty() && matches!(self.sheet, Sheet::Section(_)));
+        if subject == Subject::View3D {
+            self.section_box_properties(ui);
+        }
         if view_shown {
             self.graphics_properties(ui);
             self.phasing_properties(ui);

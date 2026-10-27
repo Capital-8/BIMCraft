@@ -254,7 +254,7 @@ impl<'a> Scene<'a> {
         let plan = m.plan_level(view).is_some();
         let level = m.guid(m.plan_level(view).unwrap_or(view));
         let above = m.level_above(level);
-        let cut = m.plan_range(view).cut;
+        let cut = m.shown_range(view).cut;
         // Whether the box round `pts` lies within `window` of `p`.
         let near = |pts: &[P2]| {
             let (lo, hi) = pts.iter().fold((P2(f64::INFINITY, f64::INFINITY), P2(f64::NEG_INFINITY, f64::NEG_INFINITY)), |(lo, hi), q| {
@@ -337,7 +337,7 @@ fn cloud_point(m: &Model, level: Id, p: P2, reach: f64, look: &Look) -> Option<P
     if m.clouds.is_empty() {
         return None;
     }
-    let cut = m.plan_range(level).cut;
+    let cut = m.shown_range(level).cut;
     m.elements
         .iter()
         .filter_map(|(&id, e)| match e {

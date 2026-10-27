@@ -31,6 +31,9 @@ pub use crate::ids::{Elements, FIRST_ID, Guid, Id, Key};
 /// A line in plan, through two points.
 pub type Line = (P2, P2);
 
+/// The least a section box runs on each axis, mm.
+pub const MIN_SECTION_BOX: f64 = 10.0;
+
 /// Height of a plan view's cut plane above its level, unless its view range says otherwise; rooms
 /// find the walls that bound them at this height.
 pub const CUT_HEIGHT: f64 = 1200.0;
@@ -98,11 +101,23 @@ pub struct Level {
     /// What its plan hides and how it draws the rest.
     #[serde(default, skip_serializing_if = "Graphics::is_default")]
     pub graphics: Graphics,
+    /// Whether its plan shows what the default 3D view's section box keeps, while it's on: the box's heights as its view
+    /// range and its sides as its crop.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub section_box: bool,
 }
 
 impl Level {
     pub fn new(name: impl Into<String>, elevation: f64) -> Level {
-        Level { name: name.into(), elevation, view_range: ViewRange::default(), crop: None, extent: None, graphics: Graphics::default() }
+        Level {
+            name: name.into(),
+            elevation,
+            view_range: ViewRange::default(),
+            crop: None,
+            extent: None,
+            graphics: Graphics::default(),
+            section_box: false,
+        }
     }
 }
 
@@ -710,6 +725,10 @@ pub struct PlanView {
     pub graphics: Graphics,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parent: Option<Guid>,
+    /// Whether its plan shows what the default 3D view's section box keeps, while it's on: the box's heights as its view
+    /// range and its sides as its crop.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub section_box: bool,
 }
 
 /// A 3D view, seen from `azimuth` degrees round from east (counter-clockwise) and `elevation`
@@ -723,6 +742,37 @@ pub struct View3D {
     /// What it hides and how it draws the rest.
     #[serde(default, skip_serializing_if = "Graphics::is_default")]
     pub graphics: Graphics,
+    /// The box it is cut to, as Revit's Section Box: kept, with its extents, when it's turned off.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub section_box: Option<SectionBox>,
+}
+
+impl View3D {
+    /// The default 3D view, `{3D}`, as it is before anything changes it.
+    pub fn default_view() -> View3D {
+        View3D {
+            name: "{3D}".into(),
+            azimuth: crate::view3d::AZIMUTH,
+            elevation: crate::view3d::ELEVATION,
+            graphics: Graphics::default(),
+            section_box: None,
+        }
+    }
+}
+
+/// A 3D view's section box: six planes square to the axes, from `min` to `max` (mm), keeping what lies between them while it
+/// is `on`.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SectionBox {
+    pub min: [f64; 3],
+    pub max: [f64; 3],
+    #[serde(default = "yes")]
+    pub on: bool,
+}
+
+fn yes() -> bool {
+    true
 }
 
 /// A door's or window's tag, showing its mark in the plan of its wall's level, `offset` mm from
@@ -2321,6 +2371,17 @@ impl Model {
         Some(self.level(id)?.extent.unwrap_or_else(|| self.model_extent()))
     }
 
+    /// The box round every solid and placed scan, its min and max corners; none in an empty project.
+    pub fn model_box(&self) -> Option<([f64; 3], [f64; 3])> {
+        let clouds = self.elements.iter().filter_map(|(id, _)| self.cloud_box(*id)).flat_map(|(lo, hi)| [lo, hi]);
+        let pts = crate::view3d::solids(self).iter().flat_map(|s| s.corners()).chain(clouds).collect::<Vec<_>>();
+        let first = *pts.first()?;
+        Some(
+            pts.iter()
+                .fold((first, first), |(lo, hi), p| (std::array::from_fn(|i| lo[i].min(p[i])), std::array::from_fn(|i| hi[i].max(p[i])))),
+        )
+    }
+
     /// What a level stretches over without an extent of its own: every solid and grid in plan,
     /// [`LEVEL_PAST`] past them (10 m each way of the origin in an empty project).
     pub fn model_extent(&self) -> [P2; 2] {
@@ -2507,6 +2568,37 @@ impl Model {
         let r = self.view_range_of(key);
         let above = || self.level_above(level).map_or(f64::INFINITY, |a| self.elevation(a));
         PlanRange { top: r.top.map_or_else(above, |t| z + t).max(z + r.cut), cut: z + r.cut, bottom: z + r.bottom, depth: z + r.depth }
+    }
+
+    /// The default 3D view's section box, its min and max corners, if plan `key` follows it (a dependent view as its parent
+    /// does) and it's on.
+    pub fn plan_box(&self, key: impl Key) -> Option<([f64; 3], [f64; 3])> {
+        let follows = match self.elements.get(self.plan_source(key)) {
+            Some(Element::Level(l)) => l.section_box,
+            Some(Element::PlanView(v)) => v.section_box,
+            _ => false,
+        };
+        follows.then(|| self.default_3d().and_then(|v| self.section_box(v))).flatten()
+    }
+
+    /// The heights plan `key` shows: its view range's, or, following the section box, from the box's bottom up to its top,
+    /// where it cuts. What a plan draws and snaps to; commands that ask what a plan cuts keep its own range.
+    pub fn shown_range(&self, key: impl Key) -> PlanRange {
+        match self.plan_box(key) {
+            Some((lo, hi)) => PlanRange { top: hi[2], cut: hi[2], bottom: lo[2], depth: lo[2] },
+            None => self.plan_range(key),
+        }
+    }
+
+    /// The crop plan `key` is drawn with: its own crop region, cut to the section box's sides when it follows the box.
+    pub fn shown_crop(&self, key: impl Key) -> Option<[P2; 2]> {
+        let own = self.crop_of(key);
+        let Some((lo, hi)) = self.plan_box(key) else { return own };
+        let (blo, bhi) = (P2(lo[0], lo[1]), P2(hi[0], hi[1]));
+        Some(match own {
+            Some([a, b]) => [P2(a.0.max(blo.0), a.1.max(blo.1)), P2(b.0.min(bhi.0), b.1.min(bhi.1))],
+            None => [blo, bhi],
+        })
     }
 
     /// The level plan `key` is of: a level itself, or the level of a plan view.
@@ -3124,6 +3216,14 @@ impl Model {
     pub fn sheet(&self, id: impl Key) -> Option<&Sheet> {
         match self.elements.get(id) {
             Some(Element::Sheet(s)) => Some(s),
+            _ => None,
+        }
+    }
+
+    /// The box 3D view `view` is cut to, its min and max corners: none when it has none, or it's turned off.
+    pub fn section_box(&self, view: impl Key) -> Option<([f64; 3], [f64; 3])> {
+        match self.elements.get(view) {
+            Some(Element::View3D(View3D { section_box: Some(b), .. })) if b.on => Some((b.min, b.max)),
             _ => None,
         }
     }
@@ -4206,6 +4306,9 @@ impl Model {
                         return Err(format!("{who}: elevation {}° isn't between -89° and 89°", v.elevation));
                     }
                     v.graphics.check(self).map_err(|e| format!("{who}: {e}"))?;
+                    if let Some(b) = &v.section_box {
+                        section_box_ok(&who, b)?;
+                    }
                     if !view_names.insert(v.name.as_str()) {
                         return Err(format!("{who}: another view is already named `{}`", v.name));
                     }
@@ -4501,6 +4604,20 @@ pub fn culprit(error: &str) -> Option<Id> {
 
 fn coord(what: &str, v: f64) -> Result<(), String> {
     if v.is_finite() && v.abs() <= MAX_COORD { Ok(()) } else { Err(format!("{what}: {v} is not a usable number")) }
+}
+
+/// Whether `b` is a section box: usable numbers, and some room between its planes on each axis.
+fn section_box_ok(who: &str, b: &SectionBox) -> Result<(), String> {
+    for (axis, (lo, hi)) in ["x", "y", "z"].into_iter().zip(b.min.into_iter().zip(b.max)) {
+        coord(&format!("{who} section box {axis}"), lo)?;
+        coord(&format!("{who} section box {axis}"), hi)?;
+        if hi - lo < MIN_SECTION_BOX {
+            return Err(format!(
+                "{who}: its section box runs from {lo} to {hi} mm in {axis}; its max is at least {MIN_SECTION_BOX} mm past its min on each axis"
+            ));
+        }
+    }
+    Ok(())
 }
 
 /// Whether `r` is a view range that makes sense: usable numbers running top ≥ cut plane ≥ bottom ≥

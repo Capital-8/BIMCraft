@@ -3376,6 +3376,17 @@ const WORDS: &[[&str; 3]] = &[
         "Só polilinhas e splines aceitam vértices, e uma linha mantém suas duas extremidades.",
         "Solo las polilíneas y las splines admiten vértices, y una línea conserva sus dos extremos.",
     ],
+    // The 3D view's section box.
+    ["Section Box", "Caixa de corte", "Caja de sección"],
+    [
+        "Section Box: cut the 3D view to a box, each face moved by its grip in the view or typed here (BX)",
+        "Caixa de corte: corta a vista 3D em uma caixa, cada face movida pela sua alça na vista ou digitada aqui (BX)",
+        "Caja de sección: recorta la vista 3D a una caja, cada cara movida por su pinzamiento en la vista o escrita aquí (BX)",
+    ],
+    ["North", "Norte", "Norte"],
+    ["South", "Sul", "Sur"],
+    ["East", "Leste", "Este"],
+    ["West", "Oeste", "Oeste"],
 ];
 
 #[cfg(test)]

@@ -5187,6 +5187,7 @@ mod patterns;
 mod planviews;
 mod purge;
 mod revit;
+mod section_box;
 mod sketch;
 mod smallest;
 mod start;
