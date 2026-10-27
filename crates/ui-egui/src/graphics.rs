@@ -8,7 +8,7 @@
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
-use bimcraft_core::graphics::{ANNOTATION, Applied, Dash, Detail, Graphics, Group, MODEL, Override, SCANS, Style, VisualStyle};
+use bimcraft_core::graphics::{ANNOTATION, Applied, Dash, Detail, Graphics, Group, IMPORTED, MODEL, Override, SCANS, Style, VisualStyle};
 use bimcraft_core::model::{Element, Guid, Id, Model};
 use bimcraft_core::pen::{MAX_PEN, Pen};
 use bimcraft_core::schedule;
@@ -26,7 +26,10 @@ use crate::style::pal;
 use crate::{BimApp, Sheet, Status};
 
 /// Visibility/Graphics' tabs.
-const TABS: [&str; 5] = ["Model Categories", "Annotation Categories", "Filters", "Elements", "Design Options"];
+const TABS: [&str; 6] = ["Model Categories", "Annotation Categories", "Imported Categories", "Filters", "Elements", "Design Options"];
+
+/// The Elements tab's place in [`TABS`].
+pub(crate) const ELEMENTS_TAB: usize = 4;
 
 /// What a list of the dialog has picked, to edit its override.
 #[derive(Clone, Debug, PartialEq)]
@@ -205,7 +208,7 @@ impl BimApp {
     pub(crate) fn override_selection(&mut self) {
         let m = Arc::clone(&self.session.model);
         let picked: Vec<Id> = self.drawn_selection(&m);
-        self.open_graphics(3);
+        self.open_graphics(ELEMENTS_TAB);
         if let Some(d) = &mut self.vg_dialog {
             d.pick = picked.first().map(|id| Pick::Element(*id));
             d.listed.extend(picked);
@@ -318,8 +321,13 @@ impl BimApp {
                     let names: Vec<&str> = if d.tab == 0 { MODEL.iter().chain(&SCANS).copied().collect() } else { ANNOTATION.to_vec() };
                     styles = categories(ui, &mut d, &model, &shown, &names, !followed.contains(&Group::Categories));
                 }
-                2 => filters(ui, &mut d, &model, &shown, !followed.contains(&Group::Filters)),
-                3 => elements(ui, &mut d, &model, &self.selection),
+                2 => {
+                    styles = categories(ui, &mut d, &model, &shown, &IMPORTED, !followed.contains(&Group::Categories));
+                    ui.add_space(6.0);
+                    imported_layers(ui, &mut d, &model);
+                }
+                3 => filters(ui, &mut d, &model, &shown, !followed.contains(&Group::Filters)),
+                ELEMENTS_TAB => elements(ui, &mut d, &model, &self.selection),
                 _ => design_options(ui, &mut d, &model, &shown, !followed.contains(&Group::Options)),
             }
             ui.add_space(6.0);
@@ -657,6 +665,7 @@ fn patch(d: &VgDialog, followed: &BTreeSet<Group>) -> Option<Value> {
     put("categories", json!(d.own.categories), json!(d.draft.categories), followed.contains(&Group::Categories));
     put("elements", json!(d.own.elements), json!(d.draft.elements), false);
     put("options", json!(d.own.options), json!(d.draft.options), followed.contains(&Group::Options));
+    put("layers", json!(d.own.layers), json!(d.draft.layers), false);
     if !followed.contains(&Group::Filters) && d.own.filters != d.draft.filters {
         p.insert("filters".into(), json!(d.draft.filters));
     }
@@ -1136,6 +1145,36 @@ fn elements(ui: &mut Ui, d: &mut VgDialog, model: &Model, selection: &[Id]) {
             d.draft.elements.remove(&model.guid(id));
             d.listed.remove(&id);
             d.pick = None;
+        }
+    });
+}
+
+/// The Imported Categories tab's layers: for each CAD drawing of the project, a check box for each of its layers, cleared
+/// for those this view hides (Revit's layers under each drawing's row).
+fn imported_layers(ui: &mut Ui, d: &mut VgDialog, model: &Model) {
+    if model.cads.is_empty() {
+        ui.label(RichText::new(t("The project has no CAD drawings: Insert > Import CAD brings one in.")).color(pal().muted));
+        return;
+    }
+    ui.label(RichText::new(t("Layers this view shows of each drawing")).strong());
+    ScrollArea::vertical().max_height(150.0).auto_shrink([false, true]).id_salt("vg-layers").show(ui, |ui| {
+        for (name, cad) in &model.cads {
+            egui::CollapsingHeader::new(name).id_salt(("vg-cad", name)).default_open(model.cads.len() == 1).show(ui, |ui| {
+                for layer in &cad.dxf().layers {
+                    let mut on = !d.draft.layers.get(name).is_some_and(|l| l.contains(&layer.name));
+                    if ui.checkbox(&mut on, &layer.name).changed() {
+                        let hidden = d.draft.layers.entry(name.clone()).or_default();
+                        if on {
+                            hidden.remove(&layer.name);
+                        } else {
+                            hidden.insert(layer.name.clone());
+                        }
+                        if hidden.is_empty() {
+                            d.draft.layers.remove(name);
+                        }
+                    }
+                }
+            });
         }
     });
 }

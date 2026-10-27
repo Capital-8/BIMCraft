@@ -25,6 +25,8 @@ pub(crate) enum Action {
     HideCategory,
     OverrideGraphics,
     Delete,
+    /// The linked CAD drawings selected, read again from their files.
+    ReloadCad,
 }
 
 impl Action {
@@ -42,6 +44,7 @@ impl Action {
             Action::HideCategory => "Hide Category",
             Action::OverrideGraphics => "Override Graphics",
             Action::Delete => "Delete",
+            Action::ReloadCad => "Reload CAD",
         }
     }
 
@@ -106,6 +109,9 @@ impl BimApp {
                 Item::new(Action::SelectAllInstances, true),
                 Item::new(Action::Delete, true),
             ]);
+            if !self.linked_cads().is_empty() {
+                groups.push(vec![Item::new(Action::ReloadCad, true)]);
+            }
             // What the view on screen hides and paints.
             if self.graphic_view().is_some() {
                 groups.push(vec![
@@ -138,7 +144,29 @@ impl BimApp {
             Action::HideCategory => self.hide_selection(true),
             Action::OverrideGraphics => self.override_selection(),
             Action::Delete => self.delete(),
+            Action::ReloadCad => {
+                for cad in self.linked_cads() {
+                    self.run("reload_cad", serde_json::json!({"cad": cad}));
+                }
+            }
         }
+    }
+
+    /// The linked CAD drawings the selection places, when all it holds are imports of linked drawings; else none.
+    fn linked_cads(&self) -> Vec<String> {
+        let m = &self.session.model;
+        let mut names = Vec::new();
+        for id in &self.selection {
+            match m.elements.get(*id) {
+                Some(bimcraft_core::model::Element::CadImport(ci)) if m.cads.get(&ci.cad).is_some_and(|c| c.path().is_some()) => {
+                    if !names.contains(&ci.cad) {
+                        names.push(ci.cad.clone());
+                    }
+                }
+                _ => return Vec::new(),
+            }
+        }
+        names
     }
 
     /// The menu on a view's `response`, doing what's chosen from it.

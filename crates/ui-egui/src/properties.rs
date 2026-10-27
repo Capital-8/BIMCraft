@@ -72,6 +72,8 @@ enum Kind {
     Justification,
     /// Whether a roof or a floor is there (a wall's attachment); read only.
     Attached,
+    /// One of these values (as the command names it, and its label): a drop-down, the first when it has none.
+    Choice(&'static [(&'static str, &'static str)]),
 }
 
 use Kind::*;
@@ -285,6 +287,19 @@ fn rows(category: &str) -> &'static [Row] {
             ("Other", "at", "Origin", Point),
             ("Other", "angle", "Angle", Number),
         ],
+        "cadimport" => &[
+            ("Constraints", "level", "Level", Level),
+            ("Identity Data", "cad", "Drawing", Shown),
+            ("Identity Data", "source", "File", Shown),
+            ("Identity Data", "linked", "Linked File", Shown),
+            ("Identity Data", "unit", "Units", Shown),
+            ("Identity Data", "entities", "Entities", Shown),
+            ("Identity Data", "layers", "Layers", Shown),
+            ("Other", "at", "Position", Point),
+            ("Other", "angle", "Angle", Number),
+            ("Other", "scale", "Scale", Number),
+            ("Graphics", "colors", "Colors", Choice(&[("preserve", "Preserve"), ("invert", "Invert"), ("black", "Black and White")])),
+        ],
         "link" => &[
             ("Identity Data", "name", "Name", Text),
             ("Identity Data", "path", "File", Shown),
@@ -393,6 +408,7 @@ fn icon(category: &str) -> Icon {
         "spot" => Icon::Spot,
         "view3d" => Icon::View3D,
         "pointcloud" => Icon::PointCloud,
+        "cadimport" => Icon::ImportCad,
         _ => Icon::Plan,
     }
 }
@@ -1115,6 +1131,15 @@ impl BimApp {
                             Justification => {
                                 let names = [("top", "Top"), ("centre", "Centre"), ("bottom", "Bottom")];
                                 let now = names.iter().find(|(k, _)| val.as_str() == Some(k)).map_or("Centre", |(_, n)| n);
+                                let options: Vec<String> = names.iter().map(|(_, n)| t(n).to_string()).collect();
+                                if let Some(j) = combo(ui, (id, key), name.id, t(now), &options)
+                                    && let Some((k, _)) = names.iter().find(|(_, n)| t(n) == j)
+                                {
+                                    change = Some((key, Ok(json!(k))));
+                                }
+                            }
+                            Choice(names) => {
+                                let now = names.iter().find(|(k, _)| val.as_str() == Some(k)).or(names.first()).map_or("", |(_, n)| n);
                                 let options: Vec<String> = names.iter().map(|(_, n)| t(n).to_string()).collect();
                                 if let Some(j) = combo(ui, (id, key), name.id, t(now), &options)
                                     && let Some((k, _)) = names.iter().find(|(_, n)| t(n) == j)
