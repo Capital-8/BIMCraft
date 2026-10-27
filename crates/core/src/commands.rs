@@ -3485,7 +3485,7 @@ fn read_dxf_file(s: &Session, path: &str) -> Result<Vec<u8>, String> {
         "dxf" => {}
         "dwg" => {
             return Err(format!(
-                "{}: DWG is a closed format BIMCraft doesn't read; save it as DXF (any version, ASCII) from the program that made it, \
+                "{}: BIMCraft doesn't read DWG yet; save it as DXF (any version, ASCII) from the program that made it, \
                  or convert it with a DWG to DXF converter, and bring that in",
                 full.display()
             ));
