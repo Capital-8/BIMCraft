@@ -22,7 +22,8 @@ any other, so a hand-edited file never leaves the menu with no choice picked). `
 `style::canvas_dark` controls canvas ink, fill and background conversion, and the section/3D image cache keys. Both software
 and GPU 3D painters use the canvas background. What the drawing paints in a palette (the fill of what is selected or hovered,
 a crop region's outline) takes it from `style::canvas_pal`, which follows the canvas, not `pal`, which follows the interface:
-`DARK`'s fills are near-black on a white drawing. A scan is dimmed only on a dark canvas (`canvas_dark`), so a dark interface
+`DARK`'s fills are near-black on a white drawing. A light canvas has a palette of its own (`CANVAS_LIGHT`: a deeper hover stroke and
+selection tint than the interface's `LIGHT`, which keeps the tints it always had, so the plain Light window's chrome is unchanged). A scan is dimmed only on a dark canvas (`canvas_dark`), so a dark interface
 around a light drawing leaves it as it is.
 
 New and Open (`BimApp::reopened`) keep the look: a new `BimApp` would run `style::apply` again, which sets the theme
@@ -210,7 +211,7 @@ in a language with long words can take a row or two more than it reserved: the d
 The window is on one project, the `uid` of the model it was built on (`BimApp::project`): a model of another `uid` in the session's place (a script's or an embedder's
 New or Open; the control port turns an agent's away, `bridge::REFUSED`) starts the window over (`reopened`), so a sketch or a dialog's draft of the old project cannot be
 finished into the new one. Hover and selection are drawn in the canvas's palette, not the interface's (`canvas_pal`): on a light canvas inside a dark interface the dark palette's
-blues were 2.5:1 on white; `style`'s tests keep the two told apart and 3:1 on the paper. A section's picture is drawn first and once a frame, and the drawing over it
+blues were 2.5:1 on white; `style`'s tests keep the two told apart and 3:1 on the paper in `CANVAS_LIGHT`, and keep `LIGHT`'s tints as they were. A section's picture is drawn first and once a frame, and the drawing over it
 (`render::section_over`) takes its regions' ink from that picture (`Cut::draw`), so a pan or a zoom costs one picture; a hover that changes along with the view draws it a
 second time.
 
