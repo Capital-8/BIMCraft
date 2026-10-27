@@ -2560,6 +2560,14 @@ impl Model {
         Some((min, max))
     }
 
+    /// Forget the layers each view and view template hides of the CAD drawings `gone`.
+    pub fn forget_cad_layers(&mut self, gone: &[String]) {
+        let views = self.elements.values_mut().filter_map(graphics::graphics_mut);
+        for g in views.chain(self.view_templates.values_mut().map(|t| &mut t.graphics)) {
+            g.layers.retain(|cad, _| !gone.contains(cad));
+        }
+    }
+
     /// The CAD drawings no import places.
     pub fn unplaced_cads(&self) -> Vec<String> {
         if self.cads.is_empty() {

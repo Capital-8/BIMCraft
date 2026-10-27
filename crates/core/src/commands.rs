@@ -1133,7 +1133,8 @@ pub static ALL: &[Command] = &[
         "{view?: a level's, section's or elevation's name or id, or {3D} (the lowest level's plan unless given), hide?: [category, \
          …], show?: […], hide_elements?: [id, …], show_elements?: […], categories?: {category: override | null, …}, elements?: \
          {id: override | null, …}, filters?: [{filter, hidden?, projection?, cut?, halftone?, transparency?}, …], phase?: name \
-         | null, phase_filter?: name | null, options?: {set: option | null, …}, template?: name | null, reset?: true} what a view hides and how it draws the rest, as Revit's Visibility/Graphics does; with \
+         | null, phase_filter?: name | null, options?: {set: option | null, …}, layers?: {drawing: [layer, …] | null, …}, template?: name | null, \
+         reset?: true} what a view hides and how it draws the rest, as Revit's Visibility/Graphics does; with \
          none of those, the view's settings as they are. A category hidden (walls, floors, rooms, grids, dimensions, levels…, \
          in any case, singular or plural) leaves all its elements out of that view, and `hide_elements` the elements given. An \
          override is {hidden?, projection?: style, cut?: style, halftone?, transparency?}, a style {color?, weight? (a pen, \
@@ -1147,7 +1148,8 @@ pub static ALL: &[Command] = &[
          beats the filters applied (the first prevailing), which beat the category's. `filters` replaces the list applied; \
          `template` follows a view template; `reset` takes away all of the view's own settings. `phase` is the phase the view \
          shows (the project's last unless it says) and `phase_filter` how it shows each status of what's in it (see `phase`); \
-         `options` chooses the design option it shows of a set (the set's primary unless it says; see `option`)",
+         `options` chooses the design option it shows of a set (the set's primary unless it says; see `option`); `layers` the \
+         layers of each CAD drawing it hides, by the drawing's name (null shows them all again)",
         view_graphics,
     ),
     edit(
@@ -2438,7 +2440,7 @@ fn merged_override(c: &str, what: &str, from: Option<&Override>, patch: &Value) 
 /// categories' and its filters' alone.
 fn edit_graphics(c: &str, m: &Model, p: &Value, g: &mut Graphics, of_template: bool) -> Result<(), String> {
     let given = |k: &str| !absent(p.get(k));
-    let views_own = ["hide_elements", "show_elements", "elements"];
+    let views_own = ["hide_elements", "show_elements", "elements", "layers"];
     if of_template && let Some(k) = views_own.iter().find(|k| given(k)).or(p.get("template").map(|_| &"template")) {
         return Err(bad(c, format!("`{k}` is a view's own; a template holds categories, filters, a phase and design options")));
     }
@@ -2508,6 +2510,36 @@ fn edit_graphics(c: &str, m: &Model, p: &Value, g: &mut Graphics, of_template: b
             }
         }
         Some(v) => return Err(bad(c, format!("`categories` is {{category: override}}, not {v}"))),
+        None => {}
+    }
+    match p.get("layers") {
+        v if absent(v) => {}
+        Some(Value::Object(o)) if o.len() <= crate::cad::MAX_CADS => {
+            for (cad, hidden) in o {
+                let Some(drawing) = m.cads.get(cad) else {
+                    return Err(bad(c, format!("`layers`: the project has no CAD drawing `{cad}` (see `elements` of category cadimport)")));
+                };
+                let names: BTreeSet<String> = match hidden {
+                    Value::Null => BTreeSet::new(),
+                    Value::Array(a) if a.len() <= crate::model::MAX_HIDDEN => a
+                        .iter()
+                        .map(|v| {
+                            v.as_str().map(str::to_string).ok_or_else(|| bad(c, format!("`layers`: `{cad}` lists layers by name, not {v}")))
+                        })
+                        .collect::<Result<_, _>>()?,
+                    v => return Err(bad(c, format!("`layers`: `{cad}` is a list of the layers to hide, or null, not {v}"))),
+                };
+                if let Some(n) = names.iter().find(|n| !drawing.dxf().layers.iter().any(|l| &l.name == *n)) {
+                    return Err(bad(c, format!("`layers`: `{cad}` has no layer `{n}` (see `cad_layers`)")));
+                }
+                if names.is_empty() {
+                    g.layers.remove(cad);
+                } else {
+                    g.layers.insert(cad.clone(), names);
+                }
+            }
+        }
+        Some(v) => return Err(bad(c, format!("`layers` is {{drawing: [layer, …] | null}}, not {v}"))),
         None => {}
     }
     match p.get("elements") {
@@ -2589,7 +2621,7 @@ fn edit_graphics(c: &str, m: &Model, p: &Value, g: &mut Graphics, of_template: b
 fn graphics_reply(g: &Graphics) -> Value {
     let hidden: Vec<&String> = g.categories.iter().filter(|(_, o)| o.hidden).map(|(k, _)| k).collect();
     json!({
-        "hidden": hidden, "categories": g.categories, "filters": g.filters,
+        "hidden": hidden, "categories": g.categories, "filters": g.filters, "layers": g.layers,
         "phase": g.phase, "phase_filter": g.phase_filter, "options": g.options,
         "scale": g.scale, "detail": g.detail, "visual_style": g.style,
     })

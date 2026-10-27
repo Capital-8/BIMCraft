@@ -799,7 +799,7 @@ impl Model {
 }
 
 /// Each name `g` holds of a library entry, given to `f` with what it names, which may put another in its place: a view's
-/// template, filters, phase, phase filter, design options and its linework's line styles.
+/// template, filters, phase, phase filter, design options, its linework's line styles and the CAD drawings whose layers it hides.
 fn graphics_refs(g: &mut crate::graphics::Graphics, f: &mut dyn FnMut(&Kind, &mut String)) {
     if let Some(t) = &mut g.template {
         f(&Kind::ViewTemplate, t);
@@ -824,6 +824,13 @@ fn graphics_refs(g: &mut crate::graphics::Graphics, f: &mut dyn FnMut(&Kind, &mu
             let option = option_ref(&set, &option, f);
             f(&Kind::OptionSet, &mut set);
             (set, option)
+        })
+        .collect();
+    g.layers = std::mem::take(&mut g.layers)
+        .into_iter()
+        .map(|(mut cad, layers)| {
+            f(&Kind::Cad, &mut cad);
+            (cad, layers)
         })
         .collect();
 }
