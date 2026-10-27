@@ -996,7 +996,7 @@ pub static ALL: &[Command] = &[
          Manning at two thirds full (n 0.011, the standard's Table 4) at its `slope` (a fraction, 0.005 at least): the inner \
          diameter it needs, and with `inside` (mm) whether that pipe carries the flow. Off the abacuses (more than 150 mm inside) \
          nothing is read. A key that does not apply to the `kind`, or `flow` together with `area`, is an error. It has no shortcut: \
-Revit has no tool for it. It changes nothing",
+         Revit has no tool for it. It changes nothing",
         storm_size,
     ),
     other(
