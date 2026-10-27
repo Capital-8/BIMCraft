@@ -305,6 +305,11 @@ impl Library {
         held.chain((self.lowest != 0).then_some(self.lowest)).min()
     }
 
+    /// Ids down to `id` are held by something, so new ones count down from below it.
+    fn hold(&mut self, id: Id) {
+        self.lowest = if self.lowest == 0 { id } else { self.lowest.min(id) };
+    }
+
     fn remove(&mut self, id: Id) {
         if let Some(e) = self.by_id.remove(&id) {
             self.by_name.remove(&(e.kind, e.name));
@@ -711,6 +716,11 @@ impl Model {
             self.library.entries().filter(|(_, e)| !keep.contains(&(e.kind.clone(), e.name.clone()))).map(|(id, _)| id).collect();
         for id in gone {
             self.library.remove(id);
+        }
+        // Parts hold their ids themselves, and a file from before a new kind of entry has them right below its entries: the
+        // new entries count down from below them too, so that none of the parts is given another id.
+        if let Some(lowest) = self.parts_now().into_iter().map(|(id, _)| id).filter(|id| !crate::ids::unset(id)).min() {
+            self.library.hold(lowest);
         }
         for (kind, name) in now {
             if self.library.id(&kind, &name).is_none() {
@@ -1378,6 +1388,9 @@ type {"category": "wall", "name": "Partition", "thickness": 110}"#,
         // entries; the parts (layers, forms, symbols) hold ids below the entries that were there.
         let mut m = (*s.model).clone();
         (m.line_patterns, m.line_styles, m.fill_patterns, m.region_types) = Default::default();
+        // The library made again, as 0.8 made it: the entries from the top down, and the parts right below the last of them.
+        m.library = Default::default();
+        m.forget_parts();
         m.sync_library();
         let mut file: Value = serde_json::from_str(&m.to_json().unwrap()).unwrap();
         for key in ["line_patterns", "line_styles", "fill_patterns", "region_types"] {
