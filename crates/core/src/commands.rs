@@ -967,7 +967,9 @@ pub static ALL: &[Command] = &[
          smaller than the fixtures' own). `role`: a `branch` (ramal de esgoto, Tabela 5, the default), a `main` (subcoletor or coletor \
          predial, Tabela 7 by `slope`, a fraction, 0.01 by default; DN 100 at least) or a `stack` (tubo de queda, Tabela 6 by the \
          building's `floors`, up to three or more). `min_dn` is the largest drain flowing into it. Replies with the `dn`, what it \
-         carries (`capacity`) and the `minimum_dn` the fixtures ask. A blank in the standard's table means not allowed: DN 100 and 150 \n         carry nothing in a building drain at 0.5 %, and a branch or a building drain never borrows the other's table. It has no \n         shortcut: Revit has no tool for it. It changes nothing",
+         carries (`capacity`) and the `minimum_dn` the fixtures ask. A blank in the standard's table means not allowed: DN 100 and 150 \
+         carry nothing in a building drain at 0.5 %, and a branch or a building drain never borrows the other's table. It has no \
+         shortcut: Revit has no tool for it. It changes nothing",
         drain_size,
     ),
     other(
