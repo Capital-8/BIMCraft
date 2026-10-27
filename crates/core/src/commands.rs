@@ -967,7 +967,7 @@ pub static ALL: &[Command] = &[
          smaller than the fixtures' own). `role`: a `branch` (ramal de esgoto, Tabela 5, the default), a `main` (subcoletor or coletor \
          predial, Tabela 7 by `slope`, a fraction, 0.01 by default; DN 100 at least) or a `stack` (tubo de queda, Tabela 6 by the \
          building's `floors`, up to three or more). `min_dn` is the largest drain flowing into it. Replies with the `dn`, what it \
-         carries (`capacity`) and the `minimum_dn` the fixtures ask. It changes nothing",
+         carries (`capacity`) and the `minimum_dn` the fixtures ask. A blank in the standard's table means not allowed: DN 100 and 150 \n         carry nothing in a building drain at 0.5 %, and a branch or a building drain never borrows the other's table. It has no \n         shortcut: Revit has no tool for it. It changes nothing",
         drain_size,
     ),
     other(
@@ -976,7 +976,7 @@ pub static ALL: &[Command] = &[
         "{units, wc?, stack_dn?, length?, trap_dn?} the DN of a sanitary vent as NBR 8160 asks, by the units (UHC) of what it vents: a \
          branch vent (ramal de ventilação, Tabela 8; `wc` says a water closet is in the group), or, with `stack_dn` (the DN of the \
          stack or drain served) and `length` (mm, from its foot to its open end), a vent stack or header (Tabela 2). `trap_dn` adds the \
-         longest run from a trap of that DN to its vent (Tabela 1). It changes nothing",
+         longest run from a trap of that DN to its vent (Tabela 1). It has no shortcut: Revit has no tool for it. It changes nothing",
         vent_size,
     ),
     other(
@@ -3082,7 +3082,16 @@ fn drain_size(_: &mut Session, p: &Value) -> R {
     let slope = within(c, p, "slope", 0.01, 0.0, 1.0)?;
     let floors = within(c, p, "floors", 1.0, 1.0, 1000.0)?.round() as u32;
     let dn = drainage::smallest(units, slope, role, floors, minimum)
-        .ok_or_else(|| bad(c, format!("{units} UHC is more than the standard's tables carry in one drain: split it")))?;
+        .ok_or_else(|| {
+        let most = drainage::DNS.iter().map(|dn| (*dn, drainage::capacity(*dn, slope, role, floors))).fold((0.0, 0.0), |a, b| if b.1 > a.1 { b } else { a });
+        bad(
+            c,
+            format!(
+                "{units} UHC is more than the tables of this version list for this role and slope: the most is DN {} at {} UHC (a blank in the standard's table means not allowed, not that the tables ended); split the load, or give a steeper `slope`",
+                most.0, most.1
+            ),
+        )
+    })?;
     Ok(json!({"units": units, "dn": dn, "capacity": drainage::capacity(dn, slope, role, floors), "minimum_dn": minimum}))
 }
 
