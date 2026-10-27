@@ -595,7 +595,12 @@ impl Model {
     /// changed is simple, as the sketch of its edges solves: no edge across another or along it, none ending part way along
     /// one, no spike or keyhole. `before` is the project the command began with. The engine asks it after every command
     /// that is an undo step, but Insert from File.
+    ///
+    /// An outline that was as bad before passes: a move, copy, rotation or mirror of a floor a file holds with a bow tie or an
+    /// edge half a millimetre long makes it no worse, so it is let by; what changes its shape, or makes a clean one bad, is
+    /// refused ([`congruent`]).
     pub fn check_edits(&self, before: &Model) -> Result<(), String> {
+        let mut work = 0;
         for (&id, e) in &self.elements {
             let Some(now) = rings_of(e) else { continue };
             if before.elements.get(id).and_then(rings_of).is_some_and(|was| was == now) {
@@ -615,6 +620,9 @@ impl Model {
                 if let Err(problems) = solve(&lines_of(ring, &[]))
                     && !problems.iter().all(|p| matches!(p, Problem::NoArea { .. }))
                 {
+                    if was_as_bad(before, id, e, ring, &mut work) {
+                        continue;
+                    }
                     let said = say(&problems, &|i| format!("edge {i}"));
                     // A command that made it has nothing to redraw (the engine takes it back): it is told to give a simple one.
                     return Err(match before.elements.get(id) {
@@ -630,6 +638,65 @@ impl Model {
         }
         Ok(())
     }
+}
+
+/// The most corners [`was_as_bad`] compares in one [`Model::check_edits`], so a file of thousands of bad outlines can't make a
+/// command take long: past it an outline is judged as the new one it is.
+const MAX_COMPARED: usize = 4_000_000;
+
+/// Whether `ring`, of `e` (element `id`), is a ring the project held before the command that is as bad as it is: the same
+/// element's, or (a copy is a new element) any of its kind's, moved, turned or mirrored.
+fn was_as_bad(before: &Model, id: crate::model::Id, e: &Element, ring: &[P2], work: &mut usize) -> bool {
+    let pool: Vec<&Element> = match before.elements.get(id) {
+        Some(was) if was.category() == e.category() => vec![was],
+        Some(_) => return false,
+        None => before.elements.values().filter(|was| was.category() == e.category()).collect(),
+    };
+    pool.into_iter()
+        .filter_map(rings_of)
+        .flat_map(|r| std::iter::once(r.boundary).chain(r.holes.into_iter().flat_map(|(_, list)| list.iter().map(Vec::as_slice))))
+        .any(|was| congruent(was, ring, work))
+}
+
+/// Whether ring `b` is ring `a` moved, turned or mirrored: the same edge lengths and turns between them, from some corner of
+/// it and either way round. `work` counts the corners compared and stops it at [`MAX_COMPARED`].
+fn congruent(a: &[P2], b: &[P2], work: &mut usize) -> bool {
+    let n = a.len();
+    if n != b.len() || n < 3 {
+        return false;
+    }
+    // Each corner's edge out of it: its length, and its dot and cross with the next edge.
+    let turns = |r: &[P2]| -> Vec<[f64; 3]> {
+        let edges: Vec<P2> = geom::ring_edges(r).map(|(p, q)| q - p).collect();
+        (0..n).map(|i| [edges[i].length(), edges[i].dot(edges[(i + 1) % n]), edges[i].cross(edges[(i + 1) % n])]).collect()
+    };
+    let backwards: Vec<P2> = b.iter().rev().copied().collect();
+    let (flat, ways) = (turns(a), [turns(b), turns(&backwards)]);
+    let mirror: Vec<[f64; 3]> = flat.iter().map(|&[l, d, c]| [l, d, -c]).collect();
+    // A hundredth of a millimetre, as the rounding of a copy to the micron and of a turn leave it, scaled for a product.
+    let near = |x: f64, y: f64, scale: f64| (x - y).abs() <= 0.01 * scale;
+    for ta in [&flat, &mirror] {
+        for tb in &ways {
+            for k in 0..n {
+                // The first corner is enough to rule most starts out.
+                if !near(ta[0][0], tb[k][0], 1.0) {
+                    continue;
+                }
+                *work += n;
+                if *work > MAX_COMPARED {
+                    return false;
+                }
+                let scale = |i: usize| ta[i][0] + ta[(i + 1) % n][0] + 1.0;
+                if (0..n).all(|i| {
+                    let j = (i + k) % n;
+                    near(ta[i][0], tb[j][0], 1.0) && near(ta[i][1], tb[j][1], scale(i)) && near(ta[i][2], tb[j][2], scale(i))
+                }) {
+                    return true;
+                }
+            }
+        }
+    }
+    false
 }
 
 /// Points made one where they lie within [`TOL`] of each other: a grid of cells [`TOL`] across holds them, so a point is
@@ -1302,6 +1369,56 @@ mod command_tests {
         run(&mut s, "modify", json!({"id": f, "boundary": [[0, 0], [5000, 0], [5000, 3000], [0, 3000]]}));
     }
 
+    /// A floor whose outline is `pts` as an old file would hold it: the check of the whole project lets it by.
+    fn old_floor(s: &mut Session, pts: &[[f64; 2]]) -> u64 {
+        let f = run(s, "floor", json!({"boundary": [[0, 0], [4000, 0], [4000, 4000], [0, 4000]]}))["id"].as_u64().unwrap();
+        if let Some(Element::Floor(fl)) = s.model_mut().elements.get_mut(f) {
+            fl.boundary = pts.iter().map(|p| crate::geom::P2(p[0], p[1])).collect();
+        }
+        assert_eq!(s.model.check(), Ok(()));
+        f
+    }
+
+    #[test]
+    fn an_outline_as_bad_as_it_was_moves_copies_turns_and_mirrors_and_one_made_worse_is_refused() {
+        let bad: [(&str, &[[f64; 2]]); 3] = [
+            ("a bow tie", &[[0.0, 0.0], [4000.0, 4000.0], [4000.0, 0.0], [0.0, 2000.0]]),
+            ("a half-millimetre edge", &[[0.0, 0.0], [4000.0, 0.0], [4000.0, 0.5], [4000.0, 4000.0], [0.0, 4000.0]]),
+            ("a closing point repeated", &[[0.0, 0.0], [4000.0, 0.0], [4000.0, 4000.0], [0.0, 4000.0], [0.0, 0.0]]),
+        ];
+        for (what, pts) in bad {
+            let mut s = Session::new();
+            let f = old_floor(&mut s, pts);
+            // A rigid motion leaves its defects what they were: moved, copied, turned (also as a copy), mirrored (also as a copy).
+            for (cmd, p) in [
+                ("move", json!({"ids": [f], "by": [1000, 500]})),
+                ("copy", json!({"ids": [f], "by": [1000, 500]})),
+                ("rotate", json!({"ids": [f], "about": [100, 200], "angle": 33})),
+                ("rotate", json!({"ids": [f], "about": [100, 200], "angle": 90, "copy": true})),
+                ("mirror", json!({"ids": [f], "axis": [[1000, 0], [1000, 1000]]})),
+                ("mirror", json!({"ids": [f], "axis": [[0, 0], [1000, 1000]], "copy": true})),
+            ] {
+                if let Err(e) = s.execute(cmd, &p) {
+                    panic!("{what}: {cmd} {p}: {e}");
+                }
+            }
+            // Its shape changed it is not: one corner moved, another outline, or a clean one made bad.
+            let mut other = pts.to_vec();
+            other[1][1] += 700.0;
+            for boundary in [json!(other), json!([[0, 0], [100, 4000], [4000, 0], [0, 2000]])] {
+                let e = s.execute("modify", &json!({"id": f, "boundary": boundary})).unwrap_err();
+                assert!(e.contains("isn't a simple outline"), "{what}: {e}");
+            }
+            let g = run(&mut s, "floor", json!({"boundary": [[0, 0], [4000, 0], [4000, 4000], [0, 4000]]}))["id"].clone();
+            let e = s.execute("modify", &json!({"id": g, "boundary": BOW})).unwrap_err();
+            assert!(e.contains("isn't a simple outline"), "{what}: {e}");
+            // Nor does a copy that stretches it pass as a copy: scaled by two it is a different outline.
+            let big: Vec<[f64; 2]> = pts.iter().map(|p| [p[0] * 2.0, p[1] * 2.0]).collect();
+            let e = s.execute("modify", &json!({"id": f, "boundary": big})).unwrap_err();
+            assert!(e.contains("isn't a simple outline"), "{what}: {e}");
+        }
+    }
+
     #[test]
     fn a_floor_over_boxes_of_walls_that_touch_at_a_corner_says_what_to_give_instead_of_naming_nothing() {
         let mut s = Session::new();
@@ -1384,9 +1501,11 @@ mod command_tests {
         std::fs::remove_file(&path).ok();
         opened.unwrap();
         inserted.unwrap();
-        // What leaves its outline alone goes through; what moves it is asked to redraw it, and a redrawn one is fine.
+        // What leaves its outline alone goes through, and so does a move, which makes it no worse; what changes its shape is
+        // asked to redraw it, and a redrawn one is fine.
         run(&mut t, "modify", json!({"id": f, "offset": 100}));
-        let e = t.execute("move", &json!({"ids": [f], "by": [1000, 0]})).unwrap_err();
+        run(&mut t, "move", json!({"ids": [f], "by": [1000, 0]}));
+        let e = t.execute("modify", &json!({"id": f, "boundary": [[0, 0], [100, 4000], [4000, 0], [0, 2000]]})).unwrap_err();
         assert!(e.contains("isn't a simple outline") && e.contains("edit_boundary"), "{e}");
         run(&mut t, "edit_boundary", json!({"id": f, "sketch": square(0.0, 0.0, 4000.0)}));
         run(&mut t, "move", json!({"ids": [f], "by": [1000, 0]}));
