@@ -602,8 +602,9 @@ impl Model {
     /// An outline that was as bad before passes: a move, copy, rotation or mirror of a floor a file holds with a bow tie or an
     /// edge half a millimetre long makes it no worse, so it is let by; what changes its shape, or makes a clean one bad, is
     /// refused ([`congruent`]). A copy is a new element, whose outline is judged against those of the elements the command was
-    /// given (`ids` or `id` in `params`): a new floor drawn like a bad one the file holds is no copy of it.
-    pub fn check_edits(&self, before: &Model, params: &serde_json::Value) -> Result<(), String> {
+    /// given (`ids` or `id` in `params`): a new floor drawn like a bad one the file holds is no copy of it. `command` is the
+    /// id of the command that ran, which words what to change.
+    pub fn check_edits(&self, before: &Model, command: &str, params: &serde_json::Value) -> Result<(), String> {
         let (mut work, given) = (0, given(before, params));
         for (&id, e) in &self.elements {
             let Some(now) = rings_of(e) else { continue };
@@ -633,10 +634,11 @@ impl Model {
                     // engine takes it back): it is told to give a simple one, or the mass it comes from to be redrawn.
                     let category = e.category();
                     return Err(match before.elements.get(id) {
-                        Some(_) if matches!(e, Element::Roof(_)) && name.starts_with("opening") => format!(
-                            "{category} {id}: its {name} isn't a simple outline: {said}; give `modify` a simple `openings`, or change the \
-                             dormer's width, height or position"
-                        ),
+                        Some(_) if matches!(e, Element::Roof(_)) && name.starts_with("opening") => {
+                            // A dormer's opening is its width, height and position; `modify` is given the openings.
+                            let dormer = if command == "dormer" { ", or change the dormer's width, height or position" } else { "" };
+                            format!("{category} {id}: its {name} isn't a simple outline: {said}; give `modify` a simple `openings`{dormer}")
+                        }
                         Some(_) => format!("{category} {id}: its {name} isn't a simple outline: {said}; redraw it with `edit_boundary`"),
                         None => format!("{category}: its {name} isn't a simple outline: {said}; {}", instead(self, e, params)),
                     });
@@ -1581,9 +1583,10 @@ mod command_tests {
         // `edit_boundary` redraws a roof's footprint and courtyards, not its openings.
         assert!(!e.contains("edit_boundary"), "{e}");
         assert_eq!(s.model, before);
-        // An opening given to `modify` is told to give a simple one; a courtyard still goes to `edit_boundary`.
+        // An opening given to `modify` is told to give a simple one, and nothing of a dormer, which wasn't made;
+        // a courtyard still goes to `edit_boundary`.
         let e = s.execute("modify", &json!({"id": roof["id"], "openings": [BOW_HOLE]})).unwrap_err();
-        assert!(e.contains("opening 0") && e.contains("`modify`") && !e.contains("edit_boundary"), "{e}");
+        assert!(e.contains("give `modify` a simple `openings`") && !e.contains("edit_boundary") && !e.contains("dormer"), "{e}");
         let e = s.execute("modify", &json!({"id": roof["id"], "courtyards": [BOW_HOLE]})).unwrap_err();
         assert!(e.contains("courtyard 0") && e.contains("edit_boundary"), "{e}");
     }
