@@ -35,8 +35,10 @@
 
     <StandardDirectory Id="ProgramFiles64Folder">
       <Directory Id="INSTALLFOLDER" Name="BIMCraft">
-        <!-- The fonts' licence, where NOTICE says it is: fonts\ibm-plex-sans\OFL.txt and fonts\ibm-plex-mono\OFL.txt. -->
-        <Directory Id="FontsFolder" Name="fonts">
+        <!-- The fonts' licence, where NOTICE says it is: fonts\ibm-plex-sans\OFL.txt and fonts\ibm-plex-mono\OFL.txt.
+             Not "FontsFolder": that Id is Windows Installer's own for the system Fonts folder, and a directory of that name
+             is taken for it, so the licences did not land in the folder that was chosen. -->
+        <Directory Id="LicenceFontsFolder" Name="fonts">
           <Directory Id="PlexSansFolder" Name="ibm-plex-sans" />
           <Directory Id="PlexMonoFolder" Name="ibm-plex-mono" />
         </Directory>
