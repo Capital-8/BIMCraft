@@ -1762,8 +1762,14 @@ fn hostile_params_never_panic_or_break_the_model() {
                         };
                         let p = small.as_ref().unwrap_or(p);
                         let mut s = base.clone();
-                        let _ = s.execute(cmd.id, p);
+                        let made = s.execute(cmd.id, p).is_ok();
                         assert_eq!(s.model.check(), Ok(()), "{} {p} left a broken model", cmd.id);
+                        // What a command made is drawn too (a revision cloud round a circle 1,000 km across once listed
+                        // 16 GB of scallops and aborted the plan, and nothing here drew it): the plans, as small as they
+                        // come; a failed command changed nothing.
+                        if made && cmd.id != "render" {
+                            draw_plans(&s.model);
+                        }
                     }
                 }
             });
@@ -1771,8 +1777,20 @@ fn hostile_params_never_panic_or_break_the_model() {
     });
     for (cmd, p) in &targeted {
         let mut s = base.clone();
-        let _ = s.execute(cmd, p);
+        let made = s.execute(cmd, p).is_ok();
         assert_eq!(s.model.check(), Ok(()), "{cmd} {p} left a broken model");
+        if made {
+            draw_plans(&s.model);
+        }
+    }
+}
+
+/// Draws every level's plan and ceiling plan at the smallest size, which builds all that they hold.
+fn draw_plans(m: &Model) {
+    for (level, _) in m.levels() {
+        for d in [crate::render::plan(m, level, 16, 16), crate::render::ceiling_plan(m, level, 16, 16)] {
+            let _ = crate::render::png(&d);
+        }
     }
 }
 

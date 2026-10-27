@@ -319,8 +319,12 @@ pub fn cloud(c: &Curve, arc: f64) -> Vec<crate::geom::P2> {
     stops.push(walk.total);
     let mut cuts = Vec::new();
     for span in stops.windows(2).filter(|s| s[1] - s[0] > 1e-9) {
-        let n = ((span[1] - span[0]) / arc).round().max(1.0) as usize;
+        let n = scallops(span[1] - span[0], arc, most);
         cuts.extend((0..n).map(|k| span[0] + (span[1] - span[0]) * k as f64 / n as f64));
+        // Past the most there is no use listing more: the even scalloping below takes over.
+        if cuts.len() > most {
+            break;
+        }
     }
     cuts.push(walk.total);
     if cuts.len() - 1 < min || cuts.len() - 1 > most {
@@ -340,6 +344,12 @@ pub fn cloud(c: &Curve, arc: f64) -> Vec<crate::geom::P2> {
         out.extend(pts.into_iter().skip(usize::from(k > 0)));
     }
     out
+}
+
+/// How many scallops of about `arc` fit a span of `len`: at least one, and at most `most + 1`, so a hostile length or arc never
+/// sizes the list of cuts (a circle 5e8 mm across asked 16.8 GB of them).
+pub(crate) fn scallops(len: f64, arc: f64, most: usize) -> usize {
+    ((len / arc).round().max(1.0) as usize).min(most + 1)
 }
 
 /// The points a scallop gets at least, so a cloud of more scallops than the points allow is made of fewer, larger ones.

@@ -234,6 +234,31 @@ fn a_revision_cloud_stays_within_the_points_a_curve_draws_and_never_cuts_a_corne
 }
 
 #[test]
+fn a_cloud_round_a_huge_circle_is_drawn_without_listing_its_scallops_first() {
+    // A span asks for the scallops that fit it, and never more than the most a curve may be cut into (plus the one that
+    // says it is too many), whatever its length: the count sizes an allocation.
+    let most = crate::curves::MAX_DRAWN / 8;
+    assert_eq!(crate::lines::scallops(1000.0, 300.0, most), 3);
+    assert_eq!(crate::lines::scallops(1.0, 300.0, most), 1);
+    assert_eq!(crate::lines::scallops(1e9, 1.5, most), most + 1);
+    assert_eq!(crate::lines::scallops(f64::MAX, 1.5, most), most + 1);
+    let mut s = Session::new();
+    run(&mut s, "wall", json!({"points": [[0, 0], [8000, 0], [8000, 6000], [0, 6000]], "closed": true}));
+    // Arcs 1.5 mm long round these circles are 84 million, 419 million and 2 billion scallops: listing their cuts took 670 MB,
+    // 3.4 GB and 16.8 GB, and the plan that drew them aborted.
+    for radius in [2e7, 1e8, 5e8] {
+        let id = id_of(&run(&mut s, "detail_line", json!({"centre": [0, 0], "radius": radius, "cloud": 1.5})));
+        let Some(Element::DetailLine(l)) = s.model.elements.get(id) else { panic!("no line") };
+        let n = l.drawn().len();
+        assert!(n > 8 && n <= crate::curves::MAX_DRAWN, "{radius}: {n} points");
+    }
+    // An open line from -5e8 to 5e8 is one span, as long as the circles' way round.
+    run(&mut s, "detail_line", json!({"start": [-5e8, 0], "end": [5e8, 0], "cloud": 1.5}));
+    let png = run(&mut s, "render", json!({"view": 100000, "width": 64, "height": 64}));
+    assert!(png["pngBase64"].as_str().is_some_and(|p| !p.is_empty()), "{png}");
+}
+
+#[test]
 fn a_regions_or_floors_pattern_origin_and_angle_show_in_elements_and_align_moves_the_origin() {
     let mut s = Session::new();
     run(&mut s, "wall", json!({"points": [[0, 0], [4000, 0], [4000, 4000], [0, 4000]], "closed": true}));
