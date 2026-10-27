@@ -3229,16 +3229,13 @@ fn hydrant_size(_: &mut Session, p: &Value) -> R {
         }
     } else {
         let key = choice(c, p, "type", TYPE_KEYS, "")?;
-        if let (Some((t, _)), Some(row)) = (system, hydrant::kind(key)) {
-            if row.1 != t {
-                return Err(bad(
-                    c,
-                    format!(
-                        "`type` {key} contradicts `column` {} and `area`, which give type {t}: give one, or make them agree",
-                        p["column"]
-                    ),
-                ));
-            }
+        if let (Some((t, _)), Some(row)) = (system, hydrant::kind(key))
+            && row.1 != t
+        {
+            return Err(bad(
+                c,
+                format!("`type` {key} contradicts `column` {} and `area`, which give type {t}: give one, or make them agree", p["column"]),
+            ));
         }
         Some(key.to_string())
     };
