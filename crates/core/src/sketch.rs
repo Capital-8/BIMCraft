@@ -626,7 +626,9 @@ impl Model {
                     let said = say(&problems, &|i| format!("edge {i}"));
                     // A command that made it has nothing to redraw (the engine takes it back): it is told to give a simple one.
                     return Err(match before.elements.get(id) {
-                        Some(_) => format!("{} {id}: its {name} isn't a simple outline: {said}; redraw it with `edit_boundary`", e.category()),
+                        Some(_) => {
+                            format!("{} {id}: its {name} isn't a simple outline: {said}; redraw it with `edit_boundary`", e.category())
+                        }
                         None => format!(
                             "{}: its {name} isn't a simple outline: {said}; give a simple `boundary` or `sketch` \
                              (walls, or boxes of walls, that touch at a corner enclose no simple outline of their own)",

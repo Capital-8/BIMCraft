@@ -411,7 +411,10 @@ pub fn default_region_types() -> BTreeMap<String, FilledRegionType> {
 /// The type a filled region takes unless told another, of `types` in `language`: Solid Black by the name the language gives it,
 /// else by its English name (the types of a file from before they were named in a language), else the first.
 pub fn default_region_type(types: &BTreeMap<String, FilledRegionType>, language: Language) -> Option<&String> {
-    [language.word(SOLID_BLACK), SOLID_BLACK].into_iter().find_map(|n| types.get_key_value(n).map(|(k, _)| k)).or_else(|| types.keys().next())
+    [language.word(SOLID_BLACK), SOLID_BLACK]
+        .into_iter()
+        .find_map(|n| types.get_key_value(n).map(|(k, _)| k))
+        .or_else(|| types.keys().next())
 }
 
 #[cfg(test)]

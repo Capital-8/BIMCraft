@@ -313,7 +313,11 @@ fn a_picture_with_more_runs_of_ink_than_are_kept_says_so_in_the_drawings_notes()
     let mut s = Session::new();
     let (id, start) = south_elevation(&mut s);
     blue(&mut s, false);
-    run(&mut s, "filled_region", json!({"view": id, "type": "Blue", "line_style": null, "sketch": square(-200.0 - start.0, -600.0, 6.6e3)}));
+    run(
+        &mut s,
+        "filled_region",
+        json!({"view": id, "type": "Blue", "line_style": null, "sketch": square(-200.0 - start.0, -600.0, 6.6e3)}),
+    );
     let view = render::section_fit(&s.model, id, 800, 600);
     assert!(render::section(&s.model, id, view).notes.is_empty(), "the wall's runs are few");
     // Kept to two, the wall's edges lose their ink under the region, and the drawing says so.

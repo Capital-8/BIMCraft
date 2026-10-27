@@ -257,14 +257,20 @@ fn a_revision_cloud_stays_within_the_points_a_curve_draws_and_never_cuts_a_corne
 #[test]
 #[ignore = "a probe: cargo test -p bimcraft-core --lib probe_ -- --ignored --nocapture"]
 fn probe_the_cost_of_the_most_hatched_regions_a_view_may_place() {
-    for (side, of) in [(300.0, "Diagonal Up"), (3000.0, "Diagonal Up"), (30000.0, "Diagonal Up"), (3000.0, "Crosshatch"), (3000.0, "Brick")] {
+    for (side, of) in [(300.0, "Diagonal Up"), (3000.0, "Diagonal Up"), (30000.0, "Diagonal Up"), (3000.0, "Crosshatch"), (3000.0, "Brick")]
+    {
         let mut s = Session::new();
         run(&mut s, "wall", json!({"points": [[0, 0], [8000, 0], [8000, 6000], [0, 6000]], "closed": true}));
         // Five regions to a group, repeated 2,000 times (the most a repeat takes): 10,000 placed.
         let regions: Vec<Id> = (0..5)
             .map(|k| {
                 let at = f64::from(k) * 50.0;
-                let sketch = json!([[[at, 0], [at + side, 0]], [[at + side, 0], [at + side, side]], [[at + side, side], [at, side]], [[at, side], [at, 0]]]);
+                let sketch = json!([
+                    [[at, 0], [at + side, 0]],
+                    [[at + side, 0], [at + side, side]],
+                    [[at + side, side], [at, side]],
+                    [[at, side], [at, 0]]
+                ]);
                 id_of(&run(&mut s, "filled_region", json!({"sketch": sketch, "type": of, "line_style": null})))
             })
             .collect();
