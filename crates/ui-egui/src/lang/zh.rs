@@ -1483,6 +1483,14 @@ pub(super) const WORDS: &[[&str; 2]] = &[
     ["{}: `{}` isn't a number", "{}：`{}` 不是数字"],
     ["Inquiry", "查询"],
     ["Select by ID", "按 ID 选择"],
+    ["Check All", "全部勾选"],
+    ["Filter Selection", "过滤选择集"],
+    ["Check None", "全部不选"],
+    ["Total selected items: {}", "选中图元总数：{}"],
+    [
+        "Filter: keep some of the selection, by category or by the values of a parameter they all have",
+        "过滤器：按类别或按共有参数的值保留部分选择",
+    ],
     ["IDs of Selection", "所选内容的 ID"],
     [
         "Select by ID: select elements by their IDs, GUIDs or IFC GlobalIds, as many as you paste, and show them",

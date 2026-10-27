@@ -1007,6 +1007,11 @@ pub fn shown(units: Units, kind: Kind, v: &Value) -> String {
     }
 }
 
+/// Two texts in the order `natural` puts them.
+pub fn natural_text(a: &str, b: &str) -> Ordering {
+    natural(&Value::String(a.into()), &Value::String(b.into()))
+}
+
 /// Numbers (and numeric text such as marks "2" and "10") by value first, then other text, in any
 /// case first.
 fn natural(a: &Value, b: &Value) -> Ordering {
