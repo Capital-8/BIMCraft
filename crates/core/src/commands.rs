@@ -982,13 +982,7 @@ pub static ALL: &[Command] = &[
     other(
         "water_size",
         "Size Cold Water Pipes",
-        "{fixtures?: {wc, lav, sink, shower, laundry: count}, flow?, method?: weights|sum, dn?, length?, fittings?: {elbow90, elbow45, \
-         tee_through, tee_side, gate, globe, check: count}, pressure?, rise?} a cold water pipe of PVC soldável as NBR 5626 asks. The \
-         flow is `flow` (L/s), or the design flow of the `fixtures` by the `method` the project chooses: weights (the empirical \
-         method, Q = 0.3 √ΣP, never more than the fixtures' own flows; the default) or sum (every fixture at once). Without `dn` it \
-         replies the smallest DN that keeps the speed within 3 m/s; with it, whether that pipe does. The head loss is Darcy-Weisbach \
-         (Colebrook, PVC at 20 °C) over `length` (m) plus the equivalent length of the `fittings`; with `pressure` (kPa, dynamic, \
-         upstream) and `rise` (m, up) it replies the pressure left at the end, 10 kPa at least at a point of use. It changes nothing",
+        "{fixtures?: {wc, lav, sink, shower, laundry: count}, flow?, method?: weights|sum, dn?, length?, fittings?: {elbow90, elbow45,          tee_through, tee_side, gate, globe, check: count}, pressure?, rise?} a cold water pipe of PVC soldável as NBR 5626 asks. The          flow is `flow` (L/s), or the design flow of the `fixtures` by the `method` the project chooses: weights (the empirical          method, Q = 0.3 √ΣP, never more than the fixtures' own flows; the default) or sum (every fixture at once). The fixture          flows and weights are those of NBR 5626:1998 Annex A, Table A.1; `wc` is the WC with a flush tank only (a flush-valve WC          is not in the table here). Without `dn` it replies the smallest DN chosen by speed alone (3 m/s at most; the pressure is          not used to choose it); with `dn`, whether that pipe keeps the speed. The head loss is Darcy-Weisbach (Colebrook, PVC at          20 °C) over `length` (mm) plus the equivalent length of the `fittings`; with `pressure` (kPa, dynamic, upstream) and `rise`          (mm, up) it replies the pressure left at the end, 10 kPa at least at a point of use, and `ok` covers both. It has no          shortcut: Revit has no tool for it. It changes nothing",
         water_size,
     ),
     other(
@@ -3169,6 +3163,11 @@ fn water_size(_: &mut Session, p: &Value) -> R {
     if let Some(key) = o.keys().find(|k| !KEYS.contains(&k.as_str())) {
         return Err(bad(c, format!("unknown parameter `{key}`")));
     }
+    let whole = |key: &str, kind: &str, n: &Value| {
+        n.as_f64()
+            .filter(|n| n.is_finite() && *n >= 0.0 && *n <= 10_000.0 && n.fract() == 0.0)
+            .ok_or_else(|| bad(c, format!("`{key}`: `{kind}` must be a whole number from 0 to 10000, got {n}")))
+    };
     let method = Method::parse(choice(c, p, "method", &["weights", "sum"], "weights")?).unwrap_or(Method::Weights);
     let flow = match (absent(p.get("flow")), p.get("fixtures")) {
         (false, f) if !absent(f) => return Err(bad(c, "give `flow` or `fixtures`, not both")),
@@ -3182,10 +3181,7 @@ fn water_size(_: &mut Session, p: &Value) -> R {
                         format!("`fixtures`: no fixture `{kind}`, use {}", FIXTURES.iter().map(|x| x.0).collect::<Vec<_>>().join(", ")),
                     ));
                 }
-                let n = n
-                    .as_f64()
-                    .filter(|n| n.is_finite() && *n >= 0.0 && *n <= 10_000.0 && n.fract() == 0.0)
-                    .ok_or_else(|| bad(c, format!("`fixtures`: `{kind}` must be a whole number from 0 to 10000, got {n}")))?;
+                let n = whole("fixtures", kind, n)?;
                 list.push((kind.as_str(), n));
             }
             water::design_flow(method, &list)
@@ -3203,18 +3199,14 @@ fn water_size(_: &mut Session, p: &Value) -> R {
         water::inside(dn).map(|_| dn).ok_or_else(|| bad(c, "`dn` must be one of 20, 25, 32, 40, 50, 60, 75, 85, 110 (PVC soldável)"))?
     };
     let inside = water::inside(dn).ok_or_else(|| bad(c, "`dn` is not a PVC soldável size"))?;
-    let mut length = within(c, p, "length", 0.0, 0.0, 1.0e6)?;
+    let mut length = within(c, p, "length", 0.0, 0.0, MAX_COORD)? / 1000.0;
     match p.get("fittings") {
         v if absent(v) => {}
         Some(Value::Object(f)) => {
             for (kind, n) in f {
                 let le = water::equivalent_length(dn, kind)
                     .ok_or_else(|| bad(c, format!("`fittings`: no fitting `{kind}`, use {}", FITTINGS.join(", "))))?;
-                let n = n
-                    .as_f64()
-                    .filter(|n| n.is_finite() && *n >= 0.0 && *n <= 10_000.0 && n.fract() == 0.0)
-                    .ok_or_else(|| bad(c, format!("`fittings`: `{kind}` must be a whole number from 0 to 10000, got {n}")))?;
-                length += le * n;
+                length += le * whole("fittings", kind, n)?;
             }
         }
         Some(v) => return Err(bad(c, format!("`fittings` must be an object {{fitting: count}}, got {v}"))),
@@ -3228,7 +3220,7 @@ fn water_size(_: &mut Session, p: &Value) -> R {
         None
     } else {
         let pressure = within(c, p, "pressure", 0.0, 0.0, 1.0e5)?;
-        let rise = within(c, p, "rise", 0.0, -1000.0, 1000.0)?;
+        let rise = within(c, p, "rise", 0.0, -MAX_COORD, MAX_COORD)? / 1000.0;
         let end = pressure - loss - rise * water::KPA_PER_M;
         ok = ok && end >= MIN_USE_KPA;
         Some(end)

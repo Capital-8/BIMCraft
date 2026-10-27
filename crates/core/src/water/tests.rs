@@ -66,13 +66,13 @@ mod command {
     #[test]
     fn a_bathroom_group() {
         let mut s = Session::new();
-        let r = run(&mut s, json!({"fixtures": {"lav": 1, "wc": 1, "shower": 1}, "length": 10}));
+        let r = run(&mut s, json!({"fixtures": {"lav": 1, "wc": 1, "shower": 1}, "length": 10000}));
         assert_eq!(r["flow_lps"], json!(0.3));
         assert_eq!(r["dn"], json!(20.0), "17 mm inside: 1.3 m/s");
         assert_eq!(r["ok"], json!(true));
         let r = run(
             &mut s,
-            json!({"flow": 0.3, "dn": 25, "length": 10, "fittings": {"elbow90": 2, "tee_side": 1}, "pressure": 100, "rise": 2}),
+            json!({"flow": 0.3, "dn": 25, "length": 10000, "fittings": {"elbow90": 2, "tee_side": 1}, "pressure": 100, "rise": 2000}),
         );
         assert_eq!(r["equivalent_length_m"], json!(14.8), "10 m + 2 x 1.2 + 2.4");
         let loss = r["loss_kpa"].as_f64().unwrap_or(f64::NAN);
