@@ -162,6 +162,59 @@ fn linework_remove_takes_nothing_off_when_the_edge_nearest_the_pick_has_none() {
     assert_eq!((r["removed"].clone(), held(&s)), (json!(1), 0), "{r}");
 }
 
+/// A wall `length` long and `thick` thick on Level 1, its north face styled and its south face made invisible, then a T wall
+/// across the middle: the north face is two edges now and the entry that held the whole face matches neither.
+fn cut_face(thick: u32, length: u32, south: bool) -> (Session, Id) {
+    let mut s = Session::new();
+    run(&mut s, "type", json!({"category": "wall", "name": "Partition", "thickness": thick}));
+    let w = run(&mut s, "wall", json!({"points": [[0, 0], [length, 0]], "type": "Partition"}))["ids"][0].as_u64().unwrap_or_default();
+    let half = f64::from(thick) / 2.0;
+    run(&mut s, "linework", json!({"view": 100000, "id": w, "at": [1000, half], "style": "Wide Lines"}));
+    if south {
+        run(&mut s, "linework", json!({"view": 100000, "id": w, "at": [1000, -half], "invisible": true}));
+    }
+    run(&mut s, "wall", json!({"points": [[length / 2, 0], [length / 2, 4000]], "type": "Partition"}));
+    (s, w)
+}
+
+fn styles(s: &Session) -> Vec<Option<String>> {
+    crate::graphics::graphics_of(&s.model, 100000).map_or(Vec::new(), |g| g.linework.iter().map(|l| l.style.clone()).collect())
+}
+
+#[test]
+fn linework_on_a_face_a_t_wall_has_cut_in_two_is_picked_off_from_either_piece() {
+    for at in [[1000, 50], [7000, 50], [4000, 50], [1000, -50]] {
+        let (mut s, w) = cut_face(100, 8000, false);
+        assert_eq!(styles(&s).len(), 1);
+        let r = run(&mut s, "linework", json!({"view": 100000, "id": w, "at": at, "remove": true}));
+        assert_eq!((r["removed"].clone(), styles(&s).len()), (json!(1), 0), "from {at:?}: {r}");
+    }
+}
+
+#[test]
+fn linework_remove_takes_the_stale_entry_at_the_stale_spot_and_the_live_one_at_the_live_edge() {
+    // The north entry is stale; the south face, whole, holds a live one. Each pick takes its own, one at a time.
+    let (mut s, w) = cut_face(100, 8000, true);
+    let r = run(&mut s, "linework", json!({"view": 100000, "id": w, "at": [1000, -50], "remove": true}));
+    assert_eq!((r["removed"].clone(), styles(&s)), (json!(1), vec![Some("Wide Lines".to_string())]), "the live south one: {r}");
+    let (mut s, w) = cut_face(100, 8000, true);
+    let r = run(&mut s, "linework", json!({"view": 100000, "id": w, "at": [1000, 50], "remove": true}));
+    assert_eq!((r["removed"].clone(), styles(&s)), (json!(1), vec![None]), "the stale north one, not the live south one: {r}");
+    // Picked again over the live face, whose edge holds the one left.
+    let r = run(&mut s, "linework", json!({"view": 100000, "id": w, "at": [1000, -50], "remove": true}));
+    assert_eq!((r["removed"].clone(), styles(&s).len()), (json!(1), 0), "{r}");
+}
+
+#[test]
+fn linework_remove_leaves_a_stale_entry_out_of_reach_of_the_pick() {
+    // A 600 mm wall: its faces are 600 apart, the reach is 200. The south face has none, the stale north entry is out of reach.
+    let (mut s, w) = cut_face(600, 8000, false);
+    for at in [[1000, -300], [1000, 5000]] {
+        let r = run(&mut s, "linework", json!({"view": 100000, "id": w, "at": at, "remove": true}));
+        assert_eq!((r["removed"].clone(), styles(&s).len()), (json!(0), 1), "from {at:?}: {r}");
+    }
+}
+
 #[test]
 fn linework_is_found_again_from_any_other_pick_on_its_edge_whatever_the_ends_of_the_wall() {
     let mut s = Session::new();

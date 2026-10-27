@@ -2437,6 +2437,12 @@ pub fn edge_at(m: &Model, key: Id, id: Id, at: P2, reach: f64) -> Option<(P2, P2
     line_at(m, key, id, at, reach, false)
 }
 
+/// Every edge element `id` draws in plan `key` within `reach` mm of `at` (as [`edge_at`] finds one) and a little past it,
+/// nearest first: an edge at the rim of the reach is still seen. What says which Linework is on an edge that is drawn.
+pub fn edges_at(m: &Model, key: Id, id: Id, at: P2, reach: f64) -> Vec<(P2, P2)> {
+    lines_at(m, key, id, at, reach, false).into_iter().map(|(_, a, b)| (a, b)).collect()
+}
+
 /// The line of element `id`'s fill pattern in plan `key` nearest `at`, within `reach` mm, its ends in plan mm: what Align
 /// moves a region's or a floor's model pattern by.
 pub fn pattern_line_at(m: &Model, key: Id, id: Id, at: P2, reach: f64) -> Option<(P2, P2)> {
@@ -2444,6 +2450,12 @@ pub fn pattern_line_at(m: &Model, key: Id, id: Id, at: P2, reach: f64) -> Option
 }
 
 fn line_at(m: &Model, key: Id, id: Id, at: P2, reach: f64, pattern: bool) -> Option<(P2, P2)> {
+    lines_at(m, key, id, at, reach, pattern).into_iter().find(|(dist, ..)| *dist <= 10.0).map(|(_, a, b)| (a, b))
+}
+
+/// The straight pieces of element `id`'s lines in plan `key` (its fill pattern's, when `pattern`) within `reach` mm of `at`
+/// and half a pixel more, nearest first, each with its distance in pixels, 10 of which are `reach`.
+fn lines_at(m: &Model, key: Id, id: Id, at: P2, reach: f64, pattern: bool) -> Vec<(f64, P2, P2)> {
     // A window round the point, 10 px to `reach`, drawn without the view's own linework (an edge drawn unseen is still one).
     let scale = 10.0 / reach.max(1.0);
     let view = View { scale, cx: at.0, cy: at.1, width: 1000, height: 1000 };
@@ -2462,7 +2474,7 @@ fn line_at(m: &Model, key: Id, id: Id, at: P2, reach: f64, pattern: bool) -> Opt
     let d = draw(m, key, view);
     let q = view.px(at);
     let near = |a: (f32, f32), b: (f32, f32)| geom::dist_to_segment(P2(f64::from(q.0), f64::from(q.1)), pt(a), pt(b));
-    (d.prims.iter().zip(&d.owners).zip(&d.parts))
+    let mut out: Vec<_> = (d.prims.iter().zip(&d.owners).zip(&d.parts))
         .filter(|((_, o), part)| {
             **o == Some(id) && if pattern { **part == Part::Pattern } else { !matches!(part, Part::Text | Part::Pattern) }
         })
@@ -2470,10 +2482,11 @@ fn line_at(m: &Model, key: Id, id: Id, at: P2, reach: f64, pattern: bool) -> Opt
             Prim::Line { pts, closed, .. } => segments(pts, *closed),
             _ => Vec::new(),
         })
-        .map(|(a, b)| (near(a, b), a, b))
-        .filter(|(dist, ..)| *dist <= 10.0)
-        .min_by(|x, y| x.0.total_cmp(&y.0))
-        .map(|(_, a, b)| (view.mm(a), view.mm(b)))
+        .map(|(a, b)| (near(a, b), view.mm(a), view.mm(b)))
+        .filter(|(dist, ..)| *dist <= 10.5)
+        .collect();
+    out.sort_by(|x, y| x.0.total_cmp(&y.0));
+    out
 }
 
 fn pt((x, y): (f32, f32)) -> P2 {

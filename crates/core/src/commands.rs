@@ -876,7 +876,8 @@ pub static ALL: &[Command] = &[
         "{view?, id, at: [x, y], style? | invisible?: true, remove?: true} Revit's Linework: the edge of element `id` that a \
          plan (`view`, a level's or a plan view; the lowest level's by default) draws nearest `at` (within 200 mm), drawn in \
          that view only in line style `style`, or not at all with `invisible`; `remove` takes the Linework nearest `at` off \
-         that edge again (one edge, even where another lies within reach). A view holds at most 2000 edges. It returns the \
+         that edge again (one edge, even where another lies within reach; where that edge has none, the nearest entry within \
+         reach on an edge the element no longer draws, one a call). A view holds at most 2000 edges. It returns the \
          edge, `from` and `to`, or with `remove` how many were `removed`",
         linework,
     ),
@@ -7325,18 +7326,27 @@ fn linework(s: &mut Session, p: &Value) -> R {
     let source = m.plan_source(key);
     if remove {
         // The edge the element draws nearest `at`, and the Linework on that edge, no other: both faces of a thin wall lie
-        // within reach of one pick, and the nearer may have none. An edge the element no longer draws there is gone: its
-        // Linework is taken by the nearest of it, so it can still be picked off.
-        let edge = render::edge_at(m, key, id, at, LINEWORK_REACH);
+        // within reach of one pick, and the nearer may have none. Linework on no edge the element draws there (the edge
+        // changed shape: a wall across a styled face cut it in two) is stale, and still styles what it overlaps. When the
+        // nearest edge has none, the nearest stale entry within reach goes, so it can still be picked off; never one on
+        // another edge that is drawn.
+        let edges = render::edges_at(m, key, id, at, LINEWORK_REACH);
         let g =
             s.model_mut().elements.get_mut(source).and_then(graphics::graphics_mut).ok_or_else(|| bad(c, "that view has no graphics"))?;
-        let dist = |l: &graphics::Linework| geom::dist_to_segment(at, l.from, l.to);
-        let nearest = g.linework.iter().filter(|l| l.element == guid).map(dist).fold(f64::INFINITY, f64::min);
         let before = g.linework.len();
-        match edge {
-            Some((from, to)) => g.linework.retain(|l| !(l.element == guid && on_edge(l, from, to))),
-            None if nearest <= LINEWORK_REACH => g.linework.retain(|l| l.element != guid || dist(l) > nearest + 1e-3),
-            None => {}
+        match edges.first() {
+            Some(&(from, to)) if g.linework.iter().any(|l| l.element == guid && on_edge(l, from, to)) => {
+                g.linework.retain(|l| !(l.element == guid && on_edge(l, from, to)));
+            }
+            _ => {
+                let stale = |l: &&graphics::Linework| l.element == guid && !edges.iter().any(|&(from, to)| on_edge(l, from, to));
+                let nearest = (g.linework.iter().enumerate().filter(|(_, l)| stale(l)))
+                    .map(|(i, l)| (geom::dist_to_segment(at, l.from, l.to), i))
+                    .min_by(|a, b| a.0.total_cmp(&b.0));
+                if let Some((_, i)) = nearest.filter(|(dist, _)| *dist <= LINEWORK_REACH) {
+                    g.linework.remove(i);
+                }
+            }
         }
         return Ok(json!({"removed": before - g.linework.len()}));
     }

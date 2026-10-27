@@ -113,7 +113,10 @@ plan's `Graphics::linework` holds each as the element's GUID, the edge's two end
 segment of the element's lines within `LINEWORK_REACH`. `render::linework` restyles, after `Look::dress`, the parts of the
 element's lines that lie along that edge (collinear within a pixel, over its length), so one face of a wall changes and the
 rest of its outline doesn't. Picked again, an edge's entry is replaced; `remove` takes out the one nearest the point (the desktop's
-`<By Category>`), not every edge within reach: both faces of a thin wall are. A view's linework is checked (`Graphics::check`):
+`<By Category>`), not every edge within reach: both faces of a thin wall are. An entry on an edge the element no longer draws (a
+wall across a styled face cut it in two) is stale: the drawing still restyles what it overlaps, and where the edge picked has
+no entry, `remove` takes the nearest stale entry within `LINEWORK_REACH`, one a call, never one on another edge that is
+drawn (`render::edges_at` lists the edges drawn). A view's linework is checked (`Graphics::check`):
 at most `MAX_LINEWORK` (2,000) edges, ends within `MAX_COORD`, and a line style the project has. The drawing splits an element's
 lines along all its edges in one pass (`render::linework`: the cost is the prims plus the edges, not a pass over every prim for
 each edge). A line style a view's linework uses can't be deleted, and an element's entries go with it.
