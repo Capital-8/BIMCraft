@@ -6,6 +6,9 @@ pub mod autosave;
 #[cfg(test)]
 mod autosave_tests;
 pub mod bridge;
+pub mod cad;
+#[cfg(test)]
+mod cad_tests;
 pub mod cloud;
 #[cfg(test)]
 mod cloud_tests;

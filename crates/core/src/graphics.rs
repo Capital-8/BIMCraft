@@ -49,10 +49,12 @@ pub const ANNOTATION: [&str; 10] = ["dimension", "tag", "text", "line", "region"
 /// The point clouds, which views hide and override as Revit's Visibility/Graphics does on a tab of their own: not a model
 /// category, so Object Styles has no row for them.
 pub const SCANS: [&str; 1] = ["pointcloud"];
+/// The CAD imports, which views hide and override on a tab of their own too, as Revit's Imported Categories.
+pub const IMPORTED: [&str; 1] = ["cadimport"];
 
 /// Whether views draw elements of `category`.
 pub fn drawn(category: &str) -> bool {
-    MODEL.contains(&category) || ANNOTATION.contains(&category) || SCANS.contains(&category)
+    MODEL.contains(&category) || ANNOTATION.contains(&category) || SCANS.contains(&category) || IMPORTED.contains(&category)
 }
 
 /// How much of a mass a 3D view sees through, percent, unless its graphics say otherwise.
@@ -347,6 +349,9 @@ pub struct Graphics {
     /// Revit's Linework: an edge of an element drawn in a line style of the view's own, or not at all.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub linework: Vec<Linework>,
+    /// The layers of each CAD drawing it hides, by the drawing's name: Revit's Imported Categories, layer by layer.
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub layers: BTreeMap<String, BTreeSet<String>>,
 }
 
 /// An edge of `element` as the view draws it, from `from` to `to` (mm in the view's terms), in line style `style` instead
@@ -435,7 +440,7 @@ impl Graphics {
             if !drawn(c) {
                 return Err(format!(
                     "`{c}` isn't a category views draw; there are: {}",
-                    MODEL.iter().chain(&ANNOTATION).chain(&SCANS).copied().collect::<Vec<_>>().join(", ")
+                    MODEL.iter().chain(&ANNOTATION).chain(&SCANS).chain(&IMPORTED).copied().collect::<Vec<_>>().join(", ")
                 ));
             }
             o.check(&format!("category `{c}`"))?;
@@ -458,6 +463,18 @@ impl Graphics {
                 && !m.line_styles.contains_key(st)
             {
                 return Err(format!("Linework edge {i}: there's no line style `{st}`{}", known(m.line_styles.keys())));
+            }
+        }
+        if self.layers.len() > crate::cad::MAX_CADS || self.layers.values().any(|l| l.len() > crate::model::MAX_HIDDEN) {
+            return Err(format!(
+                "it hides layers of more than {} CAD drawings, or more than {} of one",
+                crate::cad::MAX_CADS,
+                crate::model::MAX_HIDDEN
+            ));
+        }
+        for (cad, layers) in &self.layers {
+            if let Some(n) = std::iter::once(cad).chain(layers).find(|n| n.chars().count() > crate::model::MAX_TEXT) {
+                return Err(format!("the layer or drawing `{n}` is longer than {} characters", crate::model::MAX_TEXT));
             }
         }
         let mut seen = BTreeSet::new();
@@ -692,6 +709,8 @@ pub fn graphics_of(m: &Model, view: impl Key) -> Option<&Graphics> {
 #[derive(Default)]
 pub struct Look {
     hidden: BTreeSet<Id>,
+    /// The layers of each CAD drawing it hides, by the drawing's name.
+    layers: BTreeMap<String, BTreeSet<String>>,
     paint: BTreeMap<Id, Override>,
     style: VisualStyle,
     /// The section box a 3D view is cut to, its min and max corners, while it's on.
@@ -732,7 +751,7 @@ impl Look {
     /// (a room's area) makes redraws slow.
     pub fn with(m: &Model, own: &Graphics) -> Look {
         let g = own.resolved(m);
-        let mut look = Look { style: g.style, ..Look::default() };
+        let mut look = Look { style: g.style, layers: own.layers.clone(), ..Look::default() };
         // Nothing to look for: no graphics of its own, and nothing in the project phased or in an option.
         let linked = m.elements.keys().next_back().is_some_and(|id| crate::link::is_linked(*id));
         if own.draws_as_is() && !linked && !crate::phasing::any(m) && !m.elements.values().any(|e| matches!(e, Element::Mass(_))) {
@@ -799,6 +818,11 @@ impl Look {
     /// How the view draws surfaces in 3D.
     pub fn style(&self) -> VisualStyle {
         self.style
+    }
+
+    /// The layers of the CAD drawing `cad` the view hides.
+    pub fn hidden_layers(&self, cad: &str) -> Option<&BTreeSet<String>> {
+        self.layers.get(cad)
     }
 
     /// Whether the view draws element `id`.
