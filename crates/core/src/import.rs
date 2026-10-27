@@ -2314,8 +2314,21 @@ pub fn ifc(bytes: &[u8], name: &str) -> Result<Imported, String> {
         }
     }
 
+    // Doors' and windows' marks: their tags, unless a tag is only the element's id (Revit names a
+    // door `Family:Type:123456` and tags it `123456`) or another door or window took it first.
+    // The rest are numbered on in the series the tags are numbered in.
+    let mut marks: [BTreeSet<String>; 2] = Default::default();
+    let mut tags: HashMap<u64, String> = HashMap::new();
+    for id in named(OPENINGS) {
+        let Some(o) = e(id) else { continue };
+        let Some(tag) = text(o.args.get(7)) else { continue };
+        let id_only = text(o.args.get(2)).and_then(|n| n.rsplit_once(':')).is_some_and(|(_, last)| last.trim() == tag);
+        if !id_only && marks[usize::from(o.name.starts_with("IFCDOOR"))].insert(tag.to_string()) {
+            tags.insert(id, tag.to_string());
+        }
+    }
+
     // Doors and windows: where their openings cut their walls.
-    let (mut doors, mut windows) = (0u32, 0u32);
     for id in named(OPENINGS) {
         let Some(o) = e(id) else { continue };
         let is_door = o.name.starts_with("IFCDOOR");
@@ -2360,8 +2373,12 @@ pub fn ifc(bytes: &[u8], name: &str) -> Result<Imported, String> {
         let new = OpeningType { width, height, sill: if is_door { 0.0 } else { sill }, operation };
         let types = if is_door { &mut m.types.door } else { &mut m.types.window };
         let type_name = kind(types, &base_name, same, new);
-        let count = if is_door { &mut doors } else { &mut windows };
-        *count += 1;
+        let mark = tags.remove(&id).unwrap_or_else(|| {
+            let taken = &mut marks[usize::from(is_door)];
+            let next = next_number(taken.iter().map(String::as_str));
+            taken.insert(next.clone());
+            next
+        });
         let flip_hand = operated.map_or_else(|| enumeration(o.args.get(11)).is_some_and(|op| op.contains("RIGHT")), |(_, right)| right);
         let op = Opening {
             params: Default::default(),
@@ -2370,7 +2387,7 @@ pub fn ifc(bytes: &[u8], name: &str) -> Result<Imported, String> {
             host: Guid::of_id(host),
             offset: micron(P2((s0 + s1) / 2.0, 0.0)).0,
             sill,
-            mark: count.to_string(),
+            mark,
             flip_facing: false,
             flip_hand,
         };

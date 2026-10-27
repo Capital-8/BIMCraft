@@ -2644,9 +2644,71 @@ fn ifc_files_from_other_tools_come_in_measured_from_their_geometry() {
     let room = room.unwrap();
     assert_eq!((room.name.as_str(), room.number.as_str(), m.level(room.level).map(|l| l.name.as_str())), ("Office", "101", Some("First")));
     assert!((1000.0..5000.0).contains(&room.point.0) && (2000.0..3900.0).contains(&room.point.1), "{:?}", room.point);
+    // A tag that is only the element's id, as Revit writes it, is no mark: the window is numbered.
+    let marks: Vec<&str> =
+        m.elements.values().filter_map(|e| if let crate::model::Element::Window(o) = e { Some(o.mark.as_str()) } else { None }).collect();
+    assert_eq!(marks, ["1"]);
     // What BIMCraft has no element for is left out, and said so.
     let skipped = r["skipped"].to_string();
     assert!(skipped.contains("IFCFURNISHINGELEMENT"), "{skipped}");
+}
+
+#[test]
+fn marks_number_on_in_the_series_they_are_in() {
+    use crate::commands::next_number;
+    let next = |taken: &[&str]| next_number(taken.iter().copied());
+    assert_eq!(next(&[]), "1");
+    assert_eq!(next(&["1", "2", "7"]), "8");
+    // A prefix two marks share is a series; padding is kept.
+    assert_eq!(next(&["P1", "P2", "P5"]), "P6");
+    assert_eq!(next(&["J-01", "J-02", "J-09"]), "J-10");
+    // A lone prefixed mark among numbered ones, or fewer than them, is an exception.
+    assert_eq!(next(&["D2"]), "1");
+    assert_eq!(next(&["D2", "1"]), "2");
+    assert_eq!(next(&["P1", "P2", "1", "2", "3"]), "4");
+    // The bigger series wins; never a mark already taken; text with no number is no series.
+    assert_eq!(next(&["P1", "P2", "P3", "J1", "J2"]), "P4");
+    assert_eq!(next(&["P01", "P02", "P3"]), "P04");
+    assert_eq!(next(&["Entry", "Back"]), "1");
+}
+
+#[test]
+fn doors_and_windows_keep_their_marks_through_ifc_and_new_ones_follow_the_series() {
+    let mut s = Session::new();
+    house(&mut s);
+    s.script(
+        r#"door {"at": [1000, 0], "mark": "P1"}
+           door {"at": [3000, 0], "mark": "P2"}
+           window {"at": [8000, 2000], "mark": "J1"}
+           window {"at": [8000, 4000], "mark": "J2"}"#,
+    )
+    .unwrap();
+    // The next door and window carry on their series, and so does a copy.
+    assert_eq!(run(&mut s, "door", json!({"at": [5000, 0]}))["mark"], "P3");
+    let window = run(&mut s, "window", json!({"at": [4000, 6000]}));
+    assert_eq!(window["mark"], "J3");
+    let copy = run(&mut s, "copy", json!({"ids": [window["id"]], "by": [-2000, 0]}))["ids"][0].as_u64().unwrap();
+    assert_eq!(element(&mut s, copy)["mark"], "J4");
+    // Out to IFC and back: each keeps its tag; one with no tag is numbered on after the rest.
+    let marks = |m: &Model| {
+        let mut all: Vec<String> = m
+            .elements
+            .values()
+            .filter_map(|e| match e {
+                crate::model::Element::Door(o) | crate::model::Element::Window(o) => Some(o.mark.clone()),
+                _ => None,
+            })
+            .collect();
+        all.sort();
+        all
+    };
+    let file = crate::ifc::export(&s.model);
+    let back = crate::import::ifc(file.as_bytes(), "t").unwrap();
+    assert_eq!(marks(&back.model), marks(&s.model));
+    let untagged = file.replacen(",'P2',", ",$,", 1);
+    assert_ne!(untagged, file);
+    let back = crate::import::ifc(untagged.as_bytes(), "t").unwrap();
+    assert_eq!(marks(&back.model), ["J1", "J2", "J3", "J4", "P1", "P3", "P4"]);
 }
 
 #[test]
