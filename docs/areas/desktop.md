@@ -220,7 +220,7 @@ Trim/Extend (`forget_picks`), a sketch's picks are dropped when its lines change
 dropped when the shape changes. A fillet that does not fit keeps its two lines picked and spends the digits; a click that sizes the arc clears them. A number of the
 Options Bar that the shape in hand takes and cannot read (`options_error`) is red and makes nothing. A sketch keeps the lines as they were before each change
 (`Sketch::track`), so Ctrl+Z takes back a fillet, a trim or a grip move whole; it belongs to the plan it began in, and the window comes back to that plan until Finish or
-Cancel Edit Mode. egui draws a Dot (a dash of a hundredth of a millimetre) about a pixel and a half long, so it shows; `a_dot_of_a_hundredth_of_a_millimetre_still_draws_about_a_pixel_on_the_canvas`
+Cancel Edit Mode (`BimApp::sketch_plan`; a plan whose level was deleted is nowhere to come back to, and holds neither the window nor the tool: a view that cannot use the tool takes Modify, as for no sketch). egui draws a Dot (a dash of a hundredth of a millimetre) about a pixel and a half long, so it shows; `a_dot_of_a_hundredth_of_a_millimetre_still_draws_about_a_pixel_on_the_canvas`
 fails if that changes.
 
 Limits of the annotation stack, left as they are: the desktop has no group type rename, delete or edit (the `group_type` command does them), and a group taken

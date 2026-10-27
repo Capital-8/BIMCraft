@@ -284,6 +284,30 @@ fn leaving_the_sketchs_plan_takes_the_window_back_and_keeps_the_tool_it_was_draw
 }
 
 #[test]
+fn a_sketch_whose_plan_was_deleted_does_not_hold_the_tool_in_a_view_that_cannot_use_it() {
+    let script =
+        format!("{BOX}\nlevel {{\"name\": \"Spare\", \"elevation\": 12000}}\nsection {{\"start\": [-1000, 3000], \"end\": [9000, 3000]}}");
+    let mut h = app(&script);
+    let section = ids(&h, "section")[0];
+    let upper = h.state().session.model.levels().iter().find(|(_, l)| l.name == "Spare").map(|(id, _)| *id).unwrap();
+    h.state_mut().open_sheet(Sheet::Plan(upper));
+    h.run();
+    press(&mut h, "Annotate");
+    press(&mut h, "Filled Region");
+    press(&mut h, "Rectangle");
+    assert!(matches!(h.state().tool, Tool::SketchLine(_)));
+    // The plan it began in goes (a script, or an undo that takes the level with it): the sketch stays where it is, and a view that
+    // takes no clicks for a sketch takes the window's tool back to Modify, as it does for anything else.
+    h.state_mut().session.execute("delete", &json!({"ids": [upper]})).unwrap();
+    h.run();
+    h.state_mut().open_sheet(Sheet::Section(section));
+    h.run();
+    assert_eq!(h.state().sheet, Sheet::Section(section), "no plan to go back to");
+    assert!(h.state().sketch.is_some());
+    assert_eq!(h.state().tool, Tool::Modify, "{:?}: the sketch's plan is gone, so the tool is not held", h.state().tool);
+}
+
+#[test]
 fn a_project_put_in_the_sessions_place_under_a_sketch_or_a_dialog_takes_both_with_it() {
     let mut h = app(BOX);
     press(&mut h, "Annotate");

@@ -2221,7 +2221,7 @@ impl BimApp {
             _ => false,
         };
         // (A sketch is held in its plan: it takes the window back, with its tool, [`BimApp::track_sketch`].)
-        if !works && self.tool != Tool::Level && self.sketch.is_none() {
+        if !works && self.tool != Tool::Level && self.sketch_plan().is_none() {
             self.tool = Tool::Modify;
         }
         match &mut self.tool {
