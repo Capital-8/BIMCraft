@@ -66,8 +66,10 @@ makes or changes, whichever command (`floor`, `modify`, `edit_boundary`, `move`â
 (`Model::check_edits`, asked by the engine after each command but Insert from File): a floor's, ceiling's or roof's boundary,
 an opening or a courtyard, a shaft's boundary, that crosses itself or lies along itself, has an edge ending part way along
 another, or a spike or keyhole slit, is refused, saying which edges and where, and what to do: redraw it with `edit_boundary`; give
-`boundary` or `sketch` (with the walls that touch at a corner named only when it was taken from walls) for one a command was making;
-redraw the mass whose outline it is, for one made by face or by `mass_floors` (a mass itself may still have a bow tie outline);
+`boundary` or `sketch` (with the walls that touch at a corner named only when it was taken from walls), or simple `openings` or
+`courtyards` for one of those rings, for one a command was making;
+redraw the mass whose outline it is, for one made by face or by `mass_floors` (a mass itself may still have a bow tie outline,
+a spike or a corner touching an edge, so the message says the outline isn't simple, not that it crosses itself);
 and, for a roof's opening, which `edit_boundary` does not edit, give `modify` a simple `openings`, and from `dormer` change the
 dormer's width, height or position. That is a change from the base, which let
 `modify` and the commands that weren't given points set such an outline. `Model::check` doesn't judge the whole project by

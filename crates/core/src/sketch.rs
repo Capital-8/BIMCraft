@@ -640,7 +640,7 @@ impl Model {
                             format!("{category} {id}: its {name} isn't a simple outline: {said}; give `modify` a simple `openings`{dormer}")
                         }
                         Some(_) => format!("{category} {id}: its {name} isn't a simple outline: {said}; redraw it with `edit_boundary`"),
-                        None => format!("{category}: its {name} isn't a simple outline: {said}; {}", instead(self, e, params)),
+                        None => format!("{category}: its {name} isn't a simple outline: {said}; {}", instead(self, e, params, &name)),
                     });
                 }
             }
@@ -649,12 +649,16 @@ impl Model {
     }
 }
 
-/// What to say to whoever made `e`, in `m`, with a ring that is not simple, by where its outline came from: the mass it was
-/// made from, the `boundary` or `sketch` the command was given in `params`, or (if it was given none) the walls it was found in.
-fn instead(m: &Model, e: &Element, params: &serde_json::Value) -> String {
+/// What to say to whoever made `e`, in `m`, with the ring `name` that is not simple, by where it came from: the mass it was
+/// made from, the `openings` or `courtyards` the command was given in `params` when `name` is one of those, the `boundary` or
+/// `sketch` it was given, or (if it was given none of the four) the walls it was found in.
+fn instead(m: &Model, e: &Element, params: &serde_json::Value, name: &str) -> String {
     let mass = e.params().and_then(|p| crate::massing::refs(p).first().copied()).and_then(|g| m.elements.id(g));
     if let Some(mass) = mass {
-        return format!("it is the outline of mass {mass}, which crosses itself: redraw the mass");
+        return format!("it is the outline of mass {mass}, whose outline isn't simple: redraw the mass");
+    }
+    if let Some((_, rings)) = [("opening", "openings"), ("courtyard", "courtyards")].into_iter().find(|(one, _)| name.starts_with(one)) {
+        return format!("give simple `{rings}`");
     }
     let given = ["boundary", "sketch", "openings", "courtyards"].iter().any(|k| params.get(k).is_some_and(|v| !v.is_null()));
     let say = "give a simple `boundary` or `sketch`";
@@ -1591,20 +1595,47 @@ mod command_tests {
         assert!(e.contains("courtyard 0") && e.contains("edit_boundary"), "{e}");
     }
 
+    /// A spike (the outline goes up an edge's line and comes back down it), and a corner that touches another edge.
+    const SPIKE: [[i32; 2]; 6] = [[0, 0], [4000, 0], [4000, 4000], [4000, 6000], [4000, 5000], [0, 4000]];
+    const TOUCH: [[i32; 2]; 5] = [[0, 0], [4000, 0], [4000, 4000], [2000, 0], [0, 4000]];
+
     #[test]
-    fn what_a_mass_with_a_bow_tie_outline_makes_is_refused_saying_the_mass_crosses_itself() {
+    fn what_a_mass_with_an_outline_that_is_not_simple_makes_is_refused_saying_the_mass_outline_is_not_simple() {
         let mut s = Session::new();
-        // A mass is let have the outline (as it always was), and what it makes is refused.
-        let mass = run(&mut s, "mass", json!({"boundary": BOW, "height": 3000}))["id"].clone();
-        for (cmd, p) in
-            [("mass_floors", json!({"mass": mass})), ("floor_by_face", json!({"mass": mass})), ("roof_by_face", json!({"mass": mass}))]
-        {
-            let before = s.model.clone();
-            let e = s.execute(cmd, &p).unwrap_err();
-            assert!(e.contains(&format!("mass {mass}")) && e.contains("crosses itself") && e.contains("redraw the mass"), "{cmd}: {e}");
-            // No `boundary` or `sketch` was given to `mass_floors`, `floor_by_face` or `roof_by_face`, and no walls to touch.
-            assert!(!e.contains("`boundary`") && !e.contains("walls"), "{cmd}: {e}");
-            assert_eq!(s.model, before);
+        // A mass is let have the outline (as it always was), and what it makes is refused. The bow tie crosses itself, the
+        // spike and the touching corner do not, so none is told it does.
+        for (what, outline) in [("bow tie", json!(BOW)), ("spike", json!(SPIKE)), ("touch", json!(TOUCH))] {
+            let mass = run(&mut s, "mass", json!({"boundary": outline, "height": 3000}))["id"].clone();
+            for (cmd, p) in
+                [("mass_floors", json!({"mass": mass})), ("floor_by_face", json!({"mass": mass})), ("roof_by_face", json!({"mass": mass}))]
+            {
+                let before = s.model.clone();
+                let e = s.execute(cmd, &p).unwrap_err();
+                let (named, said) = (format!("mass {mass}"), "outline isn't simple");
+                assert!(e.contains(&named) && e.contains(said) && e.contains("redraw the mass"), "{what} {cmd}: {e}");
+                assert!(!e.contains("crosses itself"), "{what} {cmd}: {e}");
+                // No `boundary` or `sketch` was given to `mass_floors`, `floor_by_face` or `roof_by_face`, and no walls to touch.
+                assert!(!e.contains("`boundary`") && !e.contains("walls"), "{what} {cmd}: {e}");
+                assert_eq!(s.model, before);
+            }
+        }
+    }
+
+    #[test]
+    fn a_new_element_with_openings_or_courtyards_that_are_not_simple_is_told_to_give_simple_ones() {
+        let square = json!([[0, 0], [4000, 0], [4000, 4000], [0, 4000]]);
+        for (cmd, key, ask) in [
+            ("floor", "openings", "give simple `openings`"),
+            ("ceiling", "openings", "give simple `openings`"),
+            ("roof", "openings", "give simple `openings`"),
+            ("roof", "courtyards", "give simple `courtyards`"),
+        ] {
+            let mut p = json!({"boundary": square, key: [BOW_HOLE]});
+            if cmd == "roof" {
+                p["slope"] = json!(0);
+            }
+            let e = Session::new().execute(cmd, &p).unwrap_err();
+            assert!(e.contains(ask) && !e.contains("`boundary`") && !e.contains("`sketch`"), "{cmd} {key}: {e}");
         }
     }
 
