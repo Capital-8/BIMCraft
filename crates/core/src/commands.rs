@@ -967,7 +967,9 @@ pub static ALL: &[Command] = &[
          smaller than the fixtures' own). `role`: a `branch` (ramal de esgoto, Tabela 5, the default), a `main` (subcoletor or coletor \
          predial, Tabela 7 by `slope`, a fraction, 0.01 by default; DN 100 at least) or a `stack` (tubo de queda, Tabela 6 by the \
          building's `floors`, up to three or more). `min_dn` is the largest drain flowing into it. Replies with the `dn`, what it \
-         carries (`capacity`) and the `minimum_dn` the fixtures ask. A blank in the standard's table means not allowed: DN 100 and 150 \n         carry nothing in a building drain at 0.5 %, and a branch or a building drain never borrows the other's table. It has no \n         shortcut: Revit has no tool for it. It changes nothing",
+         carries (`capacity`) and the `minimum_dn` the fixtures ask. A blank in the standard's table means not allowed: DN 100 and 150 \
+         carry nothing in a building drain at 0.5 %, and a branch or a building drain never borrows the other's table. It has no \
+         shortcut: Revit has no tool for it. It changes nothing",
         drain_size,
     ),
     other(
@@ -994,7 +996,16 @@ pub static ALL: &[Command] = &[
     other(
         "water_size",
         "Size Cold Water Pipes",
-        "{fixtures?: {wc, lav, sink, shower, laundry: count}, flow?, method?: weights|sum, dn?, length?, fittings?: {elbow90, elbow45,          tee_through, tee_side, gate, globe, check: count}, pressure?, rise?} a cold water pipe of PVC soldável as NBR 5626 asks. The          flow is `flow` (L/s), or the design flow of the `fixtures` by the `method` the project chooses: weights (the empirical          method, Q = 0.3 √ΣP, never more than the fixtures' own flows; the default) or sum (every fixture at once). The fixture          flows and weights are those of NBR 5626:1998 Annex A, Table A.1; `wc` is the WC with a flush tank only (a flush-valve WC          is not in the table here). Without `dn` it replies the smallest DN chosen by speed alone (3 m/s at most; the pressure is          not used to choose it); with `dn`, whether that pipe keeps the speed. The head loss is Darcy-Weisbach (Colebrook, PVC at          20 °C) over `length` (mm) plus the equivalent length of the `fittings`; with `pressure` (kPa, dynamic, upstream) and `rise`          (mm, up) it replies the pressure left at the end, 10 kPa at least at a point of use, and `ok` covers both. It has no          shortcut: Revit has no tool for it. It changes nothing",
+        "{fixtures?: {wc, lav, sink, shower, laundry: count}, flow?, method?: weights|sum, dn?, length?, fittings?: {elbow90, elbow45, \
+         tee_through, tee_side, gate, globe, check: count}, pressure?, rise?} a cold water pipe of PVC soldável as NBR 5626 asks. The \
+         flow is `flow` (L/s), or the design flow of the `fixtures` by the `method` the project chooses: weights (the empirical \
+         method, Q = 0.3 √ΣP, never more than the fixtures' own flows; the default) or sum (every fixture at once). The fixture \
+         flows and weights are those of NBR 5626:1998 Annex A, Table A.1; `wc` is the WC with a flush tank only (a flush-valve WC \
+         is not in the table here). Without `dn` it replies the smallest DN chosen by speed alone (3 m/s at most; the pressure is \
+         not used to choose it); with `dn`, whether that pipe keeps the speed. The head loss is Darcy-Weisbach (Colebrook, PVC at \
+         20 °C) over `length` (mm) plus the equivalent length of the `fittings`; with `pressure` (kPa, dynamic, upstream) and `rise` \
+         (mm, up) it replies the pressure left at the end, 10 kPa at least at a point of use, and `ok` covers both. It has no \
+         shortcut: Revit has no tool for it. It changes nothing",
         water_size,
     ),
     other(
@@ -1008,7 +1019,7 @@ pub static ALL: &[Command] = &[
          Manning at two thirds full (n 0.011, the standard's Table 4) at its `slope` (a fraction, 0.005 at least): the inner \
          diameter it needs, and with `inside` (mm) whether that pipe carries the flow. Off the abacuses (more than 150 mm inside) \
          nothing is read. A key that does not apply to the `kind`, or `flow` together with `area`, is an error. It has no shortcut: \
-Revit has no tool for it. It changes nothing",
+         Revit has no tool for it. It changes nothing",
         storm_size,
     ),
     other(
