@@ -1740,6 +1740,13 @@ fn hostile_params_never_panic_or_break_the_model() {
     // Detailing, one of each (detail lines, regions, a group, a repeating detail, a sketch floor, Linework), and the payloads
     // that name them: some for every command, some for the one they are for.
     let (detailing, targeted) = crate::detail_tests::sweep_payloads(&mut base);
+    // A section and an elevation of it, after those, so that no id the payloads name moves: their views are drawn too.
+    let _ = base.execute("section", &json!({"start": [-1000, 3000], "end": [9000, 3000]}));
+    let _ = base.execute("elevation", &json!({"facing": "south"}));
+    let views = |m: &Model| {
+        m.elements.values().filter(|e| matches!(e, crate::model::Element::Section(_) | crate::model::Element::Elevation(_))).count()
+    };
+    assert_eq!(views(&base.model), 2, "the sweep's base has a section and an elevation to draw");
     let hostile: Vec<Value> = hostile.into_iter().chain(detailing.into_iter().map(|(_, p)| p)).collect();
     // Each command against each value, on a copy of the same session; the commands shared out between the cores.
     let cmds: Vec<_> = commands().iter().filter(|c| !matches!(c.id, "open" | "save")).collect();
@@ -1765,8 +1772,8 @@ fn hostile_params_never_panic_or_break_the_model() {
                         let made = s.execute(cmd.id, p).is_ok();
                         assert_eq!(s.model.check(), Ok(()), "{} {p} left a broken model", cmd.id);
                         // What a command made is drawn too (a revision cloud round a circle 1,000 km across once listed
-                        // 16 GB of scallops and aborted the plan, and nothing here drew it): the plans, as small as they
-                        // come; a failed command changed nothing.
+                        // 16 GB of scallops and aborted the plan, and nothing here drew it): the plans, sections and
+                        // elevations, as small as they come; a failed command changed nothing.
                         if made && cmd.id != "render" {
                             draw_plans(&s.model);
                         }
@@ -1785,12 +1792,17 @@ fn hostile_params_never_panic_or_break_the_model() {
     }
 }
 
-/// Draws every level's plan and ceiling plan at the smallest size, which builds all that they hold.
+/// Draws every level's plan and ceiling plan, and every section and elevation, at the smallest size, which builds all that
+/// they hold.
 fn draw_plans(m: &Model) {
     for (level, _) in m.levels() {
         for d in [crate::render::plan(m, level, 16, 16), crate::render::ceiling_plan(m, level, 16, 16)] {
             let _ = crate::render::png(&d);
         }
+    }
+    // (Not their pictures: the rasterizer is the plans' too, and a section's drawing costs a third as much without it.)
+    for (id, _) in m.elements.iter().filter(|(_, e)| matches!(e, crate::model::Element::Section(_) | crate::model::Element::Elevation(_))) {
+        let _ = crate::render::section(m, *id, crate::render::section_fit(m, *id, 16, 16));
     }
 }
 
