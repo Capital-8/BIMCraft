@@ -9,14 +9,22 @@ fn tabelas_5_6_and_7_are_as_printed() {
     // building drains by slope: 0.5, 1, 2, 4 %
     assert_eq!(
         [0.005, 0.01, 0.02, 0.04].map(|s| capacity(100.0, s, Role::Main, 1)),
-        [160.0, 180.0, 216.0, 250.0],
-        "0.5 % has none: the branch table's 160"
+        [0.0, 180.0, 216.0, 250.0],
+        "a blank in Tabela 7 is not allowed, and does not borrow the branch table's 160"
     );
     assert_eq!([0.005, 0.01, 0.02, 0.04].map(|s| capacity(150.0, s, Role::Main, 1)), [0.0, 700.0, 840.0, 1000.0]);
     assert_eq!([0.005, 0.01, 0.02, 0.04].map(|s| capacity(200.0, s, Role::Main, 1)), [1400.0, 1600.0, 1920.0, 2300.0]);
     // between two slopes: the smaller one, on the safe side
     assert_eq!(capacity(150.0, 0.015, Role::Main, 1), 700.0);
     assert_eq!(capacity(150.0, 0.001, Role::Main, 1), 0.0, "flatter than 0.5 %: none");
+    assert_eq!(capacity(100.0, 0.0, Role::Main, 1), 0.0, "no slope: none");
+    assert_eq!(capacity(150.0, 0.0, Role::Branch, 1), 0.0, "a branch over DN 100 is not in Tabela 5, it does not borrow Tabela 7");
+    assert_eq!(smallest(161.0, 0.01, Role::Branch, 1, 40.0), None);
+    assert_eq!(smallest(100.0, 0.005, Role::Main, 1, 100.0), Some(200.0), "DN 100 and 150 are not allowed at 0.5 %");
+    assert_eq!(capacity(100.0, 0.0, Role::Main, 1), 0.0, "no slope: none");
+    assert_eq!(capacity(150.0, 0.0, Role::Branch, 1), 0.0, "a branch over DN 100 is not in Tabela 5, it does not borrow Tabela 7");
+    assert_eq!(smallest(161.0, 0.01, Role::Branch, 1, 40.0), None);
+    assert_eq!(smallest(100.0, 0.005, Role::Main, 1, 100.0), Some(200.0), "DN 100 and 150 are not allowed at 0.5 %");
     // stacks
     assert_eq!(
         [40.0, 50.0, 75.0, 100.0, 150.0, 200.0, 250.0, 300.0].map(|dn| capacity(dn, 0.0, Role::Stack, 3)),

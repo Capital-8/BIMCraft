@@ -50,6 +50,19 @@ fn the_limits_and_the_conductors() {
 }
 
 #[test]
+fn a_protective_conductor_is_a_standard_section_so_its_diameter_is_known() {
+    for (phase, pe) in [(95.0, 50.0), (120.0, 70.0), (150.0, 95.0), (185.0, 95.0)] {
+        let all = conductors(Phases::ThreeNeutral, phase, false);
+        assert_eq!(all.last().copied(), Some(pe));
+        assert!(
+            all.iter().all(|s| cable_diameter(*s).is_some()),
+            "{phase} mm2: every conductor has a diameter, so the fill is not pending"
+        );
+        assert!(family("steel-heavy").and_then(|f| smallest(f, &all)).is_some(), "{phase} mm2 fits some size");
+    }
+}
+
+#[test]
 fn the_fill_is_worked_by_hand() {
     let pvc = family("pvc-thread");
     let sizes = pvc.map(|f| f.sizes).unwrap_or(&[]);

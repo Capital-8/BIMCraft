@@ -1,6 +1,11 @@
 //! The tables of NBR 5410:2004 the circuit sizing reads, as the standard prints them (Tabelas 36, 37, 40, 41, 42, 45, 48) with the
 //! conductors' resistance of IEC 60228 and of a maker's flexible cable. Generated once from the checked tables; each was read against the
 //! rendered page of the standard's own tables.
+//!
+//! Source: NBR 5410:2004 is a paid ABNT standard, not a public one. The values are engineering facts (currents, factors, sections)
+//! transcribed from a licensed copy, as numbers; no clause text is copied and nothing here is the standard's prose. The tables of
+//! current capacity are measured values with no formula behind them, so they stay as tables. Tabela 58 and the minimum sections
+//! are rules and are written as code in `nbr5410.rs`.
 
 /// Tabela 36: copper, PVC 70 °C, amperes by section (mm²) and method: A1, A2, B1, B2, C, D, each for two loaded conductors then three.
 pub const CU_PVC: &[(f64, [f64; 12])] = &[

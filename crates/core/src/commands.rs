@@ -939,9 +939,9 @@ pub static ALL: &[Command] = &[
          resistance; or rigid), `ambient` °C (30 in air, 20 in soil), `grouped` circuits in the conduit (this one included), `bundle` \
          (method 11 cables bundled), `spacing` between buried conduits (mm) and `soil` resistivity (K·m/W), and a `section` (mm²) and \
          `breaker` (A) already chosen, which are never made smaller. Replies with the design current, the section and breaker that give \
-         I_B ≤ I_n ≤ I_Z (and 1.45 I_n ≤ 1.45 I_Z) with the drop within `drop_limit` (4 %), the current the section carries, the drop, \
+         I_B ≤ I_n ≤ I_Z (which gives I_2 = 1.45 I_n ≤ 1.45 I_Z for the breakers of NBR NM 60898) with the drop within `drop_limit` (4 %), the current the section carries, the drop, \
          the conductors (phases, neutral, protective), the factors, and what the chosen section and breaker give. It changes nothing; \
-         aluminium, trays, several layers, short circuit and harmonics are not checked",
+         aluminium, trays, several layers, short circuit and harmonics are not checked. It has no shortcut: Revit has no tool for it",
         circuit,
     ),
     other(
@@ -952,8 +952,10 @@ pub static ALL: &[Command] = &[
          (1): their cross-sections by outside diameter over the conduit's inside, at most 53 % for one cable, 31 % for two, 40 % for \
          three or more. `family` (pvc-thread, pvc-solder, steel-heavy, steel-rir; pvc-thread) and `size` (its mark, e.g. 3/4\"; none: \
          the smallest that fits). The dimensions are the makers' own from their catalogues, each family naming maker, document, page \
-         and address; the inside diameter is the outside less twice the wall. Cables are the flexible 750 V PVC ones of 0.5 to 240 mm²: \
-         EPR or larger sections are `pending`, never guessed. Cable trays are not sized. It changes nothing",
+         and address; the inside diameter is the outside less twice the wall. The data covers the flexible 750 V PVC cable of 0.5 to \
+         240 mm² only: there is no `insulation` key, and a section above 240 mm² is `pending`, never guessed. `sections_mm2` lists the \
+         conductors of one circuit (`circuits` of them are in the conduit). Cable trays are not sized. It has no shortcut: Revit has no \
+         tool for it. It changes nothing",
         conduit_fill,
     ),
     other(
@@ -965,7 +967,7 @@ pub static ALL: &[Command] = &[
          smaller than the fixtures' own). `role`: a `branch` (ramal de esgoto, Tabela 5, the default), a `main` (subcoletor or coletor \
          predial, Tabela 7 by `slope`, a fraction, 0.01 by default; DN 100 at least) or a `stack` (tubo de queda, Tabela 6 by the \
          building's `floors`, up to three or more). `min_dn` is the largest drain flowing into it. Replies with the `dn`, what it \
-         carries (`capacity`) and the `minimum_dn` the fixtures ask. It changes nothing",
+         carries (`capacity`) and the `minimum_dn` the fixtures ask. A blank in the standard's table means not allowed: DN 100 and 150 \n         carry nothing in a building drain at 0.5 %, and a branch or a building drain never borrows the other's table. It has no \n         shortcut: Revit has no tool for it. It changes nothing",
         drain_size,
     ),
     other(
@@ -974,7 +976,7 @@ pub static ALL: &[Command] = &[
         "{units, wc?, stack_dn?, length?, trap_dn?} the DN of a sanitary vent as NBR 8160 asks, by the units (UHC) of what it vents: a \
          branch vent (ramal de ventilação, Tabela 8; `wc` says a water closet is in the group), or, with `stack_dn` (the DN of the \
          stack or drain served) and `length` (mm, from its foot to its open end), a vent stack or header (Tabela 2). `trap_dn` adds the \
-         longest run from a trap of that DN to its vent (Tabela 1). It changes nothing",
+         longest run from a trap of that DN to its vent (Tabela 1). It has no shortcut: Revit has no tool for it. It changes nothing",
         vent_size,
     ),
     other(
@@ -3040,7 +3042,8 @@ fn conduit_fill(_: &mut Session, p: &Value) -> R {
     let fill = size.and_then(|s| conduit::fill(s, &all));
     Ok(json!({
         "conductors": all.len(),
-        "sections_mm2": all,
+        "circuits": circuits,
+        "sections_mm2": one,
         "smallest": smallest,
         "size": size.map(|s| s.0),
         "inside_mm": size.map(|s| round(conduit::inside(s), 100.0)),
@@ -3092,7 +3095,16 @@ fn drain_size(_: &mut Session, p: &Value) -> R {
     let slope = within(c, p, "slope", 0.01, 0.0, 1.0)?;
     let floors = within(c, p, "floors", 1.0, 1.0, 1000.0)?.round() as u32;
     let dn = drainage::smallest(units, slope, role, floors, minimum)
-        .ok_or_else(|| bad(c, format!("{units} UHC is more than the standard's tables carry in one drain: split it")))?;
+        .ok_or_else(|| {
+        let most = drainage::DNS.iter().map(|dn| (*dn, drainage::capacity(*dn, slope, role, floors))).fold((0.0, 0.0), |a, b| if b.1 > a.1 { b } else { a });
+        bad(
+            c,
+            format!(
+                "{units} UHC is more than the tables of this version list for this role and slope: the most is DN {} at {} UHC (a blank in the standard's table means not allowed, not that the tables ended); split the load, or give a steeper `slope`",
+                most.0, most.1
+            ),
+        )
+    })?;
     Ok(json!({"units": units, "dn": dn, "capacity": drainage::capacity(dn, slope, role, floors), "minimum_dn": minimum}))
 }
 
