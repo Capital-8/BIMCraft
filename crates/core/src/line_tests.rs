@@ -354,7 +354,7 @@ fn arcs_that_reach_past_the_model_and_polylines_that_would_take_millions_of_poin
         json!({"points": points, "arcs": vec![turn; n - 1]})
     };
     let hostile = [
-        (json!({"start": [0, 0], "end": [1000, 0], "arc": 359.9999999999}), "an arc"),
+        (json!({"start": [0, 0], "end": [1000, 0], "arc": 359.9999999999}), "reaches further"),
         (json!({"start": [0, 0], "end": [1000, 0], "arc": 359.99999999}), "reaches further"),
         (json!({"start": [0, 0], "end": [1000, 0], "through": [500, 1e-9]}), ""),
         (json!({"centre": [1e9, 1e9], "radius": 1e9}), "reaches further"),
@@ -465,8 +465,12 @@ fn joining_lines_takes_the_ones_joined_in_as_delete_does_a_dimension_measuring_o
     let b = line(&mut s, json!({"start": [1000, 0], "end": [2000, 0]}));
     let c = line(&mut s, json!({"start": [0, 3000], "end": [2000, 3000]}));
     let d = run(&mut s, "dimension", json!({"refs": [{"id": b}, {"id": c}], "at": [1000, 1500]}))["id"].as_u64().unwrap_or_default();
-    let joined = run(&mut s, "join_polyline", json!({"ids": [a, b]}))["id"].as_u64().unwrap_or_default();
+    let reply = run(&mut s, "join_polyline", json!({"ids": [a, b]}));
+    let joined = reply["id"].as_u64().unwrap_or_default();
     assert_eq!(joined, a);
+    // It says that the dimension went with the line it measured.
+    let said = reply["notes"].to_string();
+    assert!(said.contains(&format!("dimension {d}")) && said.contains("deleted"), "{reply}");
     assert!(s.model.elements.get(b).is_none() && s.model.elements.get(d).is_none(), "the line and its dimension are gone");
     assert_eq!(curve(&s, a).kind(), "polyline");
     run(&mut s, "undo", json!({}));

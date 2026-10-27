@@ -388,10 +388,6 @@ pub fn default_patterns() -> BTreeMap<String, FillPattern> {
     patterns(Language::English)
 }
 
-pub fn is_default_patterns(p: &BTreeMap<String, FillPattern>) -> bool {
-    *p == default_patterns()
-}
-
 /// The filled region types a project starts with, named in `language`.
 pub fn region_types(language: Language) -> BTreeMap<String, FilledRegionType> {
     let fg = |p: &str| FilledRegionType { foreground: Some(language.word(p).to_string()), ..Default::default() };
@@ -416,10 +412,6 @@ pub fn default_region_types() -> BTreeMap<String, FilledRegionType> {
 /// else by its English name (the types of a file from before they were named in a language), else the first.
 pub fn default_region_type(types: &BTreeMap<String, FilledRegionType>, language: Language) -> Option<&String> {
     [language.word(SOLID_BLACK), SOLID_BLACK].into_iter().find_map(|n| types.get_key_value(n).map(|(k, _)| k)).or_else(|| types.keys().next())
-}
-
-pub fn is_default_region_types(t: &BTreeMap<String, FilledRegionType>) -> bool {
-    *t == default_region_types()
 }
 
 #[cfg(test)]

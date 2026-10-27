@@ -133,10 +133,6 @@ pub fn default_patterns() -> BTreeMap<String, LinePattern> {
     patterns(Language::English)
 }
 
-pub fn is_default_patterns(p: &BTreeMap<String, LinePattern>) -> bool {
-    *p == default_patterns()
-}
-
 /// The style a detail line is drawn in unless told another, the first of a project's styles: in English.
 pub const THIN: &str = "Thin Lines";
 
@@ -173,10 +169,6 @@ pub fn default_style(styles: &BTreeMap<String, LineStyle>, language: Language) -
         .find_map(|n| styles.get_key_value(n).map(|(k, _)| k))
         .or_else(|| styles.iter().find(|(_, s)| **s == thin).map(|(k, _)| k))
         .or_else(|| styles.keys().next())
-}
-
-pub fn is_default_styles(s: &BTreeMap<String, LineStyle>) -> bool {
-    *s == default_styles()
 }
 
 /// A detail line: a line drawn in one view (a level's plan, a section, an elevation or a sheet), in the view's own terms
@@ -603,6 +595,20 @@ mod tests {
         assert_eq!(default_style(&renamed, Language::Portuguese).map(String::as_str), Some("Zeta"));
         renamed.remove("Zeta");
         assert_eq!(default_style(&renamed, Language::English).map(String::as_str), renamed.keys().next().map(String::as_str));
+    }
+
+    #[test]
+    fn a_models_own_serialization_holds_its_line_and_fill_styles_even_when_they_are_the_starting_ones() {
+        // A file is written by `Model::to_json`, which has named them by GUID by then, so they were never equal to the starting
+        // ones there and a rule skipping them when they are was dead; none is left.
+        let v = serde_json::to_value(Model::new("x")).unwrap();
+        for key in ["line_patterns", "line_styles", "fill_patterns", "region_types"] {
+            assert!(v.get(key).is_some_and(|k| k.as_object().is_some_and(|o| !o.is_empty())), "{key}");
+        }
+        let file: serde_json::Value = serde_json::from_str(&Model::new("x").to_json().unwrap()).unwrap();
+        for key in ["line_patterns", "line_styles", "fill_patterns", "region_types"] {
+            assert!(file.get(key).is_some(), "{key}");
+        }
     }
 
     #[test]

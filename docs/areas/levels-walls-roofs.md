@@ -88,7 +88,7 @@ ribbon's right end.
 What the line tools hold to, and don't (`curves.rs`, `draw.rs`, `sketch.rs`). A curve is drawn as chords none further than `FLAT`
 (0.25 mm) from it: a polyline's arcs, a circle, a spline and a fitted spline (a span of a spline is cut by the greatest
 second derivative on it, so a ten metre arch is hundreds of chords), up to `MAX_DRAWN` extra points in all; a polyline whose
-arcs would take more is refused, and a circle past about 27 km of radius is drawn coarser than `FLAT` rather than in more.
+arcs would take more is refused, and a circle past about 3.4 km of radius (`MAX_DRAWN` chords stray `FLAT` from it there) is drawn coarser than `FLAT` rather than in more, 0.37 mm off at 5 km and 2 mm off at 27 km.
 An arc, a circle or an ellipse reaches no further than `MAX_COORD` from the origin, as a wall's arc must; a spline lies inside
 its control points, and a fitted spline is held to its points only, a cubic through them straying a little past. A curve's
 start and end are the points it was given. Offset moves a polyline's lines along themselves and its arcs about their own

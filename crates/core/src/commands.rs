@@ -786,7 +786,9 @@ pub static ALL: &[Command] = &[
         "Join into Polyline",
         &["PJ"],
         "{ids: [id, …]} joins detail lines of one view, lines, arcs and polylines that meet end to end, into one polyline in \
-         the first's line style (closed when they come round); the first keeps its id, the rest are deleted",
+         the first's line style (closed when they come round); the first keeps its id, the rest are deleted, and a dimension \
+         that measured one of the rest loses that reference (and is deleted, left with fewer than two): the reply's `notes` \
+         say which",
         join_polyline,
     ),
     edit(
@@ -803,7 +805,8 @@ pub static ALL: &[Command] = &[
         &[],
         "{id, at: [x, y], delete?} a detail line (a polyline, or a spline of either kind) with a vertex more where it passes \
          nearest `at` (a spline by its control points gains a control point and keeps its shape exactly), or with `delete` \
-         one fewer: the corner, control point or point passed through nearest `at`",
+         one fewer: the corner, control point or point passed through nearest `at`; `at` is within 100 mm of the line (of a \
+         vertex, to delete one), or it is refused",
         vertex,
     ),
     edit(
@@ -6633,9 +6636,23 @@ fn join_polyline(s: &mut Session, p: &Value) -> R {
     let curve =
         crate::curves::join(&curves).ok_or_else(|| bad(c, "the lines don't make one chain, each end meeting the next within 1 mm"))?;
     // The lines joined in go as Delete takes them: a dimension that measured one loses it (and goes, left with fewer than two).
+    let joined_in: Vec<Guid> = ids[1..].iter().map(|id| m.guid(*id)).collect();
+    let measuring: Vec<Id> = m
+        .elements
+        .iter()
+        .filter(|(_, e)| matches!(e, Element::Dimension(d) if d.refs.iter().any(|r| joined_in.contains(&r.id))))
+        .map(|(id, _)| *id)
+        .collect();
     delete(s, &json!({"ids": &ids[1..]}))?;
     s.model_mut().elements.insert(ids[0], Element::DetailLine(DetailLine { curve, ..first }));
-    Ok(json!({"id": ids[0]}))
+    let notes: Vec<String> = measuring
+        .into_iter()
+        .map(|d| match s.model.elements.get(d) {
+            Some(_) => format!("dimension {d} measured a line that is joined in: it lost that reference"),
+            None => format!("dimension {d} measured a line that is joined in, was left with fewer than two references, and is deleted"),
+        })
+        .collect();
+    Ok(if notes.is_empty() { json!({"id": ids[0]}) } else { json!({"id": ids[0], "notes": notes}) })
 }
 
 fn offset(s: &mut Session, p: &Value) -> R {
@@ -7233,7 +7250,11 @@ fn curve_param(c: &str, p: &Value) -> Result<crate::curves::Curve, String> {
         .unwrap_or_default();
     let f: crate::curves::Fields =
         serde_json::from_value(Value::Object(fields)).map_err(|e| bad(c, format!("{e}: a line is {}", crate::curves::FORMS)))?;
-    let curve = rounded(f.curve().map_err(|e| bad(c, e))?);
+    // Checked as given first, so that a rule names the number that was given: 359.9999999999° is rounded to 360 below, and
+    // would be refused for turning a whole circle, where the rule that refuses it is how far its huge circle reaches.
+    let given = f.curve().map_err(|e| bad(c, e))?;
+    given.check("the line").map_err(|e| bad(c, e))?;
+    let curve = rounded(given);
     curve.check("the line").map_err(|e| bad(c, e))?;
     Ok(curve)
 }
