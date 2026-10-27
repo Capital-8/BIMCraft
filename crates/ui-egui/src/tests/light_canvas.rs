@@ -3,7 +3,7 @@
 
 use super::*;
 use crate::settings::Settings;
-use crate::style::{DARK, LIGHT};
+use crate::style::{CANVAS_LIGHT, DARK, LIGHT};
 use egui::epaint::ColorMode;
 use egui::{Color32, ImageData, Shape, ThemePreference};
 use egui_kittest::kittest::NodeT;
@@ -97,8 +97,47 @@ fn a_selected_or_hovered_element_is_filled_in_the_canvas_palette_not_the_interfa
     h.hover_at(east);
     h.run();
     let (fills, _) = painted(&h);
-    assert!(fills.contains(&LIGHT.select_fill), "the selected wall: {fills:?}");
-    assert!(fills.contains(&LIGHT.hover_fill), "the hovered wall: {fills:?}");
+    assert!(fills.contains(&CANVAS_LIGHT.select_fill), "the selected wall: {fills:?}");
+    assert!(fills.contains(&CANVAS_LIGHT.hover_fill), "the hovered wall: {fills:?}");
+}
+
+/// The colours of every solid stroke the last frame painted: a path's, a segment's.
+fn strokes(h: &Harness<BimApp>) -> Vec<Color32> {
+    fn walk(s: &Shape, out: &mut Vec<Color32>) {
+        match s {
+            Shape::Path(p) => out.extend(match p.stroke.color {
+                ColorMode::Solid(c) => Some(c),
+                _ => None,
+            }),
+            Shape::LineSegment { stroke, .. } => out.push(stroke.color),
+            Shape::Vec(v) => v.iter().for_each(|s| walk(s, out)),
+            _ => {}
+        }
+    }
+    let mut out = Vec::new();
+    h.output().shapes.iter().for_each(|c| walk(&c.shape, &mut out));
+    out
+}
+
+#[test]
+fn a_selected_or_hovered_element_is_stroked_in_the_canvas_palette_and_the_two_are_told_apart_on_a_light_canvas() {
+    let mut h = app(BOX);
+    let (south, east) = (P2(4000.0, 0.0), h.state().screen(P2(8000.0, 3000.0)));
+    pick_look(&mut h, "Dark UI, Light Canvas");
+    click(&mut h, south);
+    h.hover_at(east);
+    h.run();
+    let ink = strokes(&h);
+    // The dark palette's blues are for a dark ground: on white the hover one held 2.5:1.
+    assert!(ink.contains(&LIGHT.accent), "the selected wall's outline: the light palette's accent");
+    assert!(ink.contains(&CANVAS_LIGHT.hover), "the hovered wall's outline: the canvas's own hover");
+    let (fills, _) = painted(&h);
+    let apart = |a: Color32, b: Color32| (i32::from(a.r()) - i32::from(b.r())).abs() + (i32::from(a.g()) - i32::from(b.g())).abs();
+    assert!(fills.contains(&CANVAS_LIGHT.select_fill) && fills.contains(&CANVAS_LIGHT.hover_fill));
+    assert!(
+        apart(CANVAS_LIGHT.select_fill, CANVAS_LIGHT.hover_fill) > 30,
+        "a glance tells the selected wall's tint from the hovered one's"
+    );
 }
 
 #[test]
@@ -111,6 +150,47 @@ fn the_crop_regions_outline_is_drawn_for_the_canvas_not_the_interface() {
     pick_look(&mut h, "Dark UI, Light Canvas");
     let outlines = painted(&h).1;
     assert!(outlines.contains(&LIGHT.muted), "dark enough to read on white: {outlines:?}");
+}
+
+/// What the last frame painted of a sketch: the colours of its strokes, and the fills of its 8 px squares that have one (a
+/// picked line's grips).
+fn sketch_ink(h: &Harness<BimApp>) -> (Vec<Color32>, Vec<Color32>) {
+    fn walk(s: &Shape, out: &mut (Vec<Color32>, Vec<Color32>)) {
+        match s {
+            Shape::Path(p) => out.0.extend(match p.stroke.color {
+                ColorMode::Solid(c) => Some(c),
+                _ => None,
+            }),
+            Shape::Rect(r) if r.rect.size() == egui::vec2(8.0, 8.0) && r.fill != Color32::TRANSPARENT => out.1.push(r.fill),
+            Shape::Vec(v) => v.iter().for_each(|s| walk(s, out)),
+            _ => {}
+        }
+    }
+    let mut out = (Vec::new(), Vec::new());
+    h.output().shapes.iter().for_each(|c| walk(&c.shape, &mut out));
+    out
+}
+
+#[test]
+fn a_sketchs_wrong_lines_and_grips_are_drawn_for_the_canvas_not_the_interface() {
+    let mut h = app(&format!("{BOX}\nfloor {{}}"));
+    let f = ids(&h, "floor")[0];
+    h.state_mut().selection = vec![f];
+    h.run();
+    press(&mut h, "Modify | Floors");
+    press(&mut h, "Edit Boundary");
+    key(&mut h, Key::Escape);
+    // Taking the north line out leaves the two lines that met it loose; Finish says so and the lines show it.
+    click(&mut h, P2(4000.0, 6000.0));
+    key(&mut h, Key::Delete);
+    press(&mut h, "Finish Edit Mode");
+    assert!(h.state().sketch.as_ref().is_some_and(|s| s.wrong.len() == 2), "{}", h.state().status.text);
+    // A picked line's ends are grips.
+    click(&mut h, P2(4000.0, 0.0));
+    pick_look(&mut h, "Dark UI, Light Canvas");
+    let (strokes, grips) = sketch_ink(&h);
+    assert!(strokes.contains(&LIGHT.error), "wrong lines read on white: {strokes:?}");
+    assert!(!grips.is_empty() && grips.iter().all(|c| *c == LIGHT.surface), "grips: {grips:?}");
 }
 
 #[test]

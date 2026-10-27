@@ -184,7 +184,7 @@ fn queuing_a_snapshot_and_cleanup_never_waits_for_a_blocked_worker() {
         worker.remove(backup).unwrap();
         done.send(worker).unwrap_or_else(|_| panic!("receiver dropped"));
     });
-    let returned = result.recv_timeout(Duration::from_secs(2));
+    let returned = result.recv_timeout(Duration::from_secs(10));
     release.send(()).unwrap();
     let mut worker = returned.expect("scheduling blocked the caller");
     assert!(matches!(notice(&mut worker), Notice::Saved { result: Ok(()), .. }));

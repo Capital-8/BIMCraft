@@ -43,3 +43,68 @@ is runs and landings laid out from its start (`stairs::stair`, `stairs::ramp`): 
 mm up), as deep as the runs are wide, the next run turning by its `turn`; a railing on one follows its walk line moved out to
 its side (`stairs::railing`), so it goes wherever its host goes. `modify` merges into fields that are objects (JSON Merge Patch), so `{"view_range": {"cut": 1500}}` keeps the rest; an element's own field can't be
 called `category`, the tag every element carries.
+
+Sketches (`sketch.rs`) are how an outline is drawn, the one solver everything with an outline and holes uses: floors,
+ceilings, roofs by footprint, shafts and filled regions now, topography next. A sketch is `SketchLine`s, straight or
+arcs (a point `through`), in any order, either way round; `sketch::solve` cuts arcs into chords no more than 5° round,
+welds ends within `TOL`, then names every problem at once with the lines it's about, what to fix first first
+(`Problem::rank`: a line too short or out of range; two lines crossing, or one ending part way along another; two along
+each other; three or more at a point; an end no other meets; a loop with no area), and otherwise walks the loops and nests
+them by how many others each is inside: even, an outline (counter-clockwise), odd, a hole (clockwise) of the innermost loop
+round it, so an island in a hole is an outline again. `solve_one` wants one outline (a floor's, a roof's). The element
+keeps the sketch it was drawn or last edited by (`sketch` on floors, ceilings, roofs and shafts; empty when it was made
+over the walls or read from a file): each line is a part with an id and a GUID of its own (`HasPart`, listed in
+`parts_now` by the element's GUID), going with the element when it moves and new on a copy; part ids are not given
+again once a line is gone, for as long as the project is open (the library remembers the lowest it has held; a file holds the
+ids in use, so one a line had before it was deleted and the file saved may be given again after the file is reopened). Commands take `sketch` (lines `[[x,y],[x,y]]`, arcs `[[x,y],[x,y],[x,y]]`, or
+`{start, end, through?, id?}`) in place of `boundary` and its holes; `edit_boundary` without one gives the lines to edit
+(the kept sketch while it still draws the outline, `sketch::draws`, else the outline's edges as new lines) and with one
+redraws it, a line sent back with its `id` keeping it (keeping a roof's gables on edges that stay); the `sketch` command
+solves without making anything. Messages name a line by its id, or its place in the list while it has none. A boundary
+given as points is cleaned (a repeated point dropped, and one within a millimetre of the last), and every outline a command
+makes or changes, whichever command (`floor`, `modify`, `edit_boundary`, `move`…), is judged as the sketch of its edges
+(`Model::check_edits`, asked by the engine after each command but Insert from File): a floor's, ceiling's or roof's boundary,
+an opening or a courtyard, a shaft's boundary, that crosses itself or lies along itself, has an edge ending part way along
+another, or a spike or keyhole slit, is refused, saying which edges and where, and what to do: redraw it with `edit_boundary`; give
+`boundary` or `sketch` (with the walls that touch at a corner named only when it was taken from walls), or simple `openings` or
+`courtyards` for one of those rings, for one a command was making;
+redraw the mass whose outline it is, for one made by face or by `mass_floors` (a mass itself may still have a bow tie outline,
+a spike or a corner touching an edge, so the message says the outline isn't simple, not that it crosses itself);
+and, for a roof's opening, which `edit_boundary` does not edit, give `modify` a simple `openings`, and from `dormer` change the
+dormer's width, height or position. That is a change from the base, which let
+`modify` and the commands that weren't given points set such an outline. `Model::check` doesn't judge the whole project by
+it: a file, an IFC import or a Revit import with a keyhole outline still opens, and what leaves its outline alone (`modify`
+of its offset, `delete`, `edit_boundary` with a sketch that is simple) still works, and so does what moves, copies, turns or mirrors
+it, which makes it no worse (a copy is judged against the elements the command was given, so a new floor drawn with a bow tie
+the file also holds is refused); what changes its shape is asked to redraw it first. One line that crosses itself (a closed polyline round a bow tie, a spline with a loop) is found as two lines
+crossing are, and a sketch is refused at once past 200,000 straight pieces (a circle is up to 8,193 of them), or when its
+pieces lie so close together that telling which cross would take six million steps.
+
+The desktop's sketch mode (`crates/ui-egui/src/sketch.rs`) holds the lines until Finish Edit Mode, which solves them
+first and says what's wrong for whoever drew it (`sketch::friendly`: what to fix, kind by kind, where, in the project's
+units, and the lines by id) with those lines in the error colour; solved, it runs the command. Draw has every shape of
+the Draw panel (`draw.rs`; lines, rectangles, polygons, circles, the arcs, Fillet Arc on two sketch lines, splines, ellipses,
+polylines, Pick Lines: see [views and graphics](views-and-graphics.md)) and Pick Walls (a line along each wall's location
+line, an arc along an arc wall); a sketch line is any curve, so a circle or an ellipse is a loop of its own. Modify picks
+sketch lines (a click, a window box from the left, a crossing box from the right), a picked line's handles (its corners, a
+spline's points, a circle's centre) are grips that take every one joined there with them, and Delete removes them; Ctrl+Z takes back a line; the plan's snaps take the
+sketch's own ends, middles, crossings and curves as well as visible view-specific detail (`snap::in_sketch`). Floor, Ceiling, Roof and Shaft each start a new one (Boundary
+Line, Sketch Ceiling); Edit Boundary redraws one selected. The Mode panel (Finish, Cancel; Edit Boundary) stands at the
+ribbon's right end.
+
+What the line tools hold to, and don't (`curves.rs`, `draw.rs`, `sketch.rs`). A curve is drawn as chords none further than `FLAT`
+(0.25 mm) from it: a polyline's arcs, a circle, a spline and a fitted spline (a span of a spline is cut by the greatest
+second derivative on it, so a ten metre arch is hundreds of chords), up to `MAX_DRAWN` extra points in all; a polyline whose
+arcs would take more is refused, and a circle past about 3.4 km of radius (`MAX_DRAWN` chords stray `FLAT` from it there) is drawn coarser than `FLAT` rather than in more, 0.37 mm off at 5 km and 2 mm off at 27 km.
+An arc, a circle or an ellipse reaches no further than `MAX_COORD` from the origin, as a wall's arc must; a spline lies inside
+its control points, and a fitted spline is held to its points only, a cubic through them straying a little past. A curve's
+start and end are the points it was given. Offset moves a polyline's lines along themselves and its arcs about their own
+centres and makes each corner where the moved sides cross; it gives nothing where a side would vanish or turn round, or a
+corner is so sharp its mitre would be 50 offsets long, and it does not trim a fold it makes in a concave shape (Revit's
+does); an ellipse or a spline offsets to a fitted spline within 0.05 mm. Fillet on walls keeps their doors and windows
+where they stand and refuses to cut one off, but does not stretch a third wall that ended on the corner. A detail line with
+no style gets Thin Lines by the project's name, else the English one, else the thin black solid style. Of the line tools,
+Revit has default shortcuts for Trim/Extend to Corner (TR), Offset (OF), Fillet (FL), Split (SL) and Detail Line (DL), which
+`corner`, `offset`, `fillet`, `split` and `detail_line` have; it has none for Trim/Extend to a boundary, vertices, Convert
+Spline, Edit Boundary, line patterns and styles or fill patterns, which have none here. Explode Polyline is EX, ours (PX is
+the desktop's Plumbing Fixture).

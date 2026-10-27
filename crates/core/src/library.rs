@@ -42,6 +42,11 @@ pub enum Kind {
     FamilyType,
     /// A family's parameter, named `family: parameter`.
     FamilyParameter,
+    LinePattern,
+    LineStyle,
+    FillPattern,
+    FilledRegionType,
+    DetailGroup,
 }
 
 impl Kind {
@@ -62,6 +67,11 @@ impl Kind {
             Kind::DesignOption => "design option".into(),
             Kind::FamilyType => "family type".into(),
             Kind::FamilyParameter => "family parameter".into(),
+            Kind::LinePattern => "line pattern".into(),
+            Kind::LineStyle => "line style".into(),
+            Kind::FillPattern => "fill pattern".into(),
+            Kind::FilledRegionType => "filled region type".into(),
+            Kind::DetailGroup => "detail group".into(),
         }
     }
 
@@ -80,6 +90,11 @@ impl Kind {
             "design-option" => Kind::DesignOption,
             "family-type" => Kind::FamilyType,
             "family-parameter" => Kind::FamilyParameter,
+            "line-pattern" => Kind::LinePattern,
+            "line-style" => Kind::LineStyle,
+            "fill-pattern" => Kind::FillPattern,
+            "filled-region-type" => Kind::FilledRegionType,
+            "detail-group" => Kind::DetailGroup,
             _ => Kind::Type(s.strip_prefix("type:")?.to_string()),
         })
     }
@@ -102,6 +117,11 @@ impl fmt::Display for Kind {
             Kind::DesignOption => f.write_str("design-option"),
             Kind::FamilyType => f.write_str("family-type"),
             Kind::FamilyParameter => f.write_str("family-parameter"),
+            Kind::LinePattern => f.write_str("line-pattern"),
+            Kind::LineStyle => f.write_str("line-style"),
+            Kind::FillPattern => f.write_str("fill-pattern"),
+            Kind::FilledRegionType => f.write_str("filled-region-type"),
+            Kind::DetailGroup => f.write_str("detail-group"),
         }
     }
 }
@@ -164,6 +184,12 @@ impl HasPart for crate::family::Form {
     }
 }
 
+impl HasPart for crate::sketch::SketchLine {
+    fn ident(&mut self) -> (&mut Id, &mut Guid) {
+        (&mut self.id, &mut self.guid)
+    }
+}
+
 impl HasPart for crate::family::Symbol {
     fn ident(&mut self) -> (&mut Id, &mut Guid) {
         (&mut self.id, &mut self.guid)
@@ -188,6 +214,10 @@ pub struct Library {
     by_name: BTreeMap<(Kind, String), Id>,
     by_guid: HashMap<Guid, Id>,
     parts: BTreeMap<Id, Part>,
+    /// The lowest id this library has held, entry or part, even if it has none now (0 before any): new ids count down from
+    /// below it, so an id of something deleted isn't given again while the project is open. A file holds the ids in use,
+    /// not this.
+    lowest: Id,
 }
 
 impl PartialEq for Library {
@@ -265,7 +295,19 @@ impl Library {
         self.by_name.insert((e.kind.clone(), e.name.clone()), id);
         self.by_guid.insert(e.guid, id);
         self.by_id.insert(id, e);
+        self.lowest = self.lowest_id().unwrap_or(id);
         Ok(())
+    }
+
+    /// The lowest id an entry or a part has, or has had.
+    fn lowest_id(&self) -> Option<Id> {
+        let held = self.by_id.keys().next().into_iter().chain(self.parts.keys().next()).copied();
+        held.chain((self.lowest != 0).then_some(self.lowest)).min()
+    }
+
+    /// Ids down to `id` are held by something, so new ones count down from below it.
+    fn hold(&mut self, id: Id) {
+        self.lowest = if self.lowest == 0 { id } else { self.lowest.min(id) };
     }
 
     fn remove(&mut self, id: Id) {
@@ -479,6 +521,11 @@ impl Model {
         let params: Vec<String> =
             self.families.iter().flat_map(|(f, fam)| fam.parameters.iter().map(move |p| format!("{f}: {}", p.name))).collect();
         add(Kind::FamilyParameter, &mut params.iter());
+        add(Kind::LinePattern, &mut self.line_patterns.keys());
+        add(Kind::LineStyle, &mut self.line_styles.keys());
+        add(Kind::FillPattern, &mut self.fill_patterns.keys());
+        add(Kind::FilledRegionType, &mut self.region_types.keys());
+        add(Kind::DetailGroup, &mut self.detail_groups.keys());
         out
     }
 
@@ -515,6 +562,15 @@ impl Model {
         for (n, f) in &self.families {
             add("form", "family", n, f.forms.iter().map(|x| (x.id, x.guid)).collect());
             add("symbol", "family", n, f.symbols.iter().map(|x| (x.id, x.guid)).collect());
+        }
+        for (n, g) in &self.detail_groups {
+            add("member", "detail group", n, g.members.iter().map(|x| (x.id, x.guid)).collect());
+        }
+        // An element's sketch lines, the element named by its GUID, which never changes.
+        for (id, e) in self.elements.iter() {
+            if let Some(lines) = e.sketch().filter(|l| !l.is_empty()) {
+                add("sketch line", e.category(), &self.guid(*id).to_string(), lines.iter().map(|l| (l.id, l.guid)).collect());
+            }
         }
         out
     }
@@ -572,7 +628,8 @@ impl Model {
         }
         // New ones: ids down from the library's lowest, GUIDs made in order (a file read the same makes the same).
         let floor = self.elements.keys().next_back().map_or(crate::ids::FIRST_ID, |k| k + 1).max(self.next_id);
-        let mut below = self.library.first_id().unwrap_or(LAST_ID + 1);
+        // Below every entry's and every part's there has been, so a part taken away leaves its id unused.
+        let mut below = self.library.lowest_id().unwrap_or(LAST_ID + 1);
         let given: Vec<(Id, Guid)> = now
             .iter()
             .zip(&keep)
@@ -629,7 +686,16 @@ impl Model {
             f.forms.iter_mut().for_each(|x| give(&mut x.id, &mut x.guid));
             f.symbols.iter_mut().for_each(|x| give(&mut x.id, &mut x.guid));
         }
+        for g in self.detail_groups.values_mut() {
+            g.members.iter_mut().for_each(|x| give(&mut x.id, &mut x.guid));
+        }
+        for e in self.elements.values_mut() {
+            if let Some(lines) = e.sketch_mut() {
+                lines.iter_mut().for_each(|l| give(&mut l.id, &mut l.guid));
+            }
+        }
         self.library.parts = self.parts_now().into_iter().collect();
+        self.library.lowest = self.library.lowest_id().unwrap_or(0);
     }
 
     /// What the library has that has no id and GUID gets them; what it has no more loses them. A rename that kept its
@@ -650,6 +716,11 @@ impl Model {
             self.library.entries().filter(|(_, e)| !keep.contains(&(e.kind.clone(), e.name.clone()))).map(|(id, _)| id).collect();
         for id in gone {
             self.library.remove(id);
+        }
+        // Parts hold their ids themselves, and a file from before a new kind of entry has them right below its entries: the
+        // new entries count down from below them too, so that none of the parts is given another id.
+        if let Some(lowest) = self.parts_now().into_iter().map(|(id, _)| id).filter(|id| !crate::ids::unset(id)).min() {
+            self.library.hold(lowest);
         }
         for (kind, name) in now {
             if self.library.id(&kind, &name).is_none() {
@@ -684,6 +755,14 @@ impl Model {
             f.forms.iter_mut().for_each(|x| (x.id, x.guid) = (0, Guid::default()));
             f.symbols.iter_mut().for_each(|x| (x.id, x.guid) = (0, Guid::default()));
         }
+        for g in self.detail_groups.values_mut() {
+            g.members.iter_mut().for_each(|x| (x.id, x.guid) = (0, Guid::default()));
+        }
+        for e in self.elements.values_mut() {
+            if let Some(lines) = e.sketch_mut() {
+                lines.iter_mut().for_each(|l| (l.id, l.guid) = (0, Guid::default()));
+            }
+        }
         self.library.parts.clear();
     }
 
@@ -691,8 +770,7 @@ impl Model {
     /// [`FIRST_ID`](crate::ids::FIRST_ID): one id space, a new project's library not in its elements' way. Should the two
     /// meet, the library goes on past the elements.
     pub fn fresh_library_id(&mut self) -> Id {
-        let lowest = self.library.first_id().into_iter().chain(self.library.parts.keys().next().copied()).min();
-        let below = lowest.map_or(LAST_ID, |f| f.saturating_sub(1));
+        let below = self.library.lowest_id().map_or(LAST_ID, |f| f.saturating_sub(1));
         let floor = self.elements.keys().next_back().map_or(crate::ids::FIRST_ID, |k| k + 1).max(self.next_id);
         let mut id = below;
         while id >= floor && (self.elements.contains_key(id) || self.library.taken(id)) {
@@ -715,7 +793,7 @@ impl Model {
 }
 
 /// Each name `g` holds of a library entry, given to `f` with what it names, which may put another in its place: a view's
-/// template, filters, phase, phase filter and design options.
+/// template, filters, phase, phase filter, design options and its linework's line styles.
 fn graphics_refs(g: &mut crate::graphics::Graphics, f: &mut dyn FnMut(&Kind, &mut String)) {
     if let Some(t) = &mut g.template {
         f(&Kind::ViewTemplate, t);
@@ -728,6 +806,11 @@ fn graphics_refs(g: &mut crate::graphics::Graphics, f: &mut dyn FnMut(&Kind, &mu
     }
     if let Some(p) = &mut g.phase_filter {
         f(&Kind::PhaseFilter, p);
+    }
+    for l in &mut g.linework {
+        if let Some(s) = &mut l.style {
+            f(&Kind::LineStyle, s);
+        }
     }
     g.options = std::mem::take(&mut g.options)
         .into_iter()
@@ -809,6 +892,18 @@ impl crate::model::Element {
             },
             Element::Component(c) => family_and_type(&mut c.family, &mut c.type_name, f),
             Element::PointCloud(pc) => f(&Kind::Cloud, &mut pc.cloud),
+            Element::DetailLine(l) => f(&Kind::LineStyle, &mut l.style),
+            Element::DetailGroup(g) => f(&Kind::DetailGroup, &mut g.type_name),
+            Element::RepeatingDetail(r) => f(&Kind::DetailGroup, &mut r.type_name),
+            Element::FilledRegion(r) => {
+                f(&Kind::FilledRegionType, &mut r.type_name);
+                if let Some(st) = &mut r.line_style {
+                    f(&Kind::LineStyle, st);
+                }
+                for st in r.sketch.iter_mut().filter_map(|l| l.style.as_mut()) {
+                    f(&Kind::LineStyle, st);
+                }
+            }
             Element::Schedule(sc) => {
                 let mut fields: Vec<&mut String> =
                     sc.fields.iter_mut().map(|x| &mut x.name).chain(sc.sort.iter_mut().map(|x| &mut x.field)).collect();
@@ -879,6 +974,22 @@ impl Model {
         }
         for fam in self.families.values_mut() {
             fam.material_refs_mut(&mut |m| f(&Kind::Material, m));
+        }
+        for t in self.region_types.values_mut() {
+            for p in [&mut t.foreground, &mut t.background].into_iter().flatten() {
+                f(&Kind::FillPattern, p);
+            }
+        }
+        for p in self.line_styles.values_mut().filter_map(|s| s.pattern.as_mut()) {
+            f(&Kind::LinePattern, p);
+        }
+        for m in self.detail_groups.values_mut().flat_map(|g| g.members.iter_mut()) {
+            m.element.lib_refs_mut(f);
+        }
+        for x in self.materials.values_mut() {
+            for p in [&mut x.cut_pattern, &mut x.surface_pattern].into_iter().flatten() {
+                f(&Kind::FillPattern, p);
+            }
         }
     }
 
@@ -1267,6 +1378,37 @@ type {"category": "wall", "name": "Partition", "thickness": 110}"#,
         assert!(copy.iter().all(|c| !after.contains(c) && !after.iter().any(|a| a.0 == c.0 || a.1 == c.1)), "{copy:?}");
         assert_eq!(ident(&s.model), after, "the original keeps its own");
         assert_eq!(s.model.check(), Ok(()));
+    }
+
+    #[test]
+    fn a_file_from_before_the_line_and_fill_styles_opens_with_every_part_keeping_its_id() {
+        let mut s = Session::new();
+        s.script(crate::sample::SAMPLE).unwrap();
+        // Written as 0.8 writes a project: no line patterns or styles, fill patterns or region types, and so none of their
+        // entries; the parts (layers, forms, symbols) hold ids below the entries that were there.
+        let mut m = (*s.model).clone();
+        (m.line_patterns, m.line_styles, m.fill_patterns, m.region_types) = Default::default();
+        // The library made again, as 0.8 made it: the entries from the top down, and the parts right below the last of them.
+        m.library = Default::default();
+        m.forget_parts();
+        m.sync_library();
+        let mut file: Value = serde_json::from_str(&m.to_json().unwrap()).unwrap();
+        for key in ["line_patterns", "line_styles", "fill_patterns", "region_types"] {
+            file.as_object_mut().unwrap().remove(key);
+        }
+        file["format"] = json!(5);
+        let (opened, left_out) = Model::read(&file.to_string()).unwrap();
+        assert!(left_out.is_empty(), "{left_out:?}");
+        let ids = |m: &Model| m.parts_now().into_iter().map(|(id, p)| (id, p.guid)).collect::<Vec<_>>();
+        let (was, now) = (ids(&m), ids(&opened));
+        assert!(was.len() > 100, "{} parts", was.len());
+        let renumbered = was.iter().zip(&now).filter(|(a, b)| a != b).count();
+        assert_eq!((renumbered, was.len()), (0, now.len()), "{renumbered} of {} parts have an id they did not have", was.len());
+        // The entries the file lacked are there, below the parts, and nothing has an id twice.
+        assert!(opened.library.id(&Kind::LineStyle, "Thin Lines").is_some());
+        assert!(opened.library_in_step());
+        let all: std::collections::BTreeSet<Id> = opened.library.entries().map(|(id, _)| id).chain(now.iter().map(|(id, _)| *id)).collect();
+        assert_eq!(all.len(), opened.library.entries().count() + now.len());
     }
 
     #[test]

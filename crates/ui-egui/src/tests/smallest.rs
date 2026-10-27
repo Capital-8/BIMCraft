@@ -151,3 +151,123 @@ fn the_options_bar_stays_clear_of_the_zoom_buttons_and_inside_the_window_at_the_
         assert!(w.contains_rect(button), "`{label}` {button:?} is off the window");
     }
 }
+
+/// A project with forty fill patterns, forty region types, forty line patterns and forty line styles, on the window at the least
+/// a window can be.
+fn crowded() -> Harness<'static, BimApp> {
+    let mut h = at_the_least(false, false);
+    let s = &mut h.state_mut().session;
+    for i in 0..40 {
+        let angle = f64::from(i) * 4.0;
+        s.execute("fill_pattern", &json!({"name": format!("Hatch {i:02}"), "lines": [{"angle": angle, "spacing": 5.0}]})).unwrap();
+        s.execute("filled_region_type", &json!({"name": format!("Region {i:02}"), "foreground": format!("Hatch {i:02}")})).unwrap();
+        s.execute(
+            "line_pattern",
+            &json!({"name": format!("Dashes {i:02}"), "segments": [{"dash": 3.0 + f64::from(i) / 10.0}, {"space": 1.5}]}),
+        )
+        .unwrap();
+        s.execute("line_style", &json!({"name": format!("Style {i:02}"), "pen": 2, "pattern": format!("Dashes {i:02}")})).unwrap();
+    }
+    h.run();
+    h
+}
+
+/// A PAT file of many patterns the dialog can't take, to leave a long note in it.
+fn long_note(h: &mut Harness<BimApp>) {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("bad.pat");
+    std::fs::write(&file, (0..60).map(|i| format!("*A Pattern With A Rather Long Name Number {i}\nnot numbers\n")).collect::<String>())
+        .unwrap();
+    h.state_mut().import_patterns(&file);
+    h.run();
+    h.run();
+}
+
+/// Whether each of `labels` and the dialog `modal` itself lies inside the window.
+fn dialog_fits(h: &Harness<BimApp>, modal: &str, labels: &[&str], said: &str) {
+    let w = window(least());
+    let area = h.ctx.memory(|m| m.area_rect(egui::Id::new(modal))).expect("the dialog is open");
+    assert!(w.expand(0.5).contains_rect(area), "{said}: the dialog {area:?} runs off the window {w:?}");
+    for label in labels {
+        // (The ribbon behind the dialog may carry the same word.)
+        let found: Vec<Rect> = h.get_all_by_label(label).map(|n| n.rect()).filter(|r| r.intersects(area)).collect();
+        assert!(!found.is_empty(), "{said}: `{label}` is not in the dialog {area:?}");
+        for r in found {
+            assert!(w.expand(0.5).contains_rect(r), "{said}: `{label}` {r:?} is off the window {w:?}");
+        }
+    }
+}
+
+#[test]
+fn fill_patterns_and_edit_type_with_forty_patterns_and_a_long_note_stay_inside_the_least_window_with_their_buttons_in_reach() {
+    let buttons = ["OK", "Cancel", "Apply"];
+    // Each tab of Manage's table.
+    let mut h = crowded();
+    let model = h.state().session.model.clone();
+    h.state_mut().fill_patterns_dialog = Some(crate::fillpatterns::FillPatternsDialog::new(&model));
+    h.run();
+    let types = [&["Fill Patterns", "Region Types", "Patterns", "New Type"][..], &buttons].concat();
+    dialog_fits(&h, "fill-patterns", &types, "Region Types");
+    press(&mut h, "Patterns");
+    long_note(&mut h);
+    let patterns = [&["Fill Patterns", "Patterns", "New Pattern", "Import...", "Export..."][..], &buttons].concat();
+    dialog_fits(&h, "fill-patterns", &patterns, "Patterns with a long note");
+    // A pattern's families open under the list, twenty of them: the list and they share what the window has.
+    press(&mut h, "Hatch 00: Edit Lines");
+    for _ in 0..20 {
+        press(&mut h, "Add Family");
+    }
+    dialog_fits(&h, "fill-patterns", &[&["Add Family", "Done", "New Pattern"][..], &buttons].concat(), "Patterns with its families open");
+    press(&mut h, "Done");
+    // The note is told on this tab alone, and holds to its height.
+    press(&mut h, "Region Types");
+    assert!(h.query_by_label_contains("left out:").is_none(), "the import note belongs to the Patterns tab");
+    dialog_fits(&h, "fill-patterns", &types, "Region Types after an import");
+    // Edit Type: the region's own type and, on its Patterns tab, the same list.
+    let mut h = crowded();
+    let model = h.state().session.model.clone();
+    h.state_mut().fill_patterns_dialog = Some(crate::fillpatterns::FillPatternsDialog::edit(&model, "Region 39", Vec::new()));
+    h.run();
+    dialog_fits(&h, "fill-patterns", &[&["Type Properties"][..], &buttons].concat(), "Edit Type");
+    press(&mut h, "Patterns");
+    long_note(&mut h);
+    dialog_fits(&h, "fill-patterns", &[&["Type Properties", "New Pattern", "Import..."][..], &buttons].concat(), "Edit Type's Patterns");
+}
+
+/// Edit Type in a window shorter than the least a window can be (a tiling window manager can give one): the form scrolls in the
+/// height left, and OK, Cancel and Apply stay in the window.
+#[test]
+fn edit_type_scrolls_in_a_window_too_short_for_it_so_its_buttons_stay_in_reach() {
+    let short = vec2(MIN_SIZE[0], 400.0);
+    let mut h = crowded();
+    h.set_size(short);
+    let model = h.state().session.model.clone();
+    h.state_mut().fill_patterns_dialog = Some(crate::fillpatterns::FillPatternsDialog::edit(&model, "Region 39", Vec::new()));
+    h.run();
+    h.run();
+    let area = h.ctx.memory(|m| m.area_rect(egui::Id::new("fill-patterns"))).expect("the dialog is open");
+    assert!(window(short).expand(0.5).contains_rect(area), "the dialog {area:?} runs off the window {short:?}");
+    for button in ["OK", "Cancel", "Apply"] {
+        // (The ribbon behind the dialog may carry the same word.)
+        let found: Vec<Rect> = h.get_all_by_label(button).map(|n| n.rect()).filter(|r| r.intersects(area)).collect();
+        assert!(!found.is_empty(), "`{button}` is not in the dialog {area:?}");
+        assert!(found.iter().all(|r| window(short).expand(0.5).contains_rect(*r)), "`{button}` {found:?} is off the window {short:?}");
+    }
+}
+
+#[test]
+fn line_styles_with_forty_of_each_stay_inside_the_least_window_with_their_buttons_in_reach() {
+    let mut h = crowded();
+    let model = h.state().session.model.clone();
+    h.state_mut().line_styles_dialog = Some(crate::linestyles::LineStylesDialog::new(&model));
+    h.run();
+    dialog_fits(&h, "line-styles", &["Line Styles", "New Style", "OK", "Cancel", "Apply"], "Styles");
+    press(&mut h, "Patterns");
+    dialog_fits(&h, "line-styles", &["Line Styles", "New Pattern", "OK", "Cancel", "Apply"], "Patterns");
+    // A pattern open for its segments adds a table of them under the list.
+    press(&mut h, "Dashes 00: Edit");
+    for _ in 0..14 {
+        press(&mut h, "Add Segment");
+    }
+    dialog_fits(&h, "line-styles", &["Line Styles", "Add Segment", "OK", "Cancel", "Apply"], "a pattern's segments");
+}

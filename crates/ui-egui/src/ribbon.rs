@@ -43,6 +43,8 @@ thread_local! {
     static TOOLS: Cell<(usize, usize)> = const { Cell::new((0, usize::MAX)) };
     /// Where the last panel drawn ends.
     static END: Cell<f32> = const { Cell::new(0.0) };
+    /// The tab being drawn: the room it has, where it starts, and how much of what it has drawn is gaps (`push_right`'s).
+    static LAID: Cell<(f32, f32, f32)> = const { Cell::new((0.0, 0.0, 0.0)) };
     /// A tool's choices were asked for (a shortcut's) while it has no button, being handed over or folded: its panel opens its list.
     static OPEN_LIST: Cell<bool> = const { Cell::new(false) };
     /// Whether the tab being drawn has been drawn before, so its panels' fit (which tools show) is known: its first frame lays out
@@ -76,13 +78,23 @@ pub(crate) fn tab(ui: &mut Ui, key: Id, room: f32, add: impl FnOnce(&mut Ui)) {
     SEEN.with(|s| s.borrow_mut().clear());
     let left = ui.cursor().left();
     END.with(|e| e.set(left));
+    LAID.with(|l| l.set((room - SLACK, left, 0.0)));
     add(ui);
-    let drawn = END.with(Cell::get) - left;
+    let drawn = END.with(Cell::get) - left - LAID.with(Cell::get).2;
     let seen = SEEN.with(|s| std::mem::take(&mut *s.borrow_mut()));
     let whole = drawn + seen.iter().map(|p| (p.natural - p.drawn).max(0.0)).sum::<f32>();
     ui.ctx().data_mut(|d| d.insert_temp(key, (seen, whole)));
     FITS.with(|f| f.borrow_mut().clear());
     FITTED.with(|f| f.set(true));
+}
+
+/// Pushes what is drawn next to the right end of the tab being drawn, a panel `width` wide (one that stands apart, as Edit Mode's
+/// does). The gap is not width the tab needs, so it never makes the panels before it hand their tools over.
+pub(crate) fn push_right(ui: &mut Ui, width: f32) {
+    let (room, left, gaps) = LAID.with(Cell::get);
+    let gap = (room - (END.with(Cell::get) - left - gaps) - width).max(0.0);
+    ui.add_space(gap);
+    LAID.with(|l| l.set((room, left, gaps + gap)));
 }
 
 /// How the panels `seen` fit, for a tab `whole` wide with every tool shown, in `room`: from the last panel back, each hands

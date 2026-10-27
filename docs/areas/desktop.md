@@ -22,7 +22,8 @@ any other, so a hand-edited file never leaves the menu with no choice picked). `
 `style::canvas_dark` controls canvas ink, fill and background conversion, and the section/3D image cache keys. Both software
 and GPU 3D painters use the canvas background. What the drawing paints in a palette (the fill of what is selected or hovered,
 a crop region's outline) takes it from `style::canvas_pal`, which follows the canvas, not `pal`, which follows the interface:
-`DARK`'s fills are near-black on a white drawing. A scan is dimmed only on a dark canvas (`canvas_dark`), so a dark interface
+`DARK`'s fills are near-black on a white drawing. A light canvas has a palette of its own (`CANVAS_LIGHT`: a deeper hover stroke and
+selection tint than the interface's `LIGHT`, which keeps the tints it always had, so the plain Light window's chrome is unchanged). A scan is dimmed only on a dark canvas (`canvas_dark`), so a dark interface
 around a light drawing leaves it as it is.
 
 New and Open (`BimApp::reopened`) keep the look: a new `BimApp` would run `style::apply` again, which sets the theme
@@ -73,11 +74,14 @@ line or grid east, north, west and south (`Model::clearances`, which finds them 
 `move` by the difference along that way.
 
 A point picked in a plan lands where `snap::snap` says, the core's so every front end agrees: on the end, middle or centre of
-what's drawn (`Scene::of`), where two straight lines (walls, grids; not arcs) cross, else a scan's point where the cut plane cuts it
+what's drawn (`Scene::of`), a round detail line's quadrants (`rounds`: a circle's, an ellipse's or an arc's points along its axes),
+where two straight lines (walls, grids; not arcs) or a detail line's chords cross (never a line's chords with each other), where a
+line from the last point touches a circle or an arc (`tangents`), else a scan's point where the cut plane cuts it
 ([point clouds](point-clouds.md)), the foot of the perpendicular from the last point
 to one, a guide through that point at
 a multiple of `Snaps::angle` from east or from the line before it (where the guide crosses a wall or grid it lands there, and a
-grid point lying on it beats a rounded length), a wall's centre line, else the nearest 10 mm. The desktop's `BimApp::snap` gives
+grid point lying on it beats a rounded length), a wall's centre line or the nearest point of a detail line, else the nearest 10 mm.
+Revit's Quadrants (SQ) and Tangents (ST) are snaps of their own, in Manage > Snaps with the rest. The desktop's `BimApp::snap` gives
 it the reach in px (`SNAP`, `PICK`) and the snaps in force (Manage > Snaps, kept while the window is open, or for one point
 a shortcut's override: `snap_once`, `Snaps::only`, `Snaps::none`); `found` and
 `show_snap` draw what a pick would land on, and a point that moves with the cursor goes through them. A selected wall's ends are
@@ -185,3 +189,46 @@ for the tool. Load File reads JSON (`{"WA": "Wall"}`), Revit's `<Shortcut Comman
 a description is an action only by its whole name in one of the interface's languages (`resolve_action`), and a key that is not two characters, names no action or
 is another action's is skipped and counted in the message. Custom shortcuts last while the window is open. Match Properties (MA) is the `match_properties`
 command; with one element selected the window remembers its type for the next one drawn, with several it gives the others of the first's category its type.
+
+Annotation dialogs and draw tools. Manage > Fill Patterns (`fillpatterns.rs`, also Edit Type of a filled region) and Manage > Line Styles
+(`linestyles.rs`) edit a draft of the project's entries and send it as one transaction: what is deleted and made again under its name is changed in
+place, and renames go through `renames::plan`, which runs a chain from its end and a swap through a spare name (the core refuses a rename onto a name
+that is taken). A draft keeps the entries the project held when it opened and is refused over a project that has changed since (an agent's command),
+so Apply never undoes or deletes what the draft never saw. A blank or repeated name is refused in the dialog. What an import or an export says
+(`note`) is said in the dialog, not in the status bar, which can lie over its buttons. A PAT file is read by the `import_fill_patterns` command on a scratch
+project that holds the draft's names, so the command's keep or replace rule and its caps are the dialog's too (Replace Same Name is the command's
+`replace`); an export to a name without `.pat` does not write over a file of that name with `.pat`. The preview draws a type as the plan does, in the canvas colours.
+The note belongs to the Patterns tab (the types do not show it), a file's patterns are told in the singular for one, and a left-out pattern is named with its reason (the
+core's message without the pattern's name it begins with), each cut at a word. In a test a file dialog is answered through `dialog::BEGUN`; no system dialog opens.
+
+A dialog that holds a long list (these two, Edit Type, and Line Styles) never runs off the window: the list, and a pattern's families or segments open under it, scroll in
+the height the window has left (`style::dialog_room`: the window's height less the dialog's frame, what is drawn above the list, and what is drawn under it, the notes
+and the row of buttons), so OK, Cancel and Apply stay in reach down to the least window, and the note and the error are boxes that scroll (`style::boxed_text`). When a
+pattern's families (or a line pattern's segments) are open they share the room with the list, half each. `tests/smallest.rs` opens each with forty of everything and a long
+note at the least window and asks that every button lie inside it. The room is worked out from the heights of the rows, not measured after layout, so a label that wraps
+in a language with long words can take a row or two more than it reserved: the dialog then scrolls a little instead of fitting exactly.
+
+The window is on one project, the `uid` of the model it was built on (`BimApp::project`): a model of another `uid` in the session's place (a script's or an embedder's
+New or Open; the control port turns an agent's away, `bridge::REFUSED`) starts the window over (`reopened`), so a sketch or a dialog's draft of the old project cannot be
+finished into the new one, and gives the new project a recovery copy of its own (`autosave_document`). The replaced project's own recovery copy is not asked about: it stays until the new project's first snapshot is written and is deleted then (`select_destination` retires it, `cleanup_retired_autosaves` removes it), where the old code wrote the new project over it; File > New asks about unsaved changes first and then retires the copy at once, and a copy found on disk and not yet answered (a candidate in the Recover dialog) is never deleted this way. Hover and selection are drawn in the canvas's palette, not the interface's (`canvas_pal`): on a light canvas inside a dark interface the dark palette's
+blues were 2.5:1 on white; `style`'s tests keep the two told apart and 3:1 on the paper in `CANVAS_LIGHT`, and keep `LIGHT`'s tints as they were. A section's picture is drawn first and once a frame, and the drawing over it
+(`render::section_over`) takes its regions' ink from that picture (`Cut::draw`), so a pan or a zoom costs one picture; a hover that changes along with the view draws it a
+second time.
+
+The Draw panel's tools leave nothing behind: `set_tool` drops Insulation and Revision Cloud (the Detail Line tool's) and the lines picked for Fillet Arc and
+Trim/Extend (`forget_picks`), a sketch's picks are dropped when its lines change (`track_sketch`, once a frame) and when it ends, and a shape's typed numbers are
+dropped when the shape changes. A fillet that does not fit keeps its two lines picked and spends the digits; a click that sizes the arc clears them. A number of the
+Options Bar that the shape in hand takes and cannot read (`options_error`) is red and makes nothing. A sketch keeps the lines as they were before each change
+(`Sketch::track`), so Ctrl+Z takes back a fillet, a trim or a grip move whole; it belongs to the plan it began in, and the window comes back to that plan until Finish or
+Cancel Edit Mode (`BimApp::sketch_plan`; a plan whose level was deleted is nowhere to come back to, and holds neither the window nor the tool: a view that cannot use the tool takes Modify, as for no sketch). egui draws a Dot (a dash of a hundredth of a millimetre) about a pixel and a half long, so it shows; `a_dot_of_a_hundredth_of_a_millimetre_still_draws_about_a_pixel_on_the_canvas`
+fails if that changes.
+
+Limits of the annotation stack, left as they are: the desktop has no group type rename, delete or edit (the `group_type` command does them), and a group taken
+apart with Ungroup and made again with Create Group cannot take its old name (the core refuses a name in use), so what was placed from the old type does not follow;
+detail groups and repeating details are placed in plans only; Properties' Group row is read only. Pick Lines and the polygons are Draw-panel tools that make
+curves, not commands, so an agent draws the curves they would make. A sketch's Trim, Offset, Split, Fillet, Join, Vertex and Convert Spline (`sketch_modify` and its neighbours
+in `draw.rs`) act on the sketch the window holds with the core's `draw` and `curves` functions and are not commands, so the CLI and MCP cannot reach them. The Align tool on a
+pattern asks `Model::align_pattern` where the pattern then starts and sends the answer through `modify`, saying the core's refusal when it gives one. The patterns list is not virtualized: rows off the screen paint
+no swatch, but each still lays out its widgets. A sketch's Ctrl+Z takes back at most the last 100 changes (`sketch::UNDO`); an older one is forgotten. The window tells a replaced project by its `uid`, so
+`open` of the very file the window already holds, put in the session's place by a script or an embedder, is not noticed: the file keeps its `uid`, and a sketch or a dialog's draft survives it
+(the core's `Session` counts its replacements in a private `resets`; a public reader of that count would let the window see this one too).

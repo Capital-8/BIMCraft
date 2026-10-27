@@ -822,6 +822,14 @@ fn ks_lists_every_shortcut_and_every_one_it_lists_works() {
     assert_eq!(h.state().session.model.units.name(), "ft-in");
     // Any two letters do something exactly when the dialog lists them, and it names each in every language.
     let listed: Vec<&str> = crate::shortcuts().iter().map(|(letters, _)| *letters).collect();
+    // One key, one thing: a fixture's (the Plumbing Fixture's PX, once Explode's too) or an alias that a desktop key
+    // takes first would be listed twice and reach only the first.
+    let mut seen = std::collections::BTreeMap::new();
+    for (letters, name) in crate::shortcuts() {
+        if let Some(other) = seen.insert(letters, name) {
+            assert_eq!(letters, "CL", "{letters} is both {other} and {name}");
+        }
+    }
     for a in 'A'..='Z' {
         for b in 'A'..='Z' {
             let mut app = BimApp::new(Session::new());
@@ -884,7 +892,7 @@ fn ma_gives_the_walls_selected_after_the_first_its_type_in_one_undo_step() {
 
 #[test]
 fn keys_for_tools_bimcraft_lacks_are_bound_to_nothing_rather_than_to_another_tool() {
-    for keys in ["SU", "DL", "LI", "SF", "BR", "BS", "RN", "RP", "CV", "TF", "DA", "FD"] {
+    for keys in ["SU", "LI", "SF", "BR", "BS", "RN", "RP", "CV", "TF", "DA", "FD"] {
         let mut app = BimApp::new(Session::new());
         app.typed = keys.into();
         assert!(!app.shortcut(), "{keys}");
@@ -1553,8 +1561,14 @@ fn the_palette_keeps_its_fields_and_apply_inside_it_whatever_their_labels() {
     assert_eq!(panel.width(), 290.0, "the palette at its default width");
     // Height Offset From Level is a long label.
     let fields = h.query_all(By::new().predicate(|n| matches!(n.role(), Role::TextInput | Role::ComboBox)));
+    // The palette scrolls, and a floor's has rows enough to run past its foot: only its width is the question.
     for n in fields.filter(|n| n.rect().intersects(panel)).chain([h.get_by_label("Apply")]) {
-        assert!(panel.contains_rect(n.rect()), "{:?} at {:?} runs out of the palette, {panel:?}", n.accesskit_node().label(), n.rect());
+        let r = n.rect();
+        assert!(
+            r.min.x >= panel.min.x && r.max.x <= panel.max.x,
+            "{:?} at {r:?} runs out of the palette, {panel:?}",
+            n.accesskit_node().label()
+        );
     }
 }
 
@@ -2437,6 +2451,11 @@ mass {"boundary": [[1000, 1000], [3000, 1000], [3000, 2000], [1000, 2000]], "nam
     // Wide enough for every tab's tools in the longest language: a narrower window hands some over to their panel's list.
     h.set_size(vec2(1800.0, 900.0));
     h.run();
+    // A detail group to place and repeat, so the detail tools' Options Bars have one to name.
+    let s = &mut h.state_mut().session;
+    let line = s.execute("detail_line", &json!({"start": [1000, 1000], "end": [2000, 1000]})).unwrap();
+    s.execute("create_group", &json!({"ids": [line["id"]]})).unwrap();
+    h.run();
     // The probe finds what it looks for: in English, the same labels are all English.
     assert!(english(&h, Lang::Spanish).contains(&"Architecture".to_string()));
     for l in [Lang::Portuguese, Lang::Spanish, Lang::Chinese] {
@@ -2574,9 +2593,45 @@ mass {"boundary": [[1000, 1000], [3000, 1000], [3000, 2000], [1000, 2000]], "nam
         shortcut(&mut h, "VT");
         missed.extend(english(&h, l));
         press(&mut h, tr("Close"));
+        // The detail tools' Options Bars, with a group to place; Linework with its choices.
+        for tool in ["Detail Group", "Repeating Detail", "Revision Cloud", "Insulation"] {
+            key(&mut h, Key::Escape);
+            press(&mut h, tr("Annotate"));
+            press(&mut h, tr(tool));
+            missed.extend(english(&h, l));
+        }
+        key(&mut h, Key::Escape);
+        topmost(&mut h, tr("Modify"));
+        press(&mut h, tr("Linework"));
+        missed.extend(english(&h, l));
+        key(&mut h, Key::Escape);
+        // Manage > Fill Patterns on both tabs, with a pattern's families; Line Styles on both; Edit Type of a region being sketched.
+        press(&mut h, tr("Manage"));
+        press(&mut h, tr("Fill Patterns"));
+        missed.extend(english(&h, l));
+        topmost(&mut h, tr("Patterns"));
+        press(&mut h, &tr("{}: Edit Lines").replace("{}", "Sand"));
+        missed.extend(english(&h, l));
+        press(&mut h, tr("Cancel"));
+        press(&mut h, tr("Line Styles"));
+        missed.extend(english(&h, l));
+        topmost(&mut h, tr("Patterns"));
+        missed.extend(english(&h, l));
+        press(&mut h, tr("Cancel"));
+        shortcut(&mut h, "FR");
+        press(&mut h, tr("Edit Type"));
+        missed.extend(english(&h, l));
+        press(&mut h, tr("Cancel"));
+        press(&mut h, tr("Cancel Edit Mode"));
         click(&mut h, P2(5000.0, 0.0));
         missed.extend(english(&h, l));
         key(&mut h, Key::Escape);
+        // The names of the project's own patterns, types and styles are in the project's language, English here, whatever the
+        // interface speaks (`language.rs` knows them, for a project that starts in another).
+        let m = &h.state().session.model;
+        let own: Vec<&String> =
+            m.fill_patterns.keys().chain(m.line_patterns.keys()).chain(m.region_types.keys()).chain(m.line_styles.keys()).collect();
+        missed.retain(|s| !own.contains(&s));
         missed.sort();
         missed.dedup();
         assert!(missed.is_empty(), "{l:?}: left in English: {missed:?}");
@@ -5075,20 +5130,27 @@ mod clouds;
 mod control;
 mod dialog;
 mod dock;
+mod draw;
+mod fills;
 mod fonts;
 mod gpu;
+mod groups;
 mod light_canvas;
+mod lines;
 mod lineweights;
 mod links;
 mod look;
 mod mep;
 mod objectstyles;
+mod patterns;
 mod planviews;
 mod purge;
 mod revit;
+mod sketch;
 mod smallest;
 mod start;
 mod titlebar;
+mod tools;
 mod window;
 
 #[test]

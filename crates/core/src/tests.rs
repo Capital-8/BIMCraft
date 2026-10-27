@@ -1737,6 +1737,17 @@ fn hostile_params_never_panic_or_break_the_model() {
     let _ = base.execute("mass", &json!({"boundary": block(), "height": 9000}));
     // Another, lofted, which is 8.
     let _ = base.execute("mass", &json!({"boundary": block(), "height": 9000, "lean": [1500, 500]}));
+    // Detailing, one of each (detail lines, regions, a group, a repeating detail, a sketch floor, Linework), and the payloads
+    // that name them: some for every command, some for the one they are for.
+    let (detailing, targeted) = crate::detail_tests::sweep_payloads(&mut base);
+    // A section and an elevation of it, after those, so that no id the payloads name moves: their views are drawn too.
+    let _ = base.execute("section", &json!({"start": [-1000, 3000], "end": [9000, 3000]}));
+    let _ = base.execute("elevation", &json!({"facing": "south"}));
+    let views = |m: &Model| {
+        m.elements.values().filter(|e| matches!(e, crate::model::Element::Section(_) | crate::model::Element::Elevation(_))).count()
+    };
+    assert_eq!(views(&base.model), 2, "the sweep's base has a section and an elevation to draw");
+    let hostile: Vec<Value> = hostile.into_iter().chain(detailing.into_iter().map(|(_, p)| p)).collect();
     // Each command against each value, on a copy of the same session; the commands shared out between the cores.
     let cmds: Vec<_> = commands().iter().filter(|c| !matches!(c.id, "open" | "save")).collect();
     let threads = std::thread::available_parallelism().map_or(4, |n| n.get());
@@ -1758,13 +1769,41 @@ fn hostile_params_never_panic_or_break_the_model() {
                         };
                         let p = small.as_ref().unwrap_or(p);
                         let mut s = base.clone();
-                        let _ = s.execute(cmd.id, p);
+                        let made = s.execute(cmd.id, p).is_ok();
                         assert_eq!(s.model.check(), Ok(()), "{} {p} left a broken model", cmd.id);
+                        // What a command made is drawn too (a revision cloud round a circle 1,000 km across once listed
+                        // 16 GB of scallops and aborted the plan, and nothing here drew it): the plans, sections and
+                        // elevations, as small as they come; a failed command changed nothing.
+                        if made && cmd.id != "render" {
+                            draw_plans(&s.model);
+                        }
                     }
                 }
             });
         }
     });
+    for (cmd, p) in &targeted {
+        let mut s = base.clone();
+        let made = s.execute(cmd, p).is_ok();
+        assert_eq!(s.model.check(), Ok(()), "{cmd} {p} left a broken model");
+        if made {
+            draw_plans(&s.model);
+        }
+    }
+}
+
+/// Draws every level's plan and ceiling plan, and every section and elevation, at the smallest size, which builds all that
+/// they hold.
+fn draw_plans(m: &Model) {
+    for (level, _) in m.levels() {
+        for d in [crate::render::plan(m, level, 16, 16), crate::render::ceiling_plan(m, level, 16, 16)] {
+            let _ = crate::render::png(&d);
+        }
+    }
+    // (Not their pictures: the rasterizer is the plans' too, and a section's drawing costs a third as much without it.)
+    for (id, _) in m.elements.iter().filter(|(_, e)| matches!(e, crate::model::Element::Section(_) | crate::model::Element::Elevation(_))) {
+        let _ = crate::render::section(m, *id, crate::render::section_fit(m, *id, 16, 16));
+    }
 }
 
 fn temp(name: &str) -> std::path::PathBuf {
@@ -4861,34 +4900,56 @@ fn a_file_from_before_guids_opens_with_guids_and_six_digit_ids() {
 }
 
 #[test]
-fn a_project_is_saved_as_format_5_and_one_of_format_4_opens_as_it_is_and_one_of_format_6_is_refused() {
+fn a_project_is_saved_as_format_6_and_one_of_format_4_or_5_opens_as_it_is_and_one_of_format_7_is_refused() {
     use crate::model::Model;
-    // 5 added the scans a project holds and the point clouds that place them; nothing in a file of 4 changes.
+    // 5 added the scans a project holds and the point clouds that place them; 6 added detailing (lines, regions, groups,
+    // repeating details, line and fill styles). Nothing in a file of 4 or 5 changes.
     let mut s = Session::new();
     let empty = serde_json::to_value(&*s.model).unwrap();
     house(&mut s);
+    run(&mut s, "detail_line", json!({"start": [0, 0], "end": [1000, 0]}));
     let full = serde_json::to_value(&*s.model).unwrap();
     for v in [&empty, &full] {
-        assert_eq!(v["format"], 5, "a project is saved as format 5");
-        let mut four = v.clone();
-        four["format"] = json!(4);
-        let (m, left_out) = Model::read(&four.to_string()).unwrap();
-        assert_eq!((m.format, left_out.len(), m.elements.len()), (5, 0, v["elements"].as_object().unwrap().len()));
+        assert_eq!(v["format"], 6, "a project is saved as format 6");
+        for old in [4, 5] {
+            let mut was = v.clone();
+            was["format"] = json!(old);
+            let (m, left_out) = Model::read(&was.to_string()).unwrap();
+            assert_eq!((m.format, left_out.len(), m.elements.len()), (6, 0, v["elements"].as_object().unwrap().len()));
+        }
     }
     assert!(full["elements"].as_object().unwrap().len() > 5);
     // A newer file says what it is and what to do, even when nothing else in it is wrong.
-    let mut six = empty.clone();
-    six["format"] = json!(6);
-    let e = Model::read(&six.to_string()).unwrap_err();
+    let mut seven = empty.clone();
+    seven["format"] = json!(7);
+    let e = Model::read(&seven.to_string()).unwrap_err();
     assert!(
-        e.contains("newer BIMCraft") && e.contains("file format 6") && e.contains("reads up to 5") && e.contains("update BIMCraft"),
+        e.contains("newer BIMCraft") && e.contains("file format 7") && e.contains("reads up to 6") && e.contains("update BIMCraft"),
         "{e}"
     );
     // A file of this format with a field it doesn't know is read without it, and says which.
     let mut odd = full.clone();
     odd["something_new"] = json!(true);
     let (m, left_out) = Model::read(&odd.to_string()).unwrap();
-    assert_eq!((m.format, left_out), (5, vec!["/something_new".to_string()]));
+    assert_eq!((m.format, left_out), (6, vec!["/something_new".to_string()]));
+}
+
+#[test]
+fn a_format_5_file_that_holds_elements_and_scans_migrates_to_6_and_keeps_both() {
+    use crate::model::Model;
+    let mut s = Session::new();
+    house(&mut s);
+    run(&mut s, "detail_line", json!({"start": [0, 0], "end": [1000, 0]}));
+    let scan = std::env::temp_dir().join(format!("bimcraft-format5-{}.xyz", std::process::id()));
+    std::fs::write(&scan, "0 0 0\n1 0 0\n").unwrap();
+    run(&mut s, "point_cloud", json!({"path": scan.to_str().unwrap(), "name": "dot"}));
+    let _ = std::fs::remove_file(&scan);
+    let mut file: serde_json::Value = serde_json::from_str(&s.model.to_json().unwrap()).unwrap();
+    file["format"] = json!(5);
+    let (m, left_out) = Model::read(&file.to_string()).unwrap();
+    assert_eq!((m.format, m.clouds.len(), left_out.len(), m.elements.len()), (6, 1, 0, s.model.elements.len()));
+    // Written again, it says 6.
+    assert_eq!(serde_json::from_str::<serde_json::Value>(&m.to_json().unwrap()).unwrap()["format"], 6);
 }
 
 #[test]

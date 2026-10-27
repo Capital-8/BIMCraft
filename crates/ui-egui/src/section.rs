@@ -9,13 +9,13 @@ use std::sync::Arc;
 use bimcraft_core::geom::P2;
 use bimcraft_core::model::{Id, Model};
 use bimcraft_core::render::{self, Rgb, View};
-use bimcraft_core::view3d::{Image, MAX_SIDE};
-use egui::{Color32, ColorImage, Rect, Sense, TextureHandle, TextureOptions, Ui, pos2};
+use bimcraft_core::view3d::{Image, MAX_SIDE, Scene};
+use egui::{Color32, ColorImage, Context, Rect, Sense, TextureHandle, TextureOptions, Ui, pos2};
 use serde_json::json;
 
 use crate::canvas::{PICK, Place, click_modifiers, color, paint};
 use crate::orbit::{rgb, scene_of};
-use crate::style::pal;
+use crate::style::canvas_pal;
 use crate::{BimApp, Status, Tool};
 
 /// What a picture is of: the model, the view, its framing in pixels, the elements tinted, and
@@ -25,9 +25,36 @@ type Shot = (Arc<Model>, Id, View, Vec<(Id, Rgb)>, bool);
 /// The section or elevation on screen, between frames: its picture, and its texture.
 #[derive(Default)]
 pub struct Cut {
+    /// How many times a picture was drawn (by the core, for the drawing over it or for the texture): a tick of the test that a
+    /// pan or a zoom draws it once.
+    #[cfg(test)]
+    pub(crate) pictures: usize,
     image: Option<Image>,
     texture: Option<TextureHandle>,
     shown: Option<Shot>,
+}
+
+impl Cut {
+    /// The picture of section `id` through `pixels` with `tints` on the elements they name, into the texture, of `model`.
+    #[allow(clippy::too_many_arguments)]
+    fn draw(&mut self, ctx: &Context, model: &Arc<Model>, scene: &Scene, id: Id, pixels: View, tints: Vec<(Id, Rgb)>, dark: bool) {
+        #[cfg(test)]
+        {
+            self.pictures += 1;
+        }
+        if let Some(image) = render::section_image(model, scene, id, pixels, &tints) {
+            // A hidden-line picture, so dark as the drawing over it is.
+            let (rgba, _) = image.rgba.as_chunks::<4>();
+            let pixels: Vec<Color32> = rgba.iter().map(|[r, g, b, _]| color(Rgb(*r, *g, *b))).collect();
+            let colors = ColorImage { size: [image.width as usize, image.height as usize], pixels, source_size: Default::default() };
+            match &mut self.texture {
+                Some(t) => t.set(colors, TextureOptions::NEAREST),
+                None => self.texture = Some(ctx.load_texture("section", colors, TextureOptions::NEAREST)),
+            }
+            self.image = Some(image);
+        }
+        self.shown = Some((Arc::clone(model), id, pixels, tints, dark));
+    }
 }
 
 impl BimApp {
@@ -39,11 +66,29 @@ impl BimApp {
         let Some((view, local)) = self.canvas.navigate(ui, &response, rect, id, fit) else { return };
         let crop = self.crop_grips(ui, &response, rect, &view, id);
         let datum = self.level_grips(ui, &response, rect, &view, id);
-        let d = render::section(&model, id, view);
         // The picture at the screen's pixels, framed as the drawing is in points.
         let ppp = f64::from(ui.ctx().pixels_per_point());
         let side = |v: u32| ((f64::from(v) * ppp).round().max(1.0) as u32).min(MAX_SIDE);
         let pixels = View { scale: view.scale * ppp, width: side(view.width), height: side(view.height), ..view };
+        let dark = crate::style::canvas_dark();
+        // The picture on screen is this model's, in this view and size (and, tints given, tinted so): a pan or a zoom, a new
+        // model or another tab is not. A picture costs a frame, and the drawing over it keeps its regions' ink from it: so it is
+        // drawn first and once, with the tints it had, and again only if the hover changed along with the view.
+        let current = |cut: &Cut, tints: Option<&[(Id, Rgb)]>| matches!(&cut.shown, Some((m, v, f, t, k)) if Arc::ptr_eq(m, &model) && *v == id && *f == pixels && *k == dark && tints.is_none_or(|x| x == t));
+        if !current(&self.cut, None) {
+            let tints = self.cut.shown.as_ref().map(|s| s.3.clone()).unwrap_or_default();
+            self.cut.draw(ui.ctx(), &model, scene_of(&mut self.orbit.scene, &model), id, pixels, tints, dark);
+        }
+        let d = match &self.cut.image {
+            Some(image) => render::section_over(&model, id, view, image),
+            None => {
+                #[cfg(test)]
+                {
+                    self.cut.pictures += 1;
+                }
+                render::section(&model, id, view)
+            }
+        };
         // Under the cursor: what's drawn over the picture, else what the picture shows.
         let pick = |cut: &Cut, (x, y): (f32, f32)| {
             d.pick((x, y), PICK).or_else(|| cut.image.as_ref()?.pick(f64::from(x) * ppp, f64::from(y) * ppp))
@@ -52,29 +97,15 @@ impl BimApp {
         let tints: Vec<(Id, Rgb)> = self
             .selection
             .iter()
-            .map(|id| (*id, rgb(pal().accent)))
-            .chain(hovered.filter(|h| !self.selection.contains(h)).map(|h| (h, rgb(pal().hover))))
+            .map(|id| (*id, rgb(canvas_pal().accent)))
+            .chain(hovered.filter(|h| !self.selection.contains(h)).map(|h| (h, rgb(canvas_pal().hover))))
             .collect();
-        let scene = scene_of(&mut self.orbit.scene, &model);
-        let cut = &mut self.cut;
-        let dark = crate::style::canvas_dark();
-        if !matches!(&cut.shown, Some((m, v, f, t, k)) if Arc::ptr_eq(m, &model) && *v == id && *f == pixels && *t == tints && *k == dark) {
-            if let Some(image) = render::section_image(&model, scene, id, pixels, &tints) {
-                // A hidden-line picture, so dark as the drawing over it is.
-                let (rgba, _) = image.rgba.as_chunks::<4>();
-                let pixels: Vec<Color32> = rgba.iter().map(|[r, g, b, _]| color(Rgb(*r, *g, *b))).collect();
-                let colors = ColorImage { size: [image.width as usize, image.height as usize], pixels, source_size: Default::default() };
-                match &mut cut.texture {
-                    Some(t) => t.set(colors, TextureOptions::NEAREST),
-                    None => cut.texture = Some(ui.ctx().load_texture("section", colors, TextureOptions::NEAREST)),
-                }
-                cut.image = Some(image);
-            }
-            cut.shown = Some((Arc::clone(&model), id, pixels, tints, dark));
+        if !current(&self.cut, Some(&tints)) {
+            self.cut.draw(ui.ctx(), &model, scene_of(&mut self.orbit.scene, &model), id, pixels, tints, dark);
         }
         let p = ui.painter_at(rect);
         p.rect_filled(rect, 0.0, color(render::PAPER));
-        if let Some(t) = &cut.texture {
+        if let Some(t) = &self.cut.texture {
             p.image(t.id(), rect, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
         }
         paint(&p, Place::at(rect.min), &d, &self.selection, hovered, self.thin, &[]);

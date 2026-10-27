@@ -485,9 +485,18 @@ pub(crate) fn convex_pieces(ring: &[P2]) -> Vec<Vec<P2>> {
     geom::triangulate(&ccw).into_iter().map(|t| t.iter().filter_map(|i| ccw.get(*i).copied()).collect()).collect()
 }
 
+#[cfg(test)]
+thread_local! {
+    /// The polygons cut by [`split`] on this thread: the tests of what is drawn assert on it, not on time, which varies with the
+    /// load of the machine.
+    pub(crate) static SPLITS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 /// `ring` cut by the convex counter-clockwise `piece`: the part inside it (if any), and the parts
 /// outside, apart. A repeated point of the piece's is no edge to cut by.
 pub(crate) fn split(ring: Vec<P2>, piece: &[P2]) -> (Option<Vec<P2>>, Vec<Vec<P2>>) {
+    #[cfg(test)]
+    SPLITS.with(|n| n.set(n.get() + 1));
     let big = |r: &Vec<P2>| r.len() >= 3 && geom::area(r).abs() > 1.0;
     let mut inside = ring;
     let mut outside = Vec::new();
@@ -504,10 +513,31 @@ pub(crate) fn split(ring: Vec<P2>, piece: &[P2]) -> (Option<Vec<P2>>, Vec<Vec<P2
 
 /// What's left of `rings` outside `hole`: convex pieces, counter-clockwise.
 pub(crate) fn minus(rings: &[Vec<P2>], hole: &[P2]) -> Vec<Vec<P2>> {
-    let holes = convex_pieces(hole);
+    // The box round a ring: a piece clear of the hole's piece's box is left whole, without cutting it (a big concave ring and
+    // a big concave hole make hundreds of pieces each, and cutting each by each is cubic).
+    let extent = |ring: &[P2]| {
+        ring.iter().fold((P2(f64::INFINITY, f64::INFINITY), P2(f64::NEG_INFINITY, f64::NEG_INFINITY)), |(lo, hi), q| {
+            (P2(lo.0.min(q.0), lo.1.min(q.1)), P2(hi.0.max(q.0), hi.1.max(q.1)))
+        })
+    };
+    let holes: Vec<_> = convex_pieces(hole).into_iter().map(|p| (extent(&p), p)).collect();
     rings
         .iter()
-        .flat_map(|r| holes.iter().fold(convex_pieces(r), |parts, piece| parts.into_iter().flat_map(|p| split(p, piece).1).collect()))
+        .flat_map(|r| {
+            holes.iter().fold(convex_pieces(r), |parts, ((lo, hi), piece)| {
+                parts
+                    .into_iter()
+                    .flat_map(|p| {
+                        let (a, b) = extent(&p);
+                        if b.0 < lo.0 || a.0 > hi.0 || b.1 < lo.1 || a.1 > hi.1 {
+                            Some(p).filter(|p| p.len() >= 3 && geom::area(p).abs() > 1.0).into_iter().collect::<Vec<_>>()
+                        } else {
+                            split(p, piece).1
+                        }
+                    })
+                    .collect()
+            })
+        })
         .collect()
 }
 

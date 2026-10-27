@@ -246,10 +246,16 @@ pub fn draw(m: &Model, id: impl Key) -> Option<Drawing> {
             Some(Element::Level(_) | Element::PlanView(_)) => render::draw_at(m, vp.view, view, 1.0),
             Some(Element::Section(_) | Element::Elevation(_)) => {
                 let scene = scene.get_or_insert_with(|| view3d::Scene::new(m));
-                if let Some(img) = render::section_image(m, scene, vp.view, view, &[]) {
+                // Its regions keep the ink of this very picture.
+                let img = render::section_image(m, scene, vp.view, view, &[]);
+                let drawing = match &img {
+                    Some(img) => render::section_at_over(m, vp.view, view, 1.0, img),
+                    None => render::section_at(m, vp.view, view, 1.0),
+                };
+                if let Some(img) = img {
                     d.push(Prim::Image { at: (ox, oy), width: img.width, height: img.height, rgba: img.rgba, ink: false });
                 }
-                render::section_at(m, vp.view, view, 1.0)
+                drawing
             }
             // Its title is its first row; it has no view title under it.
             Some(Element::Schedule(sc)) => {
@@ -264,6 +270,11 @@ pub fn draw(m: &Model, id: impl Key) -> Option<Drawing> {
             }
             _ => continue,
         };
+        for note in inner.notes {
+            if d.notes.len() < 32 && !d.notes.contains(&note) {
+                d.notes.push(note);
+            }
+        }
         // Its own title, owned by no element, gives way to the viewport's.
         for ((prim, owner), part) in inner.prims.into_iter().zip(inner.owners).zip(inner.parts) {
             if owner.is_some() {
@@ -282,11 +293,37 @@ pub fn draw(m: &Model, id: impl Key) -> Option<Drawing> {
         left(&mut d, &m.units.scale(vp.scale), P2(x, corner.1 - 11.0), 2.0);
     }
     for (&nid, e) in &m.elements {
+        if let Element::FilledRegion(r) = e
+            && r.view == guid
+        {
+            d.own(Some(nid));
+            render::filled_region(&mut d, m, r);
+        }
+    }
+    for (&nid, e) in &m.elements {
+        if let Element::DetailGroup(g) = e
+            && g.view == guid
+        {
+            d.own(Some(nid));
+            render::detail_group(&mut d, m, g);
+        }
+        if let Element::RepeatingDetail(r) = e
+            && r.view == guid
+        {
+            d.own(Some(nid));
+            r.groups().iter().for_each(|g| render::detail_group(&mut d, m, g));
+        }
         if let Element::Text(n) = e
             && n.view == guid
         {
             d.own(Some(nid));
             render::note(&mut d, n);
+        }
+        if let Element::DetailLine(l) = e
+            && l.view == guid
+        {
+            d.own(Some(nid));
+            render::detail_line(&mut d, m, l);
         }
     }
     d.own(None);

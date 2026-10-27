@@ -5,7 +5,8 @@
 //! left out and named, and the rest of the project opens. [`unknown`] walks a JSON value as `T` would read it, and lists
 //! every key a struct on the way doesn't have; the caller takes those out and reads the value as strictly as ever.
 //! It sees into a struct wherever serde asks for one by its fields: not inside an internally tagged or untagged enum,
-//! which serde reads as a whole, so [`Element`](crate::model::Element) is looked into by its category (`element`).
+//! which serde reads as a whole, so [`Element`](crate::model::Element) is looked into by its category (`element`): those of
+//! the project, and the members of its detail groups, which `Model::read` walks the same way.
 
 use serde::de::{self, DeserializeSeed, Deserializer, EnumAccess, IntoDeserializer, MapAccess, SeqAccess, VariantAccess, Visitor};
 use serde_json::{Map, Value};
@@ -40,8 +41,8 @@ pub fn element(category: &str, v: &Value) -> Vec<String> {
         "structuralcolumn" => Column, "footing" => Column, "beam" => Run, "stripfooting" => Run, "pipe" => Run,
         "conduit" => Run, "cabletray" => Run, "wire" => Run, "downconductor" => Run, "groundconductor" => Run,
         "cable" => Run, "component" => Component, "stair" => Stair, "ramp" => Ramp, "railing" => Railing, "roof" => Roof,
-        "text" => Note, "spot" => Spot, "schedule" => Schedule, "view3d" => View3D, "planview" => PlanView, "link" => Link,
-        "pointcloud" => PointCloud,
+        "text" => Note, "line" => DetailLine, "region" => FilledRegion, "detailgroup" => DetailGroup, "repeatingdetail" => RepeatingDetail, "spot" => Spot, "schedule" => Schedule, "view3d" => View3D,
+        "planview" => PlanView, "link" => Link, "pointcloud" => PointCloud,
     }
 }
 
@@ -55,7 +56,12 @@ pub fn remove(v: &mut Value, pointer: &str) {
 }
 
 fn step(at: &str, key: &str) -> String {
-    format!("{at}/{}", key.replace('~', "~0").replace('/', "~1"))
+    format!("{at}/{}", escaped(key))
+}
+
+/// A key as one step of a JSON pointer: `~` and `/` written the way a pointer does.
+pub fn escaped(key: &str) -> String {
+    key.replace('~', "~0").replace('/', "~1")
 }
 
 /// A value read as the type asks, noting the keys its structs don't have.

@@ -118,7 +118,8 @@ fn needs(e: &Element) -> Vec<Guid> {
 /// The names each library entry `from` names goes by here, where they differ: `(kind, name there)` to the name here.
 type Renames = HashMap<(Kind, String), String>;
 
-/// The library entries of `from` that `to` hasn't: types, materials, pictures, families and project parameters come along,
+/// The library entries of `from` that `to` hasn't: types, materials, pictures, families, project parameters, line patterns
+/// and line styles come along,
 /// each with its GUID. An entry this project has by GUID is its own, under the name it has here (the names in what comes in
 /// follow); one it has by name, with another GUID, is this project's. What comes in names entries by the names returned.
 fn bring_library(to: &mut Model, from: &Model, take: &BTreeSet<Id>, out: &mut Inserted) -> Result<Renames, String> {
@@ -151,7 +152,7 @@ fn bring_library(to: &mut Model, from: &Model, take: &BTreeSet<Id>, out: &mut In
             to.library.insert(id, Entry { kind: e.kind.clone(), name: e.name.clone(), guid: e.guid })?;
         }
     }
-    // What came in names the materials and pictures it's made of as this project does.
+    // What came in names the materials, pictures and line patterns it's made of as this project does.
     let here = |kind: &Kind, name: &mut String| {
         if let Some(n) = renames.get(&(kind.clone(), name.clone())) {
             *name = n.clone();
@@ -167,6 +168,26 @@ fn bring_library(to: &mut Model, from: &Model, take: &BTreeSet<Id>, out: &mut In
             Kind::Material => {
                 if let Some(t) = to.materials.get_mut(&name).and_then(|m| m.texture.as_mut()) {
                     here(&Kind::Picture, &mut t.image);
+                }
+                for p in to.materials.get_mut(&name).into_iter().flat_map(|x| [&mut x.cut_pattern, &mut x.surface_pattern]).flatten() {
+                    here(&Kind::FillPattern, p);
+                }
+            }
+            Kind::LineStyle => {
+                if let Some(p) = to.line_styles.get_mut(&name).and_then(|s| s.pattern.as_mut()) {
+                    here(&Kind::LinePattern, p);
+                }
+            }
+            Kind::DetailGroup => {
+                for m in to.detail_groups.get_mut(&name).into_iter().flat_map(|g| g.members.iter_mut()) {
+                    m.element.lib_refs_mut(&mut |k: &Kind, n: &mut String| here(k, n));
+                }
+            }
+            Kind::FilledRegionType => {
+                if let Some(t) = to.region_types.get_mut(&name) {
+                    for p in [&mut t.foreground, &mut t.background].into_iter().flatten() {
+                        here(&Kind::FillPattern, p);
+                    }
                 }
             }
             Kind::Type(c) => {
@@ -216,6 +237,11 @@ fn copy_definition(to: &mut Model, from: &Model, kind: &Kind, name: &str) -> boo
         Kind::Cloud => one(&mut to.clouds, Some(&from.clouds), name),
         Kind::Family => one(&mut to.families, Some(&from.families), name),
         Kind::Parameter => one(&mut to.parameters, Some(&from.parameters), name),
+        Kind::LinePattern => one(&mut to.line_patterns, Some(&from.line_patterns), name),
+        Kind::LineStyle => one(&mut to.line_styles, Some(&from.line_styles), name),
+        Kind::FillPattern => one(&mut to.fill_patterns, Some(&from.fill_patterns), name),
+        Kind::FilledRegionType => one(&mut to.region_types, Some(&from.region_types), name),
+        Kind::DetailGroup => one(&mut to.detail_groups, Some(&from.detail_groups), name),
         _ => false,
     }
 }
@@ -284,6 +310,7 @@ fn tidy_graphics(m: &mut Model) {
     let known: BTreeSet<Guid> = m.elements.with_guids().map(|(_, g, _)| g).collect();
     for g in m.elements.values_mut().filter_map(graphics::graphics_mut) {
         g.elements.retain(|k, _| known.contains(k));
+        g.linework.retain(|l| known.contains(&l.element));
     }
 }
 

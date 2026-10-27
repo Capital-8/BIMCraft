@@ -517,13 +517,14 @@ fn a_snap_on_a_big_scan_looks_only_near_the_cursor() {
     let reach = Reach { point: 80.0, line: 80.0 };
     let first = snap(&s.model, level, P2(50_010.0, 50_020.0), reach, &[], false, &Snaps::default());
     assert_eq!((first.kind, first.at), (Kind::Point, P2(50_000.0, 50_000.0)));
-    let started = std::time::Instant::now();
+    let before = crate::cloud::LOOKED.with(std::cell::Cell::get);
     for i in 0..100 {
         let p = P2(1000.0 + f64::from(i) * 917.0, 2000.0 + f64::from(i) * 613.0);
         assert_eq!(snap(&s.model, level, p, reach, &[], false, &Snaps::default()).kind, Kind::Point);
     }
-    let each = started.elapsed() / 100;
-    assert!(each < std::time::Duration::from_millis(5), "{each:?} a snap");
+    // Not the million points it holds, nor a thousandth of them: those the squares of the reach touch.
+    let each = (crate::cloud::LOOKED.with(std::cell::Cell::get) - before) / 100;
+    assert!(each <= 2_000, "{each} points looked at for a snap");
 }
 
 /// A project of `n` two-point scans, as it is written to a file.
@@ -537,13 +538,13 @@ fn project_file(n: usize) -> Value {
 }
 
 #[test]
-fn a_file_of_format_4_that_holds_scans_opens_as_5_and_a_file_of_5_is_one_a_4_refuses() {
-    // Builds before 5 saved scans as format 4 (PRs 61 to 72); those files open, and are 5 once read.
+fn a_file_of_format_4_that_holds_scans_opens_as_6_and_a_file_of_5_is_one_a_4_refuses() {
+    // Builds before 5 saved scans as format 4 (PRs 61 to 72); those files open, and are 6 once read.
     let mut file = project_file(2);
-    assert_eq!(file["format"], 5);
+    assert_eq!(file["format"], 6);
     file["format"] = json!(4);
     let (m, left_out) = crate::model::Model::read(&file.to_string()).unwrap();
-    assert_eq!((m.format, m.clouds.len(), left_out.len()), (5, 2, 0));
+    assert_eq!((m.format, m.clouds.len(), left_out.len()), (6, 2, 0));
 }
 
 #[test]
