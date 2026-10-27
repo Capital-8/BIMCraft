@@ -10,6 +10,11 @@
 //! - Tabela 2: vent stacks and headers ("colunas e barriletes de ventilação"), by the DN of the stack served, its units, and the
 //!   longest length each vent DN may have.
 //! - Tabela 1: the longest run from a trap to its vent, by the trap's DN.
+//!
+//! Source: NBR 8160 is a paid ABNT standard. These are its numbers (units, DNs, lengths) transcribed from a licensed copy "as
+//! printed"; no clause text is copied. They are limits chosen by the standard's authors, tabulated per DN and slope, with no formula
+//! that yields them, so they stay tables. A blank cell of a table means "not allowed" and is kept as 0, never filled from another
+//! table. Tabela 7 here stops at DN 200; whether the standard continues past it is to be checked against the standard itself.
 
 /// The DNs of the standard's tables, smallest first.
 pub const DNS: &[f64] = &[40.0, 50.0, 75.0, 100.0, 150.0, 200.0, 250.0, 300.0];
@@ -105,17 +110,18 @@ fn find<T: Copy>(table: &[(f64, T)], dn: f64) -> Option<T> {
     table.iter().find(|r| (r.0 - dn).abs() < 1e-9).map(|r| r.1)
 }
 
-/// The units a drain of `dn` carries: a branch from Tabela 5 (else the building-drain table), a building drain the other way round,
-/// a stack from Tabela 6 by the building's `floors`. 0 when the DN carries none (at that slope).
+/// The units a drain of `dn` carries: a branch from Tabela 5, a building drain from Tabela 7 by slope, a stack from Tabela 6 by the
+/// building's `floors`. 0 when the table has none for it: a blank in Tabela 7 (DN 100 and 150 at 0.5 %, a slope flatter than 0.5 %)
+/// means "not allowed", and a branch never borrows the building-drain table, nor the other way round.
 pub fn capacity(dn: f64, slope: f64, role: Role, floors: u32) -> f64 {
-    if role == Role::Stack {
-        return STACK.iter().find(|r| (r.0 - dn).abs() < 1e-9).map_or(0.0, |r| if floors > 3 { r.2 } else { r.1 });
+    match role {
+        Role::Stack => STACK.iter().find(|r| (r.0 - dn).abs() < 1e-9).map_or(0.0, |r| if floors > 3 { r.2 } else { r.1 }),
+        Role::Branch => find(BRANCH, dn).unwrap_or(0.0),
+        Role::Main => {
+            let column = MAIN_SLOPES.iter().rposition(|s| slope + 1e-9 >= *s);
+            column.and_then(|c| find(MAIN, dn).and_then(|row| row.get(c).copied())).unwrap_or(0.0)
+        }
     }
-    let column = MAIN_SLOPES.iter().rposition(|s| slope + 1e-9 >= *s);
-    let main = column.and_then(|c| find(MAIN, dn).and_then(|row| row.get(c).copied())).unwrap_or(0.0);
-    let branch = find(BRANCH, dn).unwrap_or(0.0);
-    let (first, second) = if role == Role::Main { (main, branch) } else { (branch, main) };
-    if first > 0.0 { first } else { second }
 }
 
 /// The smallest DN that carries `units`, at least `floor` (and, a building drain, at least [`MAIN_MIN_DN`]); none when the tables end.

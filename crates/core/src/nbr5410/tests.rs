@@ -110,6 +110,10 @@ fn the_neutral_and_the_protective_conductor() {
     assert_eq!(protective_section(25.0), 16.0);
     assert_eq!(protective_section(70.0), 35.0);
     assert_eq!(protective_section(240.0), 120.0);
+    for (phase, pe) in [(95.0, 50.0), (120.0, 70.0), (150.0, 95.0), (185.0, 95.0), (300.0, 150.0), (400.0, 240.0)] {
+        assert_eq!(protective_section(phase), pe, "PE of {phase} mm²: half, up to a standard section");
+        assert!(SECTIONS.contains(&protective_section(phase)));
+    }
     assert_eq!(cable_text(Phases::PhaseNeutral, 2.5, false), "1 × 2.5 + N 2.5 + PE 2.5 mm²");
     assert_eq!(cable_text(Phases::ThreeNeutral, 70.0, true), "3 × 70 + N 35 + PE 35 mm²");
     assert_eq!(cable_text(Phases::Three, 10.0, false), "3 × 10 + PE 10 mm²");

@@ -10,7 +10,10 @@
 //! - A horizontal drain ("condutor horizontal") takes Manning-Strickler with the water at two thirds of the inner diameter,
 //!   `Q = 60000 A R^(2/3) i^(1/2) / n` (L/min), `n` 0.011 for PVC, which is the standard's Table 4; at least 0.5 % slope.
 //!
-//! The abacuses were read curve by curve from the figure as a public course text reproduces it, its own grid calibrating the
+//! Source: NBR 10844 is a paid ABNT standard. Table 4 (Manning, n 0.011) is a formula and is computed, not stored; only its 32
+//! values are in the tests, as a check. Figure 3 is a drawing, not a table, and the fits below are this project's own: the curves
+//! were digitised from a drawing of the figure (text, page and figure number: to be filled in by whoever holds the copy), its own
+//! grid calibrating the
 //! reading: each `H` curve is a straight line `D = m Q + b` (mm, L/min) and each `L` curve `ln Q = c0 + c1 ln D + c2 (ln D)^2`, to
 //! within 0.2 to 0.6 mm (rms) of the drawn lines. Off the chart (H under 50 or over 100 mm, L under 0.3 m, D over 150 mm)
 //! nothing is read, and the caller says so.
@@ -23,6 +26,8 @@ pub const MIN_SLOPE: f64 = 0.005;
 pub const N_PVC: f64 = 0.011;
 /// The rainfall intensity the standard allows for up to 100 m² of roof in plan, mm/h.
 pub const DEFAULT_RAIN: f64 = 150.0;
+/// The largest roof in plan, m², for which that default may be used; above it the caller gives the rainfall.
+pub const DEFAULT_RAIN_MAX_AREA: f64 = 100.0;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Outlet {
@@ -172,6 +177,10 @@ pub fn downpipe_diameter(outlet: Outlet, q: f64, h: f64, l: f64) -> Result<Downp
     } else {
         lerp(ds[j - 1], ds[j], (l - c0) / (c1 - c0))
     };
+    // a curve off the chart between two of the L curves gives NaN, which `max` would drop: that is an error, never a smaller pipe
+    if by_depth.is_nan() || by_length.is_nan() {
+        return Err(Off::Diameter);
+    }
     let d = by_depth.max(by_length);
     if !d.is_finite() || d > 150.0 + 1e-9 {
         return Err(Off::Diameter);

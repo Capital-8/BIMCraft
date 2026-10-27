@@ -1,11 +1,13 @@
-//! Cold water sized as NBR 5626:2020 (Sistemas prediais de água fria e água quente) asks. Pure functions of their input: the
+//! Cold water sized as NBR 5626 (Sistemas prediais de água fria e água quente) asks. Pure functions of their input: the
 //! `water_size` command is their caller, so none of this needs a pipe network or connectors in the model.
 //!
 //! - The method that gives a pipe's design flow is the project's to choose and to justify in its report. Two are offered:
-//!   `weights`, the empirical method of NBR 5626:1998 Annex A, `Q = 0.3 √ΣP` (L/s), never more than the sum of the fixtures' own
+//!   `weights`, the empirical method of NBR 5626:1998 Annex A (the fixture table below is that edition's Table A.1, and only the
+//!   flush-tank WC is in it), `Q = 0.3 √ΣP` (L/s), never more than the sum of the fixtures' own
 //!   design flows; and `sum`, every fixture at once.
 //! - Head loss by the universal (Darcy-Weisbach) equation, the friction factor by Colebrook, water at 20 °C. A fitting counts as
-//!   the equivalent length of a maker's table of rigid PVC (PVC soldável, outside diameter DN, walls of NBR 5648).
+//!   the equivalent length of a maker's table of rigid PVC (PVC soldável, outside diameter DN, walls of NBR 5648). The maker, document
+//!   and page of that table are to be named here by whoever holds the catalogue, as `conduit/tables.rs` does for its own.
 //! - Speed 3 m/s at most (the standard lets a pipe go faster where water hammer and noise are shown not to matter); at least
 //!   10 kPa dynamic at a point of use.
 
