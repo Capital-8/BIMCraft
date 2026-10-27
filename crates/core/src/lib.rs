@@ -12,6 +12,7 @@ mod cloud_tests;
 mod commands;
 mod component_geometry;
 mod csg;
+pub mod dxf;
 pub mod engine;
 pub mod family;
 pub mod favorites;
