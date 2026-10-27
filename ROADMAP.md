@@ -20,8 +20,8 @@ The README lists what the engine, the desktop, the CLI and the MCP server do. Wh
   Editor), textures by material or from a picture, Paint, favorites kept for every project, and packages for Windows,
   Linux (AppImage, Flatpak, deb, rpm, Arch, tarball, riscv64) and macOS. Auto-update from GitHub releases is done for the Windows installer's copy, an AppImage and the macOS app, though none of it has run on a real system yet.
 - **The file** is `.bimcraft` JSON with a `format` version (6 now): an older file is migrated on open, and a newer one is
-  refused, saying so. Every save is format 6, with or without the detailing features, so 0.8's build (which reads up to 5)
-  refuses even a plain project saved by this one ("saved by a newer BIMCraft (file format 6; this one reads up to 5)"): the
+  refused, saying so. Every save is format 6, with or without the detailing features, so an earlier build (0.8.0 reads up to 4)
+  refuses even a plain project saved by this one ("saved by a newer BIMCraft (file format 6; this one reads up to 4)"): the
   release notes say so. A field this version doesn't know (a newer one's, in the same format) is left out and named, and the
   rest opens; commands still refuse a key they don't know.
 - **Ids and GUIDs**, as Revit's ElementId and UniqueId: every element, every library entry (types, materials, families,
