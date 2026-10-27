@@ -336,6 +336,21 @@ fn an_import_says_one_pattern_in_the_singular_and_keeps_the_reason_a_pattern_was
     assert!(said(&h, "1 pattern imported; left out: Alpha Beta Gamma Delta Epsilon… ("), "the name cut at a word");
     assert!(said(&h, &format!("{}… (", "x".repeat(30))), "a name of no words cut where it must");
     assert!(said(&h, "its offset is 0)"), "the reason, whole");
+    // A name whose 30th character is inside a word is cut before that word, not through it.
+    std::fs::write(&file, "*Alpha Beta Gamma Delta Epsilonic Zeta\n0,0,0,0,0\n").unwrap();
+    h.state_mut().import_patterns(&file);
+    h.run();
+    assert!(said(&h, "left out: Alpha Beta Gamma Delta… ("), "the name cut before the word the limit falls in");
+    assert!(!said(&h, "Epsilon…"), "no word cut in two");
+    // A pattern the core's check refuses has its reason told without the "fill pattern `name`" it begins with: the note names it.
+    std::fs::write(&file, "*Huge Spacing Pattern\n0,0,0,0,999999999\n").unwrap();
+    h.state_mut().import_patterns(&file);
+    h.run();
+    assert!(
+        said(&h, "Huge Spacing Pattern (line 1: its lines are 0.05 to 100000 apart, not 999999999)"),
+        "the reason, after its name once"
+    );
+    assert!(!said(&h, "fill pattern `"), "the name is not said twice");
 }
 
 #[test]

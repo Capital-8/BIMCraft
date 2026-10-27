@@ -234,6 +234,27 @@ fn fill_patterns_and_edit_type_with_forty_patterns_and_a_long_note_stay_inside_t
     dialog_fits(&h, "fill-patterns", &[&["Type Properties", "New Pattern", "Import..."][..], &buttons].concat(), "Edit Type's Patterns");
 }
 
+/// Edit Type in a window shorter than the least a window can be (a tiling window manager can give one): the form scrolls in the
+/// height left, and OK, Cancel and Apply stay in the window.
+#[test]
+fn edit_type_scrolls_in_a_window_too_short_for_it_so_its_buttons_stay_in_reach() {
+    let short = vec2(MIN_SIZE[0], 400.0);
+    let mut h = crowded();
+    h.set_size(short);
+    let model = h.state().session.model.clone();
+    h.state_mut().fill_patterns_dialog = Some(crate::fillpatterns::FillPatternsDialog::edit(&model, "Region 39", Vec::new()));
+    h.run();
+    h.run();
+    let area = h.ctx.memory(|m| m.area_rect(egui::Id::new("fill-patterns"))).expect("the dialog is open");
+    assert!(window(short).expand(0.5).contains_rect(area), "the dialog {area:?} runs off the window {short:?}");
+    for button in ["OK", "Cancel", "Apply"] {
+        // (The ribbon behind the dialog may carry the same word.)
+        let found: Vec<Rect> = h.get_all_by_label(button).map(|n| n.rect()).filter(|r| r.intersects(area)).collect();
+        assert!(!found.is_empty(), "`{button}` is not in the dialog {area:?}");
+        assert!(found.iter().all(|r| window(short).expand(0.5).contains_rect(*r)), "`{button}` {found:?} is off the window {short:?}");
+    }
+}
+
 #[test]
 fn line_styles_with_forty_of_each_stay_inside_the_least_window_with_their_buttons_in_reach() {
     let mut h = crowded();
