@@ -230,3 +230,26 @@ fn failed_background_write_reports_an_error_and_can_retry_without_interrupting_e
     until(&mut h, |h| !h.state().autosave.busy);
     assert_ne!(std::fs::read(backup).unwrap(), original);
 }
+
+#[test]
+fn a_project_put_in_the_sessions_place_gets_a_copy_of_its_own_and_the_old_one_stays_until_that_is_written() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut h = app("");
+    enable(&mut h, &dir.path().join("temp"));
+    until(&mut h, |h| h.state().autosave.discovering == 0);
+    h.state_mut().session.execute("wall", &json!({"points": [[0,0],[4000,0]]})).unwrap();
+    due(&mut h);
+    until(&mut h, |h| !h.state().autosave.busy);
+    let old = h.state().autosave.active.clone().unwrap();
+    assert!(old.exists());
+    // New, through the session as a script or an embedder does it (the control port turns an agent's away).
+    h.state_mut().session.execute("new", &json!({})).unwrap();
+    h.run();
+    let fresh = h.state().autosave.active.clone().unwrap();
+    assert_ne!(fresh, old, "the new project does not write over the old one's copy");
+    assert!(old.exists(), "unsaved work nobody was asked about stays until the new project has a copy of its own");
+    h.state_mut().session.execute("wall", &json!({"points": [[0,1000],[4000,1000]]})).unwrap();
+    due(&mut h);
+    until(&mut h, |h| !h.state().autosave.busy && !old.exists());
+    assert!(fresh.exists());
+}

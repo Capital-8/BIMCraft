@@ -1218,9 +1218,11 @@ impl BimApp {
         // What agents asked of the project comes before the tidying, which puts right what a command left stale.
         self.answer_agents(&ctx);
         // A project put in the session's place under the window (the control port turns an agent's New and Open away, but a
-        // script or an embedder may do them) starts it over, as File > New does: its sketch and dialogs were of the old one.
+        // script or an embedder may do them) starts it over, as File > New does: its sketch and dialogs were of the old one, and
+        // it gets a recovery copy of its own. (The old one's stays until that is written: nobody was asked about its changes.)
         if self.session.model.uid != self.project {
             self.reopened();
+            self.autosave_document();
         }
         self.tidy();
         self.poll_updates(&ctx);
