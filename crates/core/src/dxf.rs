@@ -250,29 +250,26 @@ impl Dxf {
 
     /// The box round everything drawn, drawing units: an arc's or circle's whole circle, a text's point.
     pub fn bounds(&self) -> Option<[P2; 2]> {
-        let mut b: Option<[P2; 2]> = None;
-        let mut take = |p: P2| {
-            b = Some(match b {
-                None => [p, p],
-                Some([lo, hi]) => [P2(lo.0.min(p.0), lo.1.min(p.1)), P2(hi.0.max(p.0), hi.1.max(p.1))],
-            });
+        union(self.entities.iter().map(|e| e.shape.bounds()))
+    }
+}
+
+/// The box round the boxes given.
+pub fn union(boxes: impl IntoIterator<Item = [P2; 2]>) -> Option<[P2; 2]> {
+    boxes.into_iter().reduce(|[lo, hi], [a, b]| [P2(lo.0.min(a.0), lo.1.min(a.1)), P2(hi.0.max(b.0), hi.1.max(b.1))])
+}
+
+impl Shape {
+    /// The box round it, drawing units: an arc's or circle's whole circle, a text's point.
+    pub fn bounds(&self) -> [P2; 2] {
+        let pts: Vec<P2> = match self {
+            Shape::Line(a, b) => vec![*a, *b],
+            Shape::Polyline { pts, .. } => pts.clone(),
+            Shape::Circle { c, r } | Shape::Arc { c, r, .. } => vec![*c - P2(*r, *r), *c + P2(*r, *r)],
+            Shape::Point(p) | Shape::Text { at: p, .. } => vec![*p],
+            Shape::Fill { rings, .. } => rings.iter().flatten().copied().collect(),
         };
-        for e in &self.entities {
-            match &e.shape {
-                Shape::Line(a, b) => {
-                    take(*a);
-                    take(*b);
-                }
-                Shape::Polyline { pts, .. } => pts.iter().for_each(|p| take(*p)),
-                Shape::Circle { c, r } | Shape::Arc { c, r, .. } => {
-                    take(*c - P2(*r, *r));
-                    take(*c + P2(*r, *r));
-                }
-                Shape::Point(p) | Shape::Text { at: p, .. } => take(*p),
-                Shape::Fill { rings, .. } => rings.iter().flatten().for_each(|p| take(*p)),
-            }
-        }
-        b
+        union(pts.into_iter().map(|p| [p, p])).unwrap_or_default()
     }
 }
 
@@ -972,7 +969,7 @@ fn arc(c: P2, r: f64, start: f64, end: f64) -> Shape {
 }
 
 /// Points along the arc from `start` through `sweep` degrees (counter-clockwise when positive), both ends included.
-fn arc_points(c: P2, r: f64, start: f64, sweep: f64) -> Vec<P2> {
+pub(crate) fn arc_points(c: P2, r: f64, start: f64, sweep: f64) -> Vec<P2> {
     let n = ((sweep.abs() / 360.0 * CURVE_STEPS as f64).ceil() as usize).clamp(2, CURVE_STEPS);
     (0..=n)
         .map(|i| {

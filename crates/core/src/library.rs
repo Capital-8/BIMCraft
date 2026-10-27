@@ -29,6 +29,8 @@ pub enum Kind {
     Picture,
     /// A scan point clouds place.
     Cloud,
+    /// A CAD drawing imports place.
+    Cad,
     Family,
     Parameter,
     ViewFilter,
@@ -52,6 +54,7 @@ impl Kind {
             Kind::Material => "material".into(),
             Kind::Picture => "picture".into(),
             Kind::Cloud => "scan".into(),
+            Kind::Cad => "CAD drawing".into(),
             Kind::Family => "family".into(),
             Kind::Parameter => "parameter".into(),
             Kind::ViewFilter => "view filter".into(),
@@ -70,6 +73,7 @@ impl Kind {
             "material" => Kind::Material,
             "picture" => Kind::Picture,
             "cloud" => Kind::Cloud,
+            "cad" => Kind::Cad,
             "family" => Kind::Family,
             "parameter" => Kind::Parameter,
             "view-filter" => Kind::ViewFilter,
@@ -92,6 +96,7 @@ impl fmt::Display for Kind {
             Kind::Material => f.write_str("material"),
             Kind::Picture => f.write_str("picture"),
             Kind::Cloud => f.write_str("cloud"),
+            Kind::Cad => f.write_str("cad"),
             Kind::Family => f.write_str("family"),
             Kind::Parameter => f.write_str("parameter"),
             Kind::ViewFilter => f.write_str("view-filter"),
@@ -464,6 +469,7 @@ impl Model {
         add(Kind::Material, &mut self.materials.keys());
         add(Kind::Picture, &mut self.images.keys());
         add(Kind::Cloud, &mut self.clouds.keys());
+        add(Kind::Cad, &mut self.cads.keys());
         add(Kind::Family, &mut self.families.keys());
         add(Kind::Parameter, &mut self.parameters.keys());
         add(Kind::ViewFilter, &mut self.view_filters.keys());
@@ -809,6 +815,7 @@ impl crate::model::Element {
             },
             Element::Component(c) => family_and_type(&mut c.family, &mut c.type_name, f),
             Element::PointCloud(pc) => f(&Kind::Cloud, &mut pc.cloud),
+            Element::CadImport(ci) => f(&Kind::Cad, &mut ci.cad),
             Element::Schedule(sc) => {
                 let mut fields: Vec<&mut String> =
                     sc.fields.iter_mut().map(|x| &mut x.name).chain(sc.sort.iter_mut().map(|x| &mut x.field)).collect();

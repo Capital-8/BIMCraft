@@ -8,6 +8,7 @@ use std::sync::Arc;
 
 use serde_json::{Map, Value, json};
 
+use crate::cad::{Cad, Colors};
 use crate::cloud::{self, Cloud};
 use crate::engine::{Command, Run, Session};
 use crate::favorites::{self, FamilyEntry, Favorites, MaterialEntry};
@@ -17,11 +18,11 @@ use crate::language::Language;
 use crate::library::Kind as LibKind;
 use crate::massing;
 use crate::model::{
-    CEILING_HEIGHT, Ceiling, CeilingType, Column, ColumnType, Component, DEFAULT_HEIGHT, DimKind, Dimension, Element, Extrusion, Face,
-    Facing, Floor, FloorType, Grid, Guid, Id, Key, Landing, Layer, Level, Line, Location, MAX_COORD, MAX_POINTS, MAX_SLOPE, MAX_TEXT, Mass,
-    Model, NOTE_SIZE, Note, Opening, OpeningType, PARAMETER_CATEGORIES, ParameterKind, Pattern, PlanView, PointCloud, ProjectParameter,
-    RAMP_SLOPE, RAMP_WIDTH, RISER, Railing, RailingType, Ramp, Reference, Roof, RoofType, Room, STAIR_WIDTH, Schedule, Section, Shaft,
-    Sheet, Side, Spot, Stair, TOL, TREAD, Tag, View3D, Viewport, Wall, WallType, heading, paper,
+    CEILING_HEIGHT, CadImport, Ceiling, CeilingType, Column, ColumnType, Component, DEFAULT_HEIGHT, DimKind, Dimension, Element, Extrusion,
+    Face, Facing, Floor, FloorType, Grid, Guid, Id, Key, Landing, Layer, Level, Line, Location, MAX_COORD, MAX_POINTS, MAX_SLOPE, MAX_TEXT,
+    Mass, Model, NOTE_SIZE, Note, Opening, OpeningType, PARAMETER_CATEGORIES, ParameterKind, Pattern, PlanView, PointCloud,
+    ProjectParameter, RAMP_SLOPE, RAMP_WIDTH, RISER, Railing, RailingType, Ramp, Reference, Roof, RoofType, Room, STAIR_WIDTH, Schedule,
+    Section, Shaft, Sheet, Side, Spot, Stair, TOL, TREAD, Tag, View3D, Viewport, Wall, WallType, heading, paper,
 };
 use crate::paint;
 use crate::phasing;
@@ -121,6 +122,45 @@ pub static ALL: &[Command] = &[
          where its file's coordinates put it; `offset` raises its middle over the level, `angle` turns it. Returns its id, the \
          scan's name, the points kept and read, and where its middle was in the file",
         point_cloud,
+    ),
+    edit(
+        "import_cad",
+        "Import CAD",
+        &[],
+        "{path | cad, name?, level?, view?, at?: [x, y], position?, units?, scale?, angle?, layers?, colors?, link?} brings in a \
+         DXF drawing (`path`: an ASCII DXF of any version; save a DWG as DXF first) or places one the project holds again (`cad`, \
+         its name), as an element in every plan of `level`, or with `view` (a plan) in that view only. `units` of the drawing: \
+         auto (the default: what its file says, else mm), mm, cm, m, in or ft; or `scale`, mm to each of its units. `position`: \
+         center (the default: the middle of the drawing on `at`, the origin unless given) or origin (its origin on `at`); \
+         `angle` turns it about `at`, degrees. `layers`: visible (the default: those its file has on and thawed), all, or a list \
+         of those to show. `colors`: preserve (the default), invert or black. `link: true` remembers the file, so `reload_cad` \
+         and opening the project read it again. Returns its id, the drawing's name, its unit, entities and layers, its extents \
+         in the model, how many entities lie far from the rest (they're left out of its extents) and what was left out",
+        import_cad,
+    ),
+    edit(
+        "cad_layers",
+        "CAD Layers",
+        &[],
+        "{id, hide?: [layer, …], show?: [layer, …], view?} a CAD import's layers, each with its colour and linetype and whether \
+         it's shown; `hide` and `show` change which it shows in every view, or with `view` in that view only (its \
+         Visibility/Graphics, by the drawing's name)",
+        cad_layers,
+    ),
+    edit(
+        "reload_cad",
+        "Reload CAD",
+        &[],
+        "{cad} reads a linked CAD drawing's file again, so every import of it shows what the file holds now (opening the project \
+         does too). Returns whether it changed",
+        reload_cad,
+    ),
+    other(
+        "cad_query",
+        "Query",
+        "{id, at: [x, y], reach?} what of a CAD import lies nearest `at`, within `reach` mm (100 unless given): its kind, layer, \
+         colour, linetype and weight, as Revit's Query",
+        cad_query,
     ),
     edit(
         "wall",
@@ -1281,6 +1321,20 @@ pub fn element_json(m: &Model, id: Id) -> Value {
         }
     });
     match e {
+        Element::CadImport(ci) => {
+            if let Some(cad) = m.cads.get(&ci.cad) {
+                extra.insert("source".into(), json!(cad.source()));
+                extra.insert("entities".into(), json!(cad.dxf().entities.len()));
+                extra.insert("layers".into(), json!(cad.dxf().layers.len()));
+                extra.insert("unit".into(), json!(cad.dxf().unit));
+                if let Some(path) = cad.path() {
+                    extra.insert("linked".into(), json!(path));
+                }
+            }
+            if let Some(b) = m.cad_box(id) {
+                extra.insert("extents".into(), json!(b));
+            }
+        }
         Element::PointCloud(pc) => {
             if let Some(cloud) = m.clouds.get(&pc.cloud) {
                 extra.insert("points".into(), json!(cloud.len()));
@@ -1511,6 +1565,10 @@ fn with_links(s: &mut Session, mut reply: Value) -> Value {
     if !failed.is_empty() {
         reply["links_not_loaded"] = json!(failed);
     }
+    let failed = relink_cads(s);
+    if !failed.is_empty() {
+        reply["cads_not_reloaded"] = json!(failed);
+    }
     reply
 }
 
@@ -1659,11 +1717,7 @@ fn insert_from(s: &mut Session, p: &Value) -> R {
 
 /// The project a link's `path` names, read as `open` reads it: its own links are not followed.
 fn read_link(s: &Session, path: &str) -> Result<Arc<Model>, String> {
-    let at = PathBuf::from(path);
-    let full = match (&s.path, at.is_relative()) {
-        (Some(project), true) => project.parent().map_or(at.clone(), |dir| dir.join(&at)),
-        _ => at,
-    };
+    let full = beside(s, path);
     let mut other = Session::new();
     open_file(&mut other, &json!({"path": full})).map_err(|e| e.trim_start_matches("open: ").to_string())?;
     Ok(other.model)
@@ -2015,7 +2069,14 @@ fn drawn_category(c: &str, given: &str) -> Result<String, String> {
             c,
             format!(
                 "`{given}` isn't a category views draw; there are: {}",
-                graphics::MODEL.iter().chain(&graphics::ANNOTATION).chain(&graphics::SCANS).copied().collect::<Vec<_>>().join(", ")
+                graphics::MODEL
+                    .iter()
+                    .chain(&graphics::ANNOTATION)
+                    .chain(&graphics::SCANS)
+                    .chain(&graphics::IMPORTED)
+                    .copied()
+                    .collect::<Vec<_>>()
+                    .join(", ")
             ),
         ))
     }
@@ -3002,6 +3063,336 @@ fn point_cloud(s: &mut Session, p: &Value) -> R {
     }
     let id = m.insert(Element::PointCloud(PointCloud { cloud: name.clone(), level, at, offset, angle }));
     Ok(json!({"id": id, "cloud": name, "points": points, "read": read, "origin": origin}))
+}
+
+// ---------- CAD drawings ----------
+
+/// The file `path` names, a relative one beside the project's file: where a link or a linked drawing is read from.
+fn beside(s: &Session, path: &str) -> PathBuf {
+    let at = PathBuf::from(path);
+    match (&s.path, at.is_relative()) {
+        (Some(project), true) => project.parent().map_or(at.clone(), |dir| dir.join(&at)),
+        _ => at,
+    }
+}
+
+/// The bytes of the DXF file `path`, or why it can't be brought in.
+fn read_dxf_file(s: &Session, path: &str) -> Result<Vec<u8>, String> {
+    let full = beside(s, path);
+    match ext(&full).as_str() {
+        "dxf" => {}
+        "dwg" => {
+            return Err(format!(
+                "{}: DWG is a closed format BIMCraft doesn't read; save it as DXF (any version, ASCII) from the program that made it, \
+                 or convert it with a DWG to DXF converter, and bring that in",
+                full.display()
+            ));
+        }
+        other => return Err(format!("{}: a .{other} file isn't a CAD drawing BIMCraft reads; it reads DXF", full.display())),
+    }
+    let len = std::fs::metadata(&full).map_err(|e| format!("{}: {e}", full.display()))?.len();
+    if len > crate::dxf::MAX_BYTES as u64 {
+        return Err(format!("{} is too large ({len} bytes; up to {})", full.display(), crate::dxf::MAX_BYTES));
+    }
+    std::fs::read(&full).map_err(|e| format!("{}: {e}", full.display()))
+}
+
+/// The CAD import `id` names, by id or GUID.
+fn cad_import<'m>(c: &str, m: &'m Model, p: &Value) -> Result<(Id, &'m CadImport), String> {
+    let v = p.get("id").filter(|v| !v.is_null()).ok_or_else(|| bad(c, "`id`, a CAD import's id or GUID, is required"))?;
+    let id = element_id(c, m, v)?;
+    match m.elements.get(id) {
+        Some(Element::CadImport(ci)) => Ok((id, ci)),
+        Some(e) => Err(bad(c, format!("{} {id} isn't a CAD import", e.category()))),
+        None => Err(bad(c, format!("no element {id}"))),
+    }
+}
+
+/// `key`, a list of a drawing's layer names, each one it has.
+fn layer_list(c: &str, p: &Value, key: &str, cad: &Cad) -> Result<Vec<String>, String> {
+    match p.get(key) {
+        v if absent(v) => Ok(Vec::new()),
+        Some(Value::Array(a)) if a.len() <= crate::model::MAX_HIDDEN => a
+            .iter()
+            .map(|v| {
+                let n = v.as_str().ok_or_else(|| bad(c, format!("`{key}` lists layers by name, not {v}")))?;
+                if cad.dxf().layer(n).is_none() {
+                    let names: Vec<&str> = cad.dxf().layers.iter().take(20).map(|l| l.name.as_str()).collect();
+                    let more = if cad.dxf().layers.len() > 20 { "…" } else { "" };
+                    return Err(bad(c, format!("the drawing has no layer `{n}` (it has: {}{more})", names.join(", "))));
+                }
+                Ok(n.to_string())
+            })
+            .collect(),
+        Some(v) => Err(bad(c, format!("`{key}` is a list of layer names, of up to {}, not {v}", crate::model::MAX_HIDDEN))),
+        None => Ok(Vec::new()),
+    }
+}
+
+/// A drawing's layers as a reply lists them: each with its colour, its linetype, and whether it shows.
+fn layers_json(cad: &Cad, hidden: &BTreeSet<String>, in_view: Option<&BTreeSet<String>>) -> Value {
+    let rows: Vec<Value> = cad
+        .dxf()
+        .layers
+        .iter()
+        .map(|l| {
+            let color = l.color.rgb().map(|c| json!([c.0, c.1, c.2]));
+            let mut row = json!({"name": l.name, "color": color, "linetype": l.linetype, "shown": !hidden.contains(&l.name)});
+            if let Some(v) = in_view {
+                row["shown_in_view"] = json!(!hidden.contains(&l.name) && !v.contains(&l.name));
+            }
+            row
+        })
+        .collect();
+    json!(rows)
+}
+
+/// The layers a drawing's file has off or frozen: those an import of only its visible layers hides.
+fn off_layers(cad: &Cad) -> BTreeSet<String> {
+    cad.dxf().layers.iter().filter(|l| l.off || l.frozen).map(|l| l.name.clone()).collect()
+}
+
+/// A DXF drawing brought in, or one the project holds placed again, as an element: Revit's Import CAD (and Link CAD).
+fn import_cad(s: &mut Session, p: &Value) -> R {
+    let c = "import_cad";
+    let m = &s.model;
+    let (level, view) = if absent(p.get("view")) {
+        (level_param(c, m, p, "level")?, None)
+    } else {
+        let (level, plan) = plan_param(c, m, p, "view")?;
+        if !absent(p.get("level")) && level_param(c, m, p, "level")? != level {
+            return Err(bad(c, "`view` is a plan of another level than `level`; give the one, or a plan of the other"));
+        }
+        (level, Some(plan.unwrap_or(level)))
+    };
+    let link = flag(c, p, "link")?;
+    let (name, cad, new) = match (string(c, p, "path")?, string(c, p, "cad")?) {
+        (Some(_), Some(_)) => return Err(bad(c, "give `path`, a DXF file to bring in, or `cad`, a drawing the project holds; not both")),
+        (None, None) => return Err(bad(c, "give `path`, a DXF file to bring in, or `cad`, the name of a drawing the project holds")),
+        (None, Some(n)) => {
+            let cad = m.cads.get(&n).cloned().ok_or_else(|| {
+                let names: Vec<&str> = m.cads.keys().map(String::as_str).collect();
+                let held = if names.is_empty() { "none".into() } else { names.join(", ") };
+                bad(c, format!("the project holds no CAD drawing named `{n}` (it holds: {held})"))
+            })?;
+            (n, cad, false)
+        }
+        (Some(path), None) => {
+            let source = Path::new(&path).file_name().map_or_else(|| path.clone(), |f| f.to_string_lossy().into_owned());
+            let stem =
+                Path::new(&path).file_stem().map_or_else(|| "Drawing".into(), |f| f.to_string_lossy().chars().take(MAX_TEXT).collect());
+            let name = string(c, p, "name")?.unwrap_or(stem);
+            if name.trim().is_empty() {
+                return Err(bad(c, "a CAD drawing needs a `name`"));
+            }
+            if m.cads.contains_key(&name) {
+                return Err(bad(
+                    c,
+                    format!(
+                        "the project already holds a CAD drawing named `{name}`: place it again with `cad`, or bring this file in under another `name`"
+                    ),
+                ));
+            }
+            if m.cads.len() >= crate::cad::MAX_CADS {
+                return Err(bad(
+                    c,
+                    format!("the project holds {} CAD drawings already; delete the imports of one first", crate::cad::MAX_CADS),
+                ));
+            }
+            let bytes = read_dxf_file(s, &path).map_err(|e| bad(c, e))?;
+            let held: usize = m.cads.values().map(Cad::len).sum();
+            if held + bytes.len() > crate::cad::MAX_HELD {
+                return Err(bad(
+                    c,
+                    format!("the project's CAD drawings would hold {} bytes; it holds up to {}", held + bytes.len(), crate::cad::MAX_HELD),
+                ));
+            }
+            let cad = Cad::new(&source, link.then_some(path.clone()), bytes).map_err(|e| bad(c, format!("{path}: {e}")))?;
+            (name, cad, true)
+        }
+    };
+    if link && !new {
+        return Err(bad(c, "`link` is for a file brought in by `path`; a drawing the project holds stays as it's held"));
+    }
+    let dxf = cad.dxf();
+    let scale = match (string(c, p, "units")?.as_deref(), num(c, p, "scale")?) {
+        (Some(_), Some(_)) => return Err(bad(c, "give `units` or `scale`, not both")),
+        (_, Some(k)) if crate::model::CAD_SCALE.contains(&k) => k,
+        (_, Some(k)) => {
+            let (lo, hi) = (crate::model::CAD_SCALE.start(), crate::model::CAD_SCALE.end());
+            return Err(bad(c, format!("`scale` is mm to each of the drawing's units, from {lo} to {hi}, not {k}")));
+        }
+        (None | Some("auto"), None) => dxf.scale.unwrap_or(1.0),
+        (Some(u), None) => cloud::unit(u).ok_or_else(|| bad(c, format!("`units` is auto, mm, cm, m, in or ft, not {u}")))?,
+    };
+    let bulk = cad.bulk().unwrap_or_default();
+    let origin = match string(c, p, "position")?.as_deref() {
+        None | Some("center" | "centre") => (bulk[0] + bulk[1]) * 0.5,
+        Some("origin") => P2(0.0, 0.0),
+        Some(o) => {
+            return Err(bad(
+                c,
+                format!("`position` is center (the middle of the drawing on `at`) or origin (its origin on `at`), not {o}"),
+            ));
+        }
+    };
+    let at = point_opt(c, p, "at")?.unwrap_or(P2(0.0, 0.0));
+    let angle = num(c, p, "angle")?.unwrap_or(0.0);
+    let hidden: BTreeSet<String> = match p.get("layers") {
+        None | Some(Value::Null) => off_layers(&cad),
+        Some(Value::String(w)) if w == "visible" => off_layers(&cad),
+        Some(Value::String(w)) if w == "all" => BTreeSet::new(),
+        Some(Value::Array(_)) => {
+            let keep: BTreeSet<String> = layer_list(c, p, "layers", &cad)?.into_iter().collect();
+            dxf.layers.iter().filter(|l| !keep.contains(&l.name)).map(|l| l.name.clone()).collect()
+        }
+        Some(v) => {
+            return Err(bad(
+                c,
+                format!("`layers` is visible (those the file has on and thawed), all, or a list of the layers to show, not {v}"),
+            ));
+        }
+    };
+    let colors = match string(c, p, "colors")? {
+        None => Colors::Preserve,
+        Some(n) => Colors::from_name(&n).ok_or_else(|| bad(c, format!("`colors` is preserve, invert or black, not {n}")))?,
+    };
+    let unit = if dxf.scale.is_some() { dxf.unit.clone() } else { format!("{} (read as mm unless `units` says)", dxf.unit) };
+    let (entities, layers, far, left_out) = (dxf.entities.len(), dxf.layers.len(), cad.far(), dxf.left_out.clone());
+    let source = cad.source().to_string();
+    let m = s.model_mut();
+    if new {
+        m.cads.insert(name.clone(), cad);
+    }
+    let id = m.insert(Element::CadImport(CadImport { cad: name.clone(), level, at, origin, scale, angle, view, hidden, colors }));
+    let extents = m.cad_box(id);
+    let mut reply = json!({
+        "id": id, "cad": name, "source": source, "unit": unit, "scale": scale, "entities": entities, "layers": layers,
+        "extents": extents, "far": far, "left_out": left_out,
+    });
+    if far > 0 {
+        reply["warning"] = json!(format!(
+            "{far} of its entities lie far from the rest of the drawing: they're drawn where they are, and left out of its extents. \
+             Delete them in the program that made the drawing, or hide their layers"
+        ));
+    }
+    Ok(reply)
+}
+
+/// An import's layers, and which it shows: in every view, or in one (its Visibility/Graphics' Imported Categories).
+fn cad_layers(s: &mut Session, p: &Value) -> R {
+    let c = "cad_layers";
+    let m = &s.model;
+    let (id, ci) = cad_import(c, m, p)?;
+    let cad = m.cads.get(&ci.cad).ok_or_else(|| bad(c, format!("the project holds no CAD drawing named `{}`", ci.cad)))?.clone();
+    let (hide, show) = (layer_list(c, p, "hide", &cad)?, layer_list(c, p, "show", &cad)?);
+    if let Some(both) = hide.iter().find(|h| show.contains(h)) {
+        return Err(bad(c, format!("layer `{both}` is in `hide` and in `show`; give it in one")));
+    }
+    let name = ci.cad.clone();
+    let mut hidden = ci.hidden.clone();
+    let view = if absent(p.get("view")) { None } else { Some(view_param(c, m, p, false)?) };
+    let in_view = match view {
+        None => {
+            hidden.extend(hide);
+            for l in &show {
+                hidden.remove(l);
+            }
+            if hidden != ci.hidden
+                && let Some(Element::CadImport(ci)) = s.model_mut().elements.get_mut(id)
+            {
+                ci.hidden = hidden.clone();
+            }
+            None
+        }
+        Some(v) => {
+            let mut g = graphics::graphics_of(m, v)
+                .cloned()
+                .ok_or_else(|| bad(c, format!("{} isn't a plan, a section, an elevation or a 3D view", view_title(m, v))))?;
+            let was = g.layers.get(&name).cloned().unwrap_or_default();
+            let mut now = was.clone();
+            now.extend(hide);
+            for l in &show {
+                now.remove(l);
+            }
+            if now != was {
+                not_dependent(c, m, v, "graphics")?;
+                if now.is_empty() {
+                    g.layers.remove(&name);
+                } else {
+                    g.layers.insert(name.clone(), now.clone());
+                }
+                g.check(m).map_err(|e| bad(c, e))?;
+                set_graphics(s.model_mut(), v, g);
+            }
+            Some(now)
+        }
+    };
+    Ok(json!({"id": id, "cad": name, "layers": layers_json(&cad, &hidden, in_view.as_ref())}))
+}
+
+/// A linked drawing read again from its file.
+fn reload_cad(s: &mut Session, p: &Value) -> R {
+    let c = "reload_cad";
+    let name = string(c, p, "cad")?.ok_or_else(|| bad(c, "`cad`, the name of a linked CAD drawing, is required"))?;
+    let cad = s.model.cads.get(&name).cloned().ok_or_else(|| bad(c, format!("the project holds no CAD drawing named `{name}`")))?;
+    let path = cad
+        .path()
+        .map(str::to_string)
+        .ok_or_else(|| bad(c, format!("CAD drawing `{name}` isn't linked; bring it in again with `import_cad` and `link`")))?;
+    let bytes = read_dxf_file(s, &path).map_err(|e| bad(c, e))?;
+    if cad.same_bytes(&bytes) {
+        return Ok(json!({"cad": name, "changed": false}));
+    }
+    let new = Cad::new(cad.source(), Some(path.clone()), bytes).map_err(|e| bad(c, format!("{path}: {e}")))?;
+    let entities = new.dxf().entities.len();
+    s.model_mut().cads.insert(name.clone(), new);
+    Ok(json!({"cad": name, "changed": true, "entities": entities}))
+}
+
+/// Every linked drawing read again, as opening a project does; those that couldn't be, as `{cad, error}`. A drawing whose file
+/// is gone keeps what the project holds of it.
+fn relink_cads(s: &mut Session) -> Vec<Value> {
+    let linked: Vec<(String, String)> = s.model.cads.iter().filter_map(|(n, cad)| Some((n.clone(), cad.path()?.to_string()))).collect();
+    let mut failed = Vec::new();
+    for (name, path) in linked {
+        let read = read_dxf_file(s, &path).and_then(|bytes| {
+            let held = s.model.cads.get(&name);
+            if held.is_some_and(|h| h.same_bytes(&bytes)) {
+                return Ok(None);
+            }
+            let source = held.map_or(name.as_str(), |h| h.source());
+            Cad::new(source, Some(path.clone()), bytes).map(Some)
+        });
+        match read {
+            Ok(Some(cad)) => {
+                Arc::make_mut(&mut s.model).cads.insert(name, cad);
+            }
+            Ok(None) => {}
+            Err(error) => failed.push(json!({"cad": name, "error": error})),
+        }
+    }
+    failed
+}
+
+/// What of an import lies nearest a point: Revit's Query.
+fn cad_query(s: &mut Session, p: &Value) -> R {
+    let c = "cad_query";
+    let m = &s.model;
+    let (id, ci) = cad_import(c, m, p)?;
+    let at = point_req(c, p, "at")?;
+    let reach = num(c, p, "reach")?.unwrap_or(100.0);
+    if reach <= 0.0 {
+        return Err(bad(c, format!("`reach` is how far from `at` to look, mm, above 0, not {reach}")));
+    }
+    let cad = m.cads.get(&ci.cad).ok_or_else(|| bad(c, format!("the project holds no CAD drawing named `{}`", ci.cad)))?;
+    let Some((e, d)) = crate::cad::nearest(cad, ci, at, reach) else { return Ok(json!({"id": id, "found": false})) };
+    let color = cad.color(e, Colors::Preserve).map(|c| json!([c.0, c.1, c.2]));
+    let linetype = e.linetype.clone().or_else(|| cad.dxf().layer(&e.layer).map(|l| l.linetype.clone()));
+    Ok(json!({
+        "id": id, "found": true, "kind": crate::cad::kind(&e.shape), "layer": e.layer, "color": color,
+        "linetype": linetype, "weight": e.weight, "distance": hundredth(d),
+    }))
 }
 
 fn grid(s: &mut Session, p: &Value) -> R {
@@ -5526,6 +5917,15 @@ pub(crate) fn transformed(c: &str, m: &Model, id: Id, mo: &Motion, with: &BTreeS
         Element::Schedule(_) | Element::View3D(_) | Element::PlanView(_) => {
             return Err(bad(c, format!("{category} {id} has no place in plan; move its viewport on its sheet")));
         }
+        Element::CadImport(ci) => {
+            if mo.mirror {
+                return Err(bad(
+                    c,
+                    format!("CAD import {id} can't be mirrored; mirror it in the program that made the drawing, or turn it"),
+                ));
+            }
+            (ci.at, ci.angle) = turned(f, ci.at, ci.angle);
+        }
         Element::PointCloud(pc) => {
             if mo.mirror {
                 return Err(bad(c, format!("point cloud {id} can't be mirrored: a scan is what was measured; move it or turn it")));
@@ -6176,6 +6576,8 @@ fn delete(s: &mut Session, p: &Value) -> R {
                         // Notes and spot elevations go with their view, spots with what they read.
                         Element::Text(n) => gone.contains(&n.view),
                         Element::Spot(sp) => gone.contains(&sp.view) || sp.host.is_some_and(|h| gone.contains(&h)),
+                        // An import in one view only goes with it.
+                        Element::CadImport(ci) => ci.view.is_some_and(|v| gone.contains(&v)),
                         _ => false,
                     }
             })
