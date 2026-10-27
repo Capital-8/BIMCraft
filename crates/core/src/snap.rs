@@ -1189,6 +1189,21 @@ mod tests {
     }
 
     #[test]
+    fn a_sketch_builds_the_outlines_of_the_nearest_walls_and_no_more_than_it_can_try() {
+        // Forty walls 100 mm apart, all within the window of the cursor: more than are tried, which are the nearest.
+        let mut s = Session::new();
+        for i in 0..40 {
+            s.execute("wall", &serde_json::json!({"points": [[0, i * 100], [3000, i * 100]]})).unwrap_or_default();
+        }
+        let level = s.model.levels()[0].0;
+        let before = BUILT.with(std::cell::Cell::get);
+        let sk = Sketch { view: level, lines: &[], editing: None };
+        in_sketch(&s.model, sk, P2(1500.0, 20.0), REACH, &[], false, &Snaps::default());
+        let built = BUILT.with(std::cell::Cell::get) - before;
+        assert_eq!(built, MAX_OUTLINES, "{built} outlines built of 40 walls");
+    }
+
+    #[test]
     fn a_sketch_in_a_big_plan_snaps_as_quickly_as_it_has_walls_near_it() {
         let m = crate::sample::highrise(20).unwrap();
         let level = m.levels()[0].0;

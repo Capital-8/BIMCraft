@@ -750,6 +750,8 @@ impl Welder {
         for x in cx - 1..=cx + 1 {
             for y in cy - 1..=cy + 1 {
                 for &n in self.cells.get(&(x, y)).into_iter().flatten() {
+                    #[cfg(test)]
+                    spent(1);
                     if found.is_none_or(|f| n < f) && self.points[n].dist(p) <= TOL {
                         found = Some(n);
                     }
@@ -1112,7 +1114,7 @@ mod tests {
         };
         // Clustered so that many are within a millimetre of several, across cells.
         let given: Vec<P2> = (0..3000).map(|_| P2(next(40.0) - 20.0, next(40.0) - 20.0)).collect();
-        let (mut welder, mut scanned) = (Welder::default(), Vec::<P2>::new());
+        let (mut welder, mut scanned, before) = (Welder::default(), Vec::<P2>::new(), SPENT.with(std::cell::Cell::get));
         for p in given {
             let by_scan = scanned.iter().position(|q| q.dist(p) <= TOL).unwrap_or_else(|| {
                 scanned.push(p);
@@ -1121,6 +1123,9 @@ mod tests {
             assert_eq!(welder.weld(p), by_scan, "{p:?}");
         }
         assert_eq!(welder.points, scanned);
+        // And by looking at the points in the cells round it, not at all of them: a scan of the points kept so far is about a million.
+        let steps = SPENT.with(std::cell::Cell::get) - before;
+        assert!(steps <= 40_000, "{steps} comparisons to weld 3,000 points into {}", scanned.len());
     }
 
     #[test]
