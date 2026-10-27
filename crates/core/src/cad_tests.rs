@@ -286,6 +286,26 @@ fn layers_are_hidden_and_shown_everywhere_or_in_one_view() {
     assert_eq!(g.layers.get("plan").map(|l| l.iter().cloned().collect::<Vec<_>>()), Some(vec!["WALLS".to_string()]));
     run(&mut s, "undo", json!({}));
     assert!(crate::graphics::graphics_of(&s.model, level).unwrap().layers.is_empty());
+    // Visibility/Graphics says the same, and its reply lists them.
+    let r = run(&mut s, "graphics", json!({"view": level, "layers": {"plan": ["FURN", "TEXT"]}}));
+    assert_eq!(r["layers"], json!({"plan": ["FURN", "TEXT"]}));
+    // A file holds the drawing by its GUID, and opens with it named again.
+    let text = s.model.to_json().unwrap();
+    let guid = s.model.library.guid(&crate::library::Kind::Cad, "plan").unwrap().to_string();
+    assert!(text.contains(&format!("\"{guid}\":")), "keyed by GUID");
+    let (m, _) = Model::read(&text).unwrap();
+    assert_eq!(crate::graphics::graphics_of(&m, level).unwrap().layers.keys().collect::<Vec<_>>(), ["plan"]);
+    let r = run(&mut s, "graphics", json!({"view": level, "layers": {"plan": null}}));
+    assert_eq!(r["layers"], json!({}));
+    for (p, says) in [
+        (json!({"view": level, "layers": {"plan": ["NOPE"]}}), "NOPE"),
+        (json!({"view": level, "layers": {"other": ["WALLS"]}}), "other"),
+        (json!({"view": level, "layers": {"plan": [5]}}), "by name"),
+        (json!({"view": level, "layers": 5}), "`layers`"),
+    ] {
+        let e = fails(&mut s, "graphics", p.clone());
+        assert!(e.contains(says), "{p}: {e}");
+    }
     for (p, says) in [
         (json!({"id": id, "hide": ["NOPE"]}), "no layer `NOPE`"),
         (json!({"id": id, "hide": ["FURN"], "show": ["FURN"]}), "in `hide` and in `show`"),
@@ -295,6 +315,10 @@ fn layers_are_hidden_and_shown_everywhere_or_in_one_view() {
         let e = fails(&mut s, "cad_layers", p.clone());
         assert!(e.contains(says), "{p}: {e}");
     }
+    // The drawing gone, no view hides its layers.
+    run(&mut s, "graphics", json!({"view": level, "layers": {"plan": ["FURN"]}}));
+    run(&mut s, "delete", json!({"ids": [id]}));
+    assert!(crate::graphics::graphics_of(&s.model, level).unwrap().layers.is_empty());
 }
 
 #[test]
