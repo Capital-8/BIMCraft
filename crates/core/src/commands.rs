@@ -939,9 +939,9 @@ pub static ALL: &[Command] = &[
          resistance; or rigid), `ambient` °C (30 in air, 20 in soil), `grouped` circuits in the conduit (this one included), `bundle` \
          (method 11 cables bundled), `spacing` between buried conduits (mm) and `soil` resistivity (K·m/W), and a `section` (mm²) and \
          `breaker` (A) already chosen, which are never made smaller. Replies with the design current, the section and breaker that give \
-         I_B ≤ I_n ≤ I_Z (and 1.45 I_n ≤ 1.45 I_Z) with the drop within `drop_limit` (4 %), the current the section carries, the drop, \
+         I_B ≤ I_n ≤ I_Z (which gives I_2 = 1.45 I_n ≤ 1.45 I_Z for the breakers of NBR NM 60898) with the drop within `drop_limit` (4 %), the current the section carries, the drop, \
          the conductors (phases, neutral, protective), the factors, and what the chosen section and breaker give. It changes nothing; \
-         aluminium, trays, several layers, short circuit and harmonics are not checked",
+         aluminium, trays, several layers, short circuit and harmonics are not checked. It has no shortcut: Revit has no tool for it",
         circuit,
     ),
     other(

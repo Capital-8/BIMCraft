@@ -3,8 +3,8 @@
 //! the neutral and the protective conductor. A pure function of its input, with no model behind it: the `circuit` command is
 //! its only caller. The tables are in [`tables`], as the standard prints them.
 //!
-//! What is checked: `I_B <= I_n <= I_Z` and the conventional trip current `1.45 I_n <= 1.45 I_Z` (the breakers of NBR NM 60898),
-//! the smallest section for the use (Tabela 47), and the voltage drop `b * I_B * L * (R cos(phi) + X sin(phi))`, with `R` at the
+//! What is checked: `I_B <= I_n <= I_Z`. For a breaker of NBR NM 60898, whose conventional trip current is `I_2 = 1.45 I_n`, that
+//! already gives `I_2 <= 1.45 I_Z`, the second condition of the standard, so it is not checked again. The smallest section for the use (Tabela 47), and the voltage drop `b * I_B * L * (R cos(phi) + X sin(phi))`, with `R` at the
 //! insulation's highest working temperature (so on the safe side) and `X` 0.1 ohm/km. What is not: aluminium, cable trays (methods
 //! E and F), several layers of cables, buried cables without a conduit, short circuit, harmonics, the conditions of a reduced
 //! neutral. The caller says so.
@@ -18,8 +18,6 @@ pub use tables::{BREAKERS, SECTIONS};
 pub const REACTANCE: f64 = 0.1;
 /// Copper's temperature coefficient of resistance, per degree.
 const COPPER_ALPHA: f64 = 0.003_93;
-/// What makes a breaker of NBR NM 60898 act in the conventional time, as a multiple of its rating.
-const TRIP_FACTOR: f64 = 1.45;
 /// The drop a terminal circuit may have, per cent of the voltage.
 pub const DROP_LIMIT: f64 = 4.0;
 const MAX_CIRCUITS: u32 = 1_000;
@@ -237,14 +235,16 @@ pub fn neutral_section(phase: f64, reduced: bool) -> f64 {
     if phase <= 25.0 || !reduced { phase } else { N48.iter().find(|r| (r.0 - phase).abs() < 1e-9).map_or(phase, |r| r.1) }
 }
 
-/// The protective conductor's section (Tabela 58): the phase's up to 16 mm², 16 above to 35, half of it above.
+/// The protective conductor's section (Tabela 58): the phase's up to 16 mm², 16 above to 35, half of it above, rounded up to the
+/// next standard section (95 mm² gets 50, 120 gets 70, 150 and 185 get 95), as a cable is only made in those.
 pub fn protective_section(phase: f64) -> f64 {
     if phase <= 16.0 {
         phase
     } else if phase <= 35.0 {
         16.0
     } else {
-        phase / 2.0
+        let half = phase / 2.0;
+        SECTIONS.iter().copied().find(|s| *s + 1e-9 >= half).unwrap_or(half)
     }
 }
 
@@ -434,8 +434,7 @@ pub fn evaluate(c: &Circuit, section: f64, breaker: f64) -> Result<Evaluation, F
         breaker,
         carries,
         ampacity_ok: ib <= carries + 1e-9,
-        breaker_ok: (breaker > 0.0)
-            .then_some(ib <= breaker + 1e-9 && breaker <= carries + 1e-9 && TRIP_FACTOR * breaker <= TRIP_FACTOR * carries + 1e-9),
+        breaker_ok: (breaker > 0.0).then_some(ib <= breaker + 1e-9 && breaker <= carries + 1e-9),
         drop: drop_of(c, section).map(|(_, percent)| (percent, percent <= limit + 1e-9)),
         minimum_ok: section + 1e-9 >= minimum_section(c.use_),
     })
