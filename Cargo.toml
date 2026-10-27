@@ -25,6 +25,8 @@ bimcraft-ui-egui = { path = "crates/ui-egui" }
 bimcraft-update = { path = "crates/update" }
 # The Revit reader: Apache-2.0 only, so the command line and the desktop take it through an optional feature.
 bimcraft-rvt = { path = "crates/rvt" }
+# The DWG bridge: MIT OR Apache-2.0 itself, over acadrust (MPL-2.0, unmodified); the core never depends on it.
+bimcraft-dwg = { path = "crates/dwg" }
 egui = "0.36"
 eframe = "0.36"
 egui_kittest = "0.36"
@@ -57,6 +59,9 @@ opt-level = 2
 
 # The Revit reader inflates and scans tens of megabytes per file, which its real-file tests do over and over.
 [profile.dev.package.bimcraft-rvt]
+opt-level = 2
+# DWG files are decoded bit by bit.
+[profile.dev.package.acadrust]
 opt-level = 2
 [profile.dev.package.miniz_oxide]
 opt-level = 2

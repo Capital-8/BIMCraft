@@ -2983,14 +2983,13 @@ impl BimApp {
             if big_button(ui, Icon::PointCloud, "Point Cloud", self.cloud_box.is_some(), tip).clicked() {
                 self.cloud_dialog = true;
             }
-            let tip =
-                "Link CAD: a DXF drawing shown in the plans of a level, read again from its file on Reload and when the project opens";
+            let tip = "Link CAD: a DWG or DXF drawing shown in the plans of a level, read again from its file on Reload and when the project opens";
             if big_button(ui, Icon::LinkCad, "Link CAD", self.cad_box.as_ref().is_some_and(|b| b.linked()), tip).clicked() {
                 self.cad_dialog = Some(true);
             }
         });
         panel(ui, "Import", |ui| {
-            let tip = "Import CAD: a DXF drawing brought into the project, drawn under the model in the plans of a level, its layers, colours and linetypes kept, and snapped to";
+            let tip = "Import CAD: a DWG or DXF drawing brought into the project, drawn under the model in the plans of a level, its layers, colours and linetypes kept, and snapped to";
             if big_button(ui, Icon::ImportCad, "Import CAD", self.cad_box.as_ref().is_some_and(|b| !b.linked()), tip).clicked() {
                 self.cad_dialog = Some(false);
             }

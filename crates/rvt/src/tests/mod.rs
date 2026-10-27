@@ -61,7 +61,10 @@ fn only_the_command_line_and_the_desktop_take_the_reader_and_only_through_a_defa
         assert!(dev.is_empty() || dev.contains("features = [\"testing\"]"), "{manifest}: {dev}");
         let dep = normal.lines().find(|l| l.starts_with("bimcraft-rvt")).unwrap_or_else(|| panic!("{manifest} has no bimcraft-rvt"));
         assert!(dep.contains("optional = true"), "{manifest}: the reader is an optional dependency, `{dep}`");
-        assert!(text.contains("default = [\"rvt\"]"), "{manifest}: the `rvt` feature is on by default");
+        assert!(
+            text.lines().any(|l| l.starts_with("default = [") && l.contains("\"rvt\"")),
+            "{manifest}: the `rvt` feature is on by default"
+        );
         assert!(text.contains("rvt = [\"dep:bimcraft-rvt\"]"), "{manifest}: the `rvt` feature turns the reader on and nothing else");
     }
 }

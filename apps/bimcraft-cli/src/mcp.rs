@@ -117,7 +117,9 @@ fn tools() -> Value {
 
 impl Server {
     pub fn new() -> Self {
-        Server { backend: Backend::Own(Session::new()) }
+        let mut session = Session::new();
+        session.dwg = crate::dwg_reader();
+        Server { backend: Backend::Own(session) }
     }
 
     /// A server whose tools work on the project `window` has open.

@@ -49,7 +49,8 @@ The README lists what the engine, the desktop, the CLI and the MCP server do. Wh
 5. **Clean room.** File formats come from public specifications (IFC, DXF, gbXML, BCF, glTF), and a format with no public
    specification (Revit's `.rvt` and `.rfa`) may be read only under the fence in [docs/rvt-provenance.md](docs/rvt-provenance.md).
    Content is original or openly licensed, a library's licence must suit MIT or Apache (the one exception is the
-   Apache-2.0-only Revit reader, `crates/rvt`, which holds ported code), and Revit's name only describes the workflow.
+   Apache-2.0-only Revit reader, `crates/rvt`, which holds ported code; acadrust, the DWG reader, is MPL-2.0, whose copyleft
+   covers only its own files, used unmodified), and Revit's name only describes the workflow.
 
 ---
 
@@ -141,7 +142,7 @@ The goal is that BIMCraft fits into a mixed-software office.
 
 | Item | Size | Notes |
 |---|---|---|
-| ~~DXF import (as a link or underlay in a view)~~ and DXF export of views and sheets | L | Import done: `import_cad`, `cad_layers`, `reload_cad` and `cad_query`, Insert > Import CAD and Link CAD, Visibility/Graphics' Imported Categories ([docs/areas/cad-import.md](docs/areas/cad-import.md)). Export, exploding an import into detail lines, and images and PDFs as underlays are still to come. Use the public DXF reference. Native DWG needs a licensed SDK or a GPL library, which conflicts with MIT or Apache, so DXF comes first and DWG is decided separately |
+| ~~DXF import (as a link or underlay in a view)~~ and DXF export of views and sheets | L | Import done: `import_cad`, `cad_layers`, `reload_cad` and `cad_query`, Insert > Import CAD and Link CAD, Visibility/Graphics' Imported Categories ([docs/areas/cad-import.md](docs/areas/cad-import.md)). Export, exploding an import into detail lines, and images and PDFs as underlays are still to come. DWG comes in through acadrust (MPL-2.0, unmodified; section 6). Use the public DXF reference |
 | Revit `.rvt` reader, in three parts, all done: the container, metadata and element inventory (`bimcraft-cli info`); the elements into the model (levels, walls, floors, ceilings, doors, windows, columns, rooms and roofs, through `run`, `convert` and the MCP `open`); File > Open in the desktop (a thread of its own, a report of what was left out) | L | Read only under the fence in [docs/rvt-provenance.md](docs/rvt-provenance.md); `crates/rvt`, Apache-2.0 only. IFC stays the way out. Left in the import: curtain walls, sloped floors and roofs by footprint, roofs by extrusion that are not a straight-line profile, a column's section shape, stairs and railings, groups, door swings, the join lists, and names for the categories `info` prints as bare ids (no table of Autodesk's `BuiltInCategory` values to check against a file was found). The desktop cannot cancel an import in flight |
 | ~~Linked models: other `.bimcraft` and IFC files as references, positioned shared or origin to origin~~ | L | Done, origin to origin: `link` and `reload`, Manage > Link Model, a Linked Models group in the Project Browser. Shared coordinates, links in sections' cut poché by category, a link's own view overrides, hiding or unloading one in a view, and nested links are still to come (issue #36) |
 | IFC export completeness: `Pset_*Common`, `Qto_*BaseQuantities`, space boundaries, classification references, an IFC4x3 option | L | Keep validating with IfcOpenShell |
@@ -233,8 +234,10 @@ them sooner.
   existing `Scene` abstraction, as an opt-in path with the processor as its reference and its fallback; see [performance](docs/performance.md).
 - **Whole-model rebuilds** after every command are simple and safe, but they set the ceiling on model size. The
   incremental work in 0.5 must keep the "validate in one place" rule: still one `check`, just scoped.
-- **DWG.** No permissively licensed DWG library exists. Decide between DXF only, an optional commercial SDK plug-in, and
-  a separately licensed GPL helper process.
+- **DWG.** Read through acadrust (pure Rust, MPL-2.0, its DWG code ported from ACadSharp, MIT, after the Open Design
+  Alliance's published specification), used unmodified as a separate library behind the apps' `dwg` feature (`crates/dwg`):
+  MPL-2.0's copyleft covers its own files only, so it suits MIT or Apache. Its decoder can't be interrupted, so the apps run it
+  in a child process; a file that brings it down takes only the child. Writing DWG is still open.
 - **The family editor's sketch mode** is as big as a small CAD program. Keep text, JSON and form-defined families working
   throughout, so agents and power users never wait on it.
 - **egui** suits a thin UI, but dense dialogs (schedules, V/G, the family editor) push it. Keep the core UI-free so a

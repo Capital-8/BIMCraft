@@ -77,6 +77,8 @@ pub struct Session {
     redo: Vec<(Step, Arc<Model>)>,
     /// How many times the project was replaced, so a transaction knows its history went with it.
     resets: usize,
+    /// What reads a DWG drawing, when the app has one (`cad::DwgReader`); none says to save it as DXF.
+    pub dwg: Option<crate::cad::DwgReader>,
 }
 
 impl Default for Session {
@@ -109,6 +111,7 @@ impl Session {
             undo: Vec::new(),
             redo: Vec::new(),
             resets: 0,
+            dwg: None,
         }
     }
 
