@@ -609,6 +609,9 @@ pub struct BimApp {
     fill_patterns_dialog: Option<fillpatterns::FillPatternsDialog>,
     /// Sketch mode: the lines of an outline being drawn, until Finish or Cancel.
     pub sketch: Option<sketch::Sketch>,
+    /// The project the window is on (its `uid`, which a project keeps for life): one put in the session's place meanwhile is
+    /// another, and everything held of the first (a sketch, a dialog's draft, the views open) is of nothing.
+    project: u64,
     /// How wide the ribbon's Mode panel was last drawn, to stand it at the ribbon's right end.
     mode_width: f32,
     options_dialog: Option<phasing::OptionsDialog>,
@@ -885,6 +888,7 @@ impl BimApp {
         let units = session.model.units;
         BimApp {
             saved: Arc::clone(&session.model),
+            project: session.model.uid,
             autosave: autosave::State::default(),
             session,
             os_events: None,
@@ -1213,6 +1217,11 @@ impl BimApp {
         lang::set(self.lang);
         // What agents asked of the project comes before the tidying, which puts right what a command left stale.
         self.answer_agents(&ctx);
+        // A project put in the session's place under the window (the control port turns an agent's New and Open away, but a
+        // script or an embedder may do them) starts it over, as File > New does: its sketch and dialogs were of the old one.
+        if self.session.model.uid != self.project {
+            self.reopened();
+        }
         self.tidy();
         self.poll_updates(&ctx);
         self.poll_revit(&ctx);
@@ -2211,7 +2220,8 @@ impl BimApp {
             Sheet::Paper(_) => self.tool == Tool::Text,
             _ => false,
         };
-        if !works && self.tool != Tool::Level {
+        // (A sketch is held in its plan: it takes the window back, with its tool, [`BimApp::track_sketch`].)
+        if !works && self.tool != Tool::Level && self.sketch.is_none() {
             self.tool = Tool::Modify;
         }
         match &mut self.tool {
