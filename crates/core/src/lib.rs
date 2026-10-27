@@ -14,6 +14,7 @@ mod component_geometry;
 mod csg;
 pub mod curves;
 pub mod draw;
+pub mod dxf;
 pub mod engine;
 pub mod family;
 pub mod favorites;
