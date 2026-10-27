@@ -259,8 +259,11 @@ polyline that meet stay one line, so its corners keep their joins, and a dashed 
 the cycle a piece begins in are solid lines of their own). A section's ink belongs to the region that keeps it (`Part::Pattern`),
 so a sheet's viewport, which keeps what an element owns, has it. A caller that has the section's picture (the desktop's, a sheet's,
 `section_png`'s) hands it in (`render::section_over`, `section_at_over`), at the view's size or a multiple of it (a screen with more
-pixels to the point), and the ink is the picture's own pixels; `render::section` draws a picture of its own when a non-masking
-region wants one, which costs what the picture does, every call. Masking still hides the model; detail annotation remains above the
+pixels to the point), and the ink is the picture's own pixels, as runs: a row of a pixel's height, and a run of up to two pixels
+that sits on one of the row above (the edge of a tall wall) joined to it as one vertical line, so 200 walls 20 m tall at 4000 x 2600
+px are some hundreds of lines and not a million runs. A picture of more than 250,000 runs (noise, not drawings) keeps the first
+250,000 and the drawing's `notes` say the ink of the last rows is under the region. `render::section` draws a picture of its own
+when a non-masking region wants one, which costs what the picture does, every call. Masking still hides the model; detail annotation remains above the
 region. The same display list feeds the desktop, PNG, SVG and sheet viewports.
 
 Limits, kept as Revit has them or not yet built: a non-masking region with a solid background hides a room's tag text while its outlines
