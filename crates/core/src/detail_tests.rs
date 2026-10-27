@@ -144,6 +144,25 @@ fn linework_remove_takes_off_the_nearest_edge_and_not_every_edge_within_reach() 
 }
 
 #[test]
+fn linework_remove_takes_nothing_off_when_the_edge_nearest_the_pick_has_none() {
+    let mut s = Session::new();
+    run(&mut s, "type", json!({"category": "wall", "name": "Partition", "thickness": 100}));
+    let w = run(&mut s, "wall", json!({"points": [[0, 0], [4000, 0]], "type": "Partition"}))["ids"][0].as_u64().unwrap_or_default();
+    let held = |s: &Session| crate::graphics::graphics_of(&s.model, 100000).map_or(0, |g| g.linework.len());
+    // Only the north face restyled; picked at 45 mm from the south face, which has none, 95 mm from the north face's.
+    run(&mut s, "linework", json!({"view": 100000, "id": w, "at": [1000, 45], "style": "Wide Lines"}));
+    let r = run(&mut s, "linework", json!({"view": 100000, "id": w, "at": [1000, -45], "remove": true}));
+    assert_eq!((r["removed"].clone(), held(&s)), (json!(0), 1), "the south face had none: {r}");
+    let r = run(&mut s, "linework", json!({"view": 100000, "id": w, "at": [1000, 45], "remove": true}));
+    assert_eq!((r["removed"].clone(), held(&s)), (json!(1), 0), "{r}");
+    // Linework on an edge the wall no longer draws is picked off by the nearest of it.
+    run(&mut s, "linework", json!({"view": 100000, "id": w, "at": [1000, 45], "style": "Wide Lines"}));
+    run(&mut s, "modify", json!({"id": w, "end": [4000, 3000]}));
+    let r = run(&mut s, "linework", json!({"view": 100000, "id": w, "at": [2000, 45], "remove": true}));
+    assert_eq!((r["removed"].clone(), held(&s)), (json!(1), 0), "{r}");
+}
+
+#[test]
 fn an_unknown_field_in_a_group_members_element_is_left_out_as_it_is_in_any_elements() {
     let mut s = Session::new();
     run(&mut s, "wall", json!({"points": [[0, 0], [4000, 0]]}));

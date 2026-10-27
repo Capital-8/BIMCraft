@@ -7324,14 +7324,19 @@ fn linework(s: &mut Session, p: &Value) -> R {
     let guid = m.guid(id);
     let source = m.plan_source(key);
     if remove {
+        // The edge the element draws nearest `at`, and the Linework on that edge, no other: both faces of a thin wall lie
+        // within reach of one pick, and the nearer may have none. An edge the element no longer draws there is gone: its
+        // Linework is taken by the nearest of it, so it can still be picked off.
+        let edge = render::edge_at(m, key, id, at, LINEWORK_REACH);
         let g =
             s.model_mut().elements.get_mut(source).and_then(graphics::graphics_mut).ok_or_else(|| bad(c, "that view has no graphics"))?;
-        // The edge nearest `at`, and no other: both faces of a thin wall lie within reach of one pick.
         let dist = |l: &graphics::Linework| geom::dist_to_segment(at, l.from, l.to);
         let nearest = g.linework.iter().filter(|l| l.element == guid).map(dist).fold(f64::INFINITY, f64::min);
         let before = g.linework.len();
-        if nearest <= LINEWORK_REACH {
-            g.linework.retain(|l| l.element != guid || dist(l) > nearest + 1e-3);
+        match edge {
+            Some((from, to)) => g.linework.retain(|l| !(l.element == guid && l.from.dist(from) < 1e-3 && l.to.dist(to) < 1e-3)),
+            None if nearest <= LINEWORK_REACH => g.linework.retain(|l| l.element != guid || dist(l) > nearest + 1e-3),
+            None => {}
         }
         return Ok(json!({"removed": before - g.linework.len()}));
     }
