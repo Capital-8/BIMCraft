@@ -939,9 +939,9 @@ pub static ALL: &[Command] = &[
          resistance; or rigid), `ambient` °C (30 in air, 20 in soil), `grouped` circuits in the conduit (this one included), `bundle` \
          (method 11 cables bundled), `spacing` between buried conduits (mm) and `soil` resistivity (K·m/W), and a `section` (mm²) and \
          `breaker` (A) already chosen, which are never made smaller. Replies with the design current, the section and breaker that give \
-         I_B ≤ I_n ≤ I_Z (and 1.45 I_n ≤ 1.45 I_Z) with the drop within `drop_limit` (4 %), the current the section carries, the drop, \
+         I_B ≤ I_n ≤ I_Z (which gives I_2 = 1.45 I_n ≤ 1.45 I_Z for the breakers of NBR NM 60898) with the drop within `drop_limit` (4 %), the current the section carries, the drop, \
          the conductors (phases, neutral, protective), the factors, and what the chosen section and breaker give. It changes nothing; \
-         aluminium, trays, several layers, short circuit and harmonics are not checked",
+         aluminium, trays, several layers, short circuit and harmonics are not checked. It has no shortcut: Revit has no tool for it",
         circuit,
     ),
     other(
@@ -952,8 +952,10 @@ pub static ALL: &[Command] = &[
          (1): their cross-sections by outside diameter over the conduit's inside, at most 53 % for one cable, 31 % for two, 40 % for \
          three or more. `family` (pvc-thread, pvc-solder, steel-heavy, steel-rir; pvc-thread) and `size` (its mark, e.g. 3/4\"; none: \
          the smallest that fits). The dimensions are the makers' own from their catalogues, each family naming maker, document, page \
-         and address; the inside diameter is the outside less twice the wall. Cables are the flexible 750 V PVC ones of 0.5 to 240 mm²: \
-         EPR or larger sections are `pending`, never guessed. Cable trays are not sized. It changes nothing",
+         and address; the inside diameter is the outside less twice the wall. The data covers the flexible 750 V PVC cable of 0.5 to \
+         240 mm² only: there is no `insulation` key, and a section above 240 mm² is `pending`, never guessed. `sections_mm2` lists the \
+         conductors of one circuit (`circuits` of them are in the conduit). Cable trays are not sized. It has no shortcut: Revit has no \
+         tool for it. It changes nothing",
         conduit_fill,
     ),
     other(
@@ -3027,7 +3029,8 @@ fn conduit_fill(_: &mut Session, p: &Value) -> R {
     let fill = size.and_then(|s| conduit::fill(s, &all));
     Ok(json!({
         "conductors": all.len(),
-        "sections_mm2": all,
+        "circuits": circuits,
+        "sections_mm2": one,
         "smallest": smallest,
         "size": size.map(|s| s.0),
         "inside_mm": size.map(|s| round(conduit::inside(s), 100.0)),
