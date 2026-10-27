@@ -20,7 +20,7 @@ use serde_json::{Value, json};
 
 use crate::lang::{t, tf};
 use crate::renames::{self, Row};
-use crate::style::{canvas_pal, pal};
+use crate::style::{ERROR_HEIGHT, boxed_text, canvas_pal, dialog_room, dialog_row, pal};
 use crate::{BimApp, Status};
 
 /// The dialog's tabs.
@@ -294,14 +294,15 @@ fn pattern_pick(ui: &mut Ui, row: &mut Option<usize>, names: &[(usize, String)],
     c.response.widget_info(|| WidgetInfo::labeled(WidgetType::ComboBox, true, label.clone()));
 }
 
-/// The types: a row each, its name, its foreground and background (pattern, colour, swatch), masking, Delete; New Type.
-fn types_tab(ui: &mut Ui, d: &mut FillPatternsDialog) {
+/// The types: a row each, its name, its foreground and background (pattern, colour, swatch), masking, Delete; New Type. The
+/// rows scroll in what the window has left over `below`, the dialog's own notes and buttons.
+fn types_tab(ui: &mut Ui, d: &mut FillPatternsDialog, below: f32) {
     ui.label(t("What filled regions are filled with: a foreground pattern over a background one, over the paper when it masks."));
     ui.add_space(4.0);
     let names: Vec<(usize, String)> = d.live().map(|(i, p)| (i, p.name.clone())).collect();
     let patterns: Vec<FillPattern> = d.patterns.iter().map(|p| p.pattern.clone()).collect();
     let mut delete = None;
-    ScrollArea::vertical().max_height(420.0).show(ui, |ui| {
+    ScrollArea::vertical().max_height(dialog_room(ui, below + dialog_row(ui))).show(ui, |ui| {
         Grid::new("region-types").striped(true).num_columns(9).show(ui, |ui| {
             for h in ["Name", "Foreground", "", "", "Background", "", "", "Masking", ""] {
                 ui.label(RichText::new(t(h)).strong());
@@ -342,8 +343,8 @@ fn dashes_text(d: &[f64]) -> String {
 }
 
 /// The families of pattern `i`, one a row: its angle, origin, shift along, spacing across and dashes; Delete; Add
-/// Family. Dashes that don't read as lengths are left as they were until they do.
-fn families(ui: &mut Ui, d: &mut FillPatternsDialog) {
+/// Family. Dashes that don't read as lengths are left as they were until they do. The rows scroll within `room`.
+fn families(ui: &mut Ui, d: &mut FillPatternsDialog, room: f32) {
     let Some((i, texts)) = &mut d.editing else { return };
     let Some(r) = d.patterns.get_mut(*i) else { return };
     let who = r.name.clone();
@@ -351,41 +352,45 @@ fn families(ui: &mut Ui, d: &mut FillPatternsDialog) {
     ui.label(RichText::new(tf("Line families of {}", &[&who])).strong());
     texts.resize(r.pattern.lines.len(), String::new());
     let mut delete = None;
-    Grid::new("pattern-families").striped(true).num_columns(8).show(ui, |ui| {
-        for h in ["", "Angle", "X", "Y", "Shift", "Spacing", "Dashes", ""] {
-            ui.label(RichText::new(t(h)).strong());
-        }
-        ui.end_row();
-        for (k, (l, text)) in r.pattern.lines.iter_mut().zip(texts.iter_mut()).enumerate() {
-            let n = (k + 1).to_string();
-            ui.label(&n);
-            let name = |what: &str| tf("{} family {}: {}", &[&who, &n, t(what)]);
-            for (what, v, range) in [
-                ("Angle", &mut l.angle, -360.0..=360.0),
-                ("X", &mut l.origin.0, -MAX_SPACING..=MAX_SPACING),
-                ("Y", &mut l.origin.1, -MAX_SPACING..=MAX_SPACING),
-                ("Shift", &mut l.shift, -MAX_SPACING..=MAX_SPACING),
-                ("Spacing", &mut l.spacing, MIN_SPACING..=MAX_SPACING),
-            ] {
-                let label = name(what);
-                let r = ui.add(DragValue::new(v).range(range).speed(0.1).max_decimals(3));
-                r.widget_info(|| WidgetInfo::labeled(WidgetType::DragValue, true, label.clone()));
-            }
-            let label = name("Dashes");
-            let e = ui.add_sized(vec2(160.0, 20.0), TextEdit::singleline(text).hint_text(t("whole")));
-            e.widget_info(|| WidgetInfo::labeled(WidgetType::TextEdit, true, label.clone()));
-            if e.changed() {
-                let read: Result<Vec<f64>, _> =
-                    text.split(',').map(str::trim).filter(|x| !x.is_empty()).map(|x| x.parse::<f64>()).collect();
-                if let Ok(dashes) = read.map(|v| v.into_iter().filter(|x| x.is_finite()).collect::<Vec<_>>()) {
-                    l.dashes = dashes;
-                }
-            }
-            if named_button(ui, t("Delete"), name("Delete")) {
-                delete = Some(k);
+    // The heading above and the row of buttons below are not the rows' room.
+    let rows = (room - 2.0 * dialog_row(ui) - 6.0).max(60.0);
+    ScrollArea::vertical().id_salt("pattern-families-rows").max_height(rows).show(ui, |ui| {
+        Grid::new("pattern-families").striped(true).num_columns(8).show(ui, |ui| {
+            for h in ["", "Angle", "X", "Y", "Shift", "Spacing", "Dashes", ""] {
+                ui.label(RichText::new(t(h)).strong());
             }
             ui.end_row();
-        }
+            for (k, (l, text)) in r.pattern.lines.iter_mut().zip(texts.iter_mut()).enumerate() {
+                let n = (k + 1).to_string();
+                ui.label(&n);
+                let name = |what: &str| tf("{} family {}: {}", &[&who, &n, t(what)]);
+                for (what, v, range) in [
+                    ("Angle", &mut l.angle, -360.0..=360.0),
+                    ("X", &mut l.origin.0, -MAX_SPACING..=MAX_SPACING),
+                    ("Y", &mut l.origin.1, -MAX_SPACING..=MAX_SPACING),
+                    ("Shift", &mut l.shift, -MAX_SPACING..=MAX_SPACING),
+                    ("Spacing", &mut l.spacing, MIN_SPACING..=MAX_SPACING),
+                ] {
+                    let label = name(what);
+                    let r = ui.add(DragValue::new(v).range(range).speed(0.1).max_decimals(3));
+                    r.widget_info(|| WidgetInfo::labeled(WidgetType::DragValue, true, label.clone()));
+                }
+                let label = name("Dashes");
+                let e = ui.add_sized(vec2(160.0, 20.0), TextEdit::singleline(text).hint_text(t("whole")));
+                e.widget_info(|| WidgetInfo::labeled(WidgetType::TextEdit, true, label.clone()));
+                if e.changed() {
+                    let read: Result<Vec<f64>, _> =
+                        text.split(',').map(str::trim).filter(|x| !x.is_empty()).map(|x| x.parse::<f64>()).collect();
+                    if let Ok(dashes) = read.map(|v| v.into_iter().filter(|x| x.is_finite()).collect::<Vec<_>>()) {
+                        l.dashes = dashes;
+                    }
+                }
+                if named_button(ui, t("Delete"), name("Delete")) {
+                    delete = Some(k);
+                }
+                ui.end_row();
+            }
+        });
     });
     if let Some(k) = delete {
         r.pattern.lines.remove(k);
@@ -489,13 +494,17 @@ fn preview(ui: &mut Ui, r: &TypeRow, patterns: &[PatternRow]) {
 }
 
 /// The patterns: a row each, its name, drafting or model, a swatch, and (a simple one) its angle, spacing and crosshatch,
-/// else how many line families it has; Edit Lines; Delete; New Pattern, Import and Export (what's asked of the app).
-fn patterns_tab(ui: &mut Ui, d: &mut FillPatternsDialog) -> Option<FileAsk> {
+/// else how many line families it has; Edit Lines; Delete; New Pattern, Import and Export (what's asked of the app). The list
+/// scrolls in what the window has left over `below` (the dialog's notes and buttons) and the row of buttons under it; when a
+/// pattern's families are open, the list and they share it.
+fn patterns_tab(ui: &mut Ui, d: &mut FillPatternsDialog, below: f32) -> Option<FileAsk> {
     ui.label(t("Families of parallel lines: drafting ones mm on paper, the same at any scale; model ones mm in the building."));
     ui.add_space(4.0);
     let ink = ui.visuals().text_color();
     let mut delete = None;
-    ScrollArea::vertical().max_height(420.0).show(ui, |ui| {
+    let room = dialog_room(ui, below + dialog_row(ui));
+    let editor = if d.editing.is_some() { room / 2.0 } else { 0.0 };
+    ScrollArea::vertical().max_height(room - editor).show(ui, |ui| {
         Grid::new("fill-patterns").striped(true).num_columns(8).show(ui, |ui| {
             for h in ["Name", "Type", "Sample", "Angle", "Spacing", "Crosshatch", "", ""] {
                 ui.label(RichText::new(t(h)).strong());
@@ -552,7 +561,7 @@ fn patterns_tab(ui: &mut Ui, d: &mut FillPatternsDialog) -> Option<FileAsk> {
             }
         });
     });
-    families(ui, d);
+    families(ui, d, editor);
     if let Some(i) = delete {
         d.gone[i] = true;
         if d.editing.as_ref().is_some_and(|(e, _)| *e == i) {
@@ -653,12 +662,15 @@ impl BimApp {
                 }
             });
             ui.separator();
+            // Under the tab: its notes, then OK, Cancel and Apply. What the window has left over them is the tab's, so that on a
+            // small one the buttons stay in reach and the rows scroll.
+            let below = messages_height(&d) + 8.0 + dialog_row(ui);
             if d.tab == 1 {
-                ask = patterns_tab(ui, &mut d);
+                ask = patterns_tab(ui, &mut d, below);
             } else if editing {
-                edit_type(ui, &mut d);
+                ScrollArea::vertical().id_salt("edit-type").max_height(dialog_room(ui, below)).show(ui, |ui| edit_type(ui, &mut d));
             } else {
-                types_tab(ui, &mut d);
+                types_tab(ui, &mut d, below);
             }
             messages(ui, &d);
             ui.add_space(8.0);
@@ -768,15 +780,27 @@ impl BimApp {
     }
 }
 
+/// The tallest the note is, in a box that scrolls.
+const NOTE_HEIGHT: f32 = 60.0;
+
+/// The note, when the Patterns tab shows it: what an import or export said belongs to the patterns, not to the types.
+fn note(d: &FillPatternsDialog) -> Option<&(String, bool)> {
+    d.note.as_ref().filter(|_| d.tab == 1)
+}
+
+/// How tall what `messages` draws can be, with the gaps between.
+fn messages_height(d: &FillPatternsDialog) -> f32 {
+    let gap = 6.0;
+    note(d).map_or(0.0, |_| NOTE_HEIGHT + gap) + d.error.as_ref().map_or(0.0, |_| ERROR_HEIGHT + gap)
+}
+
 /// What the dialog says in itself, under its tab: the last import or export (a long list of what was left out scrolls), and
 /// what stopped Apply.
 fn messages(ui: &mut Ui, d: &FillPatternsDialog) {
-    if let Some((text, bad)) = &d.note {
-        ScrollArea::vertical().id_salt("fill-patterns-note").max_height(60.0).show(ui, |ui| {
-            ui.colored_label(if *bad { pal().error } else { ui.visuals().text_color() }, text);
-        });
+    if let Some((text, bad)) = note(d) {
+        boxed_text(ui, "fill-patterns-note", if *bad { pal().error } else { ui.visuals().text_color() }, text, NOTE_HEIGHT);
     }
     if let Some(error) = &d.error {
-        ui.colored_label(pal().error, error);
+        boxed_text(ui, "fill-patterns-error", pal().error, error, ERROR_HEIGHT);
     }
 }

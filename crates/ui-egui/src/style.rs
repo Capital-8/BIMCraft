@@ -11,7 +11,7 @@ use std::sync::Arc;
 use egui::epaint::text::VariationCoords;
 use egui::{
     Color32, Context, CornerRadius, FontData, FontDefinitions, FontFamily, FontId, Frame, Margin, Shadow, Stroke, TextStyle, Theme,
-    ThemePreference, vec2,
+    ThemePreference, Ui, vec2,
 };
 
 /// A theme's colours.
@@ -203,6 +203,33 @@ pub fn card(outer: [bool; 4]) -> Frame {
 /// A card's shadow: close and soft.
 pub fn card_shadow() -> Shadow {
     Shadow { offset: [0, 2], blur: 8, spread: 0, color: pal().shadow }
+}
+
+/// What a dialog leaves of the window's height round its frame, so it never touches the window's edges.
+const DIALOG_MARGIN: f32 = 48.0;
+
+/// The tallest what a dialog says about why it was refused is, in the box that scrolls ([`boxed_text`]).
+pub const ERROR_HEIGHT: f32 = 40.0;
+
+/// The height a dialog gives a part of it that scrolls: the window's, less the dialog's frame, what `ui` has drawn so far, and
+/// `below`, what the dialog draws under that part (its notes, its row of buttons: [`dialog_row`] is one). Never under a few rows, so
+/// a window too small for a dialog scrolls it, and its buttons stay in reach.
+pub fn dialog_room(ui: &Ui, below: f32) -> f32 {
+    let used = ui.cursor().top() - ui.min_rect().top();
+    (ui.ctx().content_rect().height() - DIALOG_MARGIN - used - below).max(80.0)
+}
+
+/// The height of a row of buttons or fields in a dialog, with the gap above it.
+pub fn dialog_row(ui: &Ui) -> f32 {
+    ui.spacing().interact_size.y + ui.spacing().item_spacing.y
+}
+
+/// `text` in `colour` in a box at most `height` tall that scrolls, for what a dialog says in itself and whose length it cannot
+/// know (a core message, a long list of what an import left out).
+pub fn boxed_text(ui: &mut Ui, id: &str, colour: Color32, text: &str, height: f32) {
+    egui::ScrollArea::vertical().id_salt(id).max_height(height).show(ui, |ui| {
+        ui.colored_label(colour, text);
+    });
 }
 
 /// The lettering at a weight heavier than the body's: a title, a tab. The body's until the window has it.
