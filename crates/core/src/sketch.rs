@@ -601,9 +601,10 @@ impl Model {
     ///
     /// An outline that was as bad before passes: a move, copy, rotation or mirror of a floor a file holds with a bow tie or an
     /// edge half a millimetre long makes it no worse, so it is let by; what changes its shape, or makes a clean one bad, is
-    /// refused ([`congruent`]).
-    pub fn check_edits(&self, before: &Model) -> Result<(), String> {
-        let mut work = 0;
+    /// refused ([`congruent`]). A copy is a new element, whose outline is judged against those of the elements the command was
+    /// given (`ids` or `id` in `params`): a new floor drawn like a bad one the file holds is no copy of it.
+    pub fn check_edits(&self, before: &Model, params: &serde_json::Value) -> Result<(), String> {
+        let (mut work, given) = (0, given(before, params));
         for (&id, e) in &self.elements {
             let Some(now) = rings_of(e) else { continue };
             if before.elements.get(id).and_then(rings_of).is_some_and(|was| was == now) {
@@ -623,7 +624,7 @@ impl Model {
                 if let Err(problems) = solve(&lines_of(ring, &[]))
                     && !problems.iter().all(|p| matches!(p, Problem::NoArea { .. }))
                 {
-                    if was_as_bad(before, id, e, ring, &mut work) {
+                    if was_as_bad(before, &given, id, e, ring, &mut work) {
                         continue;
                     }
                     let said = say(&problems, &|i| format!("edge {i}"));
@@ -649,13 +650,22 @@ impl Model {
 /// command take long: past it an outline is judged as the new one it is.
 const MAX_COMPARED: usize = 4_000_000;
 
+/// The elements of `before` that `params` names in `ids` or `id`, by id or GUID: what a copy is made of.
+fn given(before: &Model, params: &serde_json::Value) -> Vec<Id> {
+    let ids = params.get("ids").and_then(serde_json::Value::as_array).into_iter().flatten().take(MAX_POINTS);
+    ids.chain(params.get("id"))
+        .filter_map(|v| serde_json::from_value::<Guid>(v.clone()).ok())
+        .filter_map(|g| before.elements.id(g))
+        .collect()
+}
+
 /// Whether `ring`, of `e` (element `id`), is a ring the project held before the command that is as bad as it is: the same
-/// element's, or (a copy is a new element) any of its kind's, moved, turned or mirrored.
-fn was_as_bad(before: &Model, id: crate::model::Id, e: &Element, ring: &[P2], work: &mut usize) -> bool {
+/// element's, or (a copy is a new element) that of an element of its kind the command was `given`, moved, turned or mirrored.
+fn was_as_bad(before: &Model, given: &[Id], id: Id, e: &Element, ring: &[P2], work: &mut usize) -> bool {
     let pool: Vec<&Element> = match before.elements.get(id) {
         Some(was) if was.category() == e.category() => vec![was],
         Some(_) => return false,
-        None => before.elements.values().filter(|was| was.category() == e.category()).collect(),
+        None => given.iter().filter_map(|g| before.elements.get(*g)).filter(|was| was.category() == e.category()).collect(),
     };
     pool.into_iter()
         .filter_map(rings_of)
@@ -1421,6 +1431,35 @@ mod command_tests {
             let big: Vec<[f64; 2]> = pts.iter().map(|p| [p[0] * 2.0, p[1] * 2.0]).collect();
             let e = s.execute("modify", &json!({"id": f, "boundary": big})).unwrap_err();
             assert!(e.contains("isn't a simple outline"), "{what}: {e}");
+        }
+    }
+
+    #[test]
+    fn a_new_floor_with_the_outline_of_a_bad_one_in_the_file_is_refused_and_a_copy_of_that_one_is_not() {
+        let bow: Vec<[f64; 2]> = BOW.iter().map(|p| [f64::from(p[0]), f64::from(p[1])]).collect();
+        let mut s = Session::new();
+        let f = old_floor(&mut s, &bow);
+        let clean = run(&mut s, "floor", json!({"boundary": [[0, 0], [4000, 0], [4000, 4000], [0, 4000]]}))["id"].clone();
+        // A brand new element is no copy of it, however alike: the same bow tie drawn by hand, or on a floor of another place.
+        for boundary in [json!(BOW), json!([[1000, 0], [5000, 4000], [5000, 0], [1000, 2000]])] {
+            let before = s.model.clone();
+            let e = s.execute("floor", &json!({ "boundary": boundary })).unwrap_err();
+            assert!(e.contains("isn't a simple outline"), "{e}");
+            assert_eq!(s.model, before);
+        }
+        // A copy of it passes, named by id, by GUID or among others; so do a mirrored and a turned one.
+        let guid = json!(s.model.guid(f));
+        for (cmd, p) in [
+            ("copy", json!({"ids": [f], "by": [9000, 0]})),
+            ("copy", json!({"id": f, "by": [9000, 0]})),
+            ("copy", json!({"ids": [guid], "by": [9000, 0]})),
+            ("copy", json!({"ids": [clean, f], "by": [9000, 0]})),
+            ("mirror", json!({"ids": [f], "axis": [[0, 0], [1000, 1000]], "copy": true})),
+            ("rotate", json!({"ids": [f], "about": [100, 200], "angle": 33, "copy": true})),
+        ] {
+            if let Err(e) = s.execute(cmd, &p) {
+                panic!("{cmd} {p}: {e}");
+            }
         }
     }
 
