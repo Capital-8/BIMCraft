@@ -677,7 +677,7 @@ fn was_as_bad(before: &Model, given: &[Id], id: Id, e: &Element, ring: &[P2], wo
 /// it and either way round. `work` counts the corners compared and stops it at [`MAX_COMPARED`].
 fn congruent(a: &[P2], b: &[P2], work: &mut usize) -> bool {
     let n = a.len();
-    if n != b.len() || n < 3 {
+    if n != b.len() || n < 3 || *work > MAX_COMPARED {
         return false;
     }
     // Each corner's edge out of it: its length, and its dot and cross with the next edge.
@@ -697,16 +697,18 @@ fn congruent(a: &[P2], b: &[P2], work: &mut usize) -> bool {
                 if !near(ta[0][0], tb[k][0], 1.0) {
                     continue;
                 }
-                *work += n;
-                if *work > MAX_COMPARED {
-                    return false;
-                }
                 let scale = |i: usize| ta[i][0] + ta[(i + 1) % n][0] + 1.0;
+                // Charged for the corners looked at, not the ones that might have been: a start that fails at once costs one,
+                // so a ring of equal edges, which every start passes, is not spent before it is compared.
                 if (0..n).all(|i| {
+                    *work += 1;
                     let j = (i + k) % n;
                     near(ta[i][0], tb[j][0], 1.0) && near(ta[i][1], tb[j][1], scale(i)) && near(ta[i][2], tb[j][2], scale(i))
                 }) {
                     return true;
+                }
+                if *work > MAX_COMPARED {
+                    return false;
                 }
             }
         }
@@ -1461,6 +1463,67 @@ mod command_tests {
                 panic!("{cmd} {p}: {e}");
             }
         }
+    }
+
+    /// A regular `n`-gon 10 m across to the micron, with the corners `swap` and the next swapped: a small bow tie in a ring of
+    /// `n - 3` edges of one length.
+    fn regular_bow(n: usize, at: [f64; 2], swap: usize) -> Vec<[f64; 2]> {
+        let micron = |v: f64| (v * 1000.0).round() / 1000.0;
+        let mut ring: Vec<[f64; 2]> = (0..n)
+            .map(|i| {
+                let a = std::f64::consts::TAU * i as f64 / n as f64;
+                [at[0] + micron(5000.0 * a.cos()), at[1] + micron(5000.0 * a.sin())]
+            })
+            .collect();
+        ring.swap(swap, swap + 1);
+        ring
+    }
+
+    #[test]
+    fn an_outline_of_thousands_of_equal_edges_as_bad_as_it_was_is_let_by_when_mirrored_turned_or_copied() {
+        // Its edges are all the one length: every corner is a place to start comparing it with its image.
+        let n = 5000;
+        let mut s = Session::new();
+        let f = old_floor(&mut s, &regular_bow(n, [0.0, 0.0], 10));
+        for (cmd, p) in [
+            ("mirror", json!({"ids": [f], "axis": [[1000, 0], [1000, 1000]]})),
+            ("mirror", json!({"ids": [f], "axis": [[0, 0], [1000, 1000]], "copy": true})),
+            ("rotate", json!({"ids": [f], "about": [100, 200], "angle": 33.3, "copy": true})),
+            ("copy", json!({"ids": [f], "by": [20000, 0]})),
+        ] {
+            if let Err(e) = s.execute(cmd, &p) {
+                panic!("{cmd} {p}: {e}");
+            }
+        }
+        // Twenty of them, the bow tie of each at another corner, copied at once: each is compared with those before it.
+        let mut s = Session::new();
+        let ids: Vec<u64> =
+            (0..20).map(|i| old_floor(&mut s, &regular_bow(n, [f64::from(i) * 20000.0, 0.0], 10 + 250 * i as usize))).collect();
+        let made = run(&mut s, "copy", json!({"ids": ids, "by": [0, 20000]}));
+        assert_eq!(made["ids"].as_array().map(Vec::len), Some(20));
+        // And one made worse is still refused.
+        let e = s.execute("modify", &json!({"id": ids[0], "boundary": [[0, 0], [4000, 4000], [4000, 0], [0, 2000]]})).unwrap_err();
+        assert!(e.contains("isn't a simple outline"), "{e}");
+    }
+
+    #[test]
+    fn comparing_two_outlines_of_thousands_of_equal_edges_stops_at_its_budget() {
+        // Rings of 5,000 edges of one length, a bow tie at the corner 4,000: every start passes the first corner and runs on for
+        // thousands before it fails, which is tens of millions of corners over the starts.
+        let points = |ring: Vec<[f64; 2]>| ring.into_iter().map(|p| crate::geom::P2(p[0], p[1])).collect::<Vec<_>>();
+        let a = points(regular_bow(5000, [0.0, 0.0], 4000));
+        // The same ring with its bow tie at another corner is found within the budget.
+        let (mut work, mut same) = (0, points(regular_bow(5000, [0.0, 0.0], 4500)));
+        assert!(super::congruent(&a, &same, &mut work), "{work} corners compared");
+        // With a second bow tie it is another ring, and the budget is spent before every start is tried.
+        same.swap(1000, 1001);
+        let (mut work, most) = (0, super::MAX_COMPARED);
+        assert!(!super::congruent(&a, &same, &mut work));
+        assert!((most..=most + a.len()).contains(&work), "{work} corners compared, of a budget of {most}");
+        // Once it is spent, a comparison looks at nothing.
+        let spent = work;
+        assert!(!super::congruent(&a, &a, &mut work));
+        assert_eq!(work, spent);
     }
 
     #[test]
