@@ -316,6 +316,47 @@ fn a_long_list_of_patterns_left_out_is_counted_and_a_file_is_not_written_over_un
     assert!(std::fs::read_to_string(dir.path().join("fresh.pat")).unwrap().contains("*Sand"));
 }
 
+#[test]
+fn an_import_says_one_pattern_in_the_singular_and_keeps_the_reason_a_pattern_was_left_out() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("one.pat");
+    std::fs::write(&file, "*Weave\n0,0,0,0,5\n").unwrap();
+    let mut h = app(BOX);
+    patterns_tab(&mut h);
+    h.state_mut().import_patterns(&file);
+    h.run();
+    assert!(said(&h, "1 pattern imported."), "one pattern, in the singular");
+    assert!(!said(&h, "1 patterns"));
+    // A pattern whose reason is longer than the cut used to lose it ("a family's lines lie on each other: its…"), and a long name
+    // is cut at a word, not in the middle of one.
+    let name = "Alpha Beta Gamma Delta Epsilon Zeta Eta Theta Iota";
+    std::fs::write(&file, format!("*Basket\n0,0,0,0,5\n*{name}\n0,0,0,0,0\n*{}\n0,0,0,0,0\n", "x".repeat(60))).unwrap();
+    h.state_mut().import_patterns(&file);
+    h.run();
+    assert!(said(&h, "1 pattern imported; left out: Alpha Beta Gamma Delta Epsilon… ("), "the name cut at a word");
+    assert!(said(&h, &format!("{}… (", "x".repeat(30))), "a name of no words cut where it must");
+    assert!(said(&h, "its offset is 0)"), "the reason, whole");
+}
+
+#[test]
+fn a_solid_fill_is_told_solid_in_portuguese_and_spanish_not_as_a_continuous_line() {
+    use crate::lang::{Lang, translated_in};
+    for l in [Lang::Portuguese, Lang::Spanish, Lang::Chinese] {
+        let mut h = app(BOX);
+        crate::lang::assume_chinese_font(&h.ctx);
+        h.state_mut().lang = l;
+        h.run();
+        let model = h.state().session.model.clone();
+        h.state_mut().fill_patterns_dialog = Some(crate::fillpatterns::FillPatternsDialog::new(&model));
+        h.run();
+        press(&mut h, translated_in(l, "Patterns").unwrap_or("Patterns"));
+        let (fill, line) = (translated_in(l, "Solid Fill").unwrap(), translated_in(l, "Solid").unwrap());
+        assert_ne!(fill, line, "{l:?}: a fill and a line pattern are two words");
+        assert!(h.query_all_by_label(fill).next().is_some(), "{l:?}: the solid fill is `{fill}`");
+        assert!(h.query_all_by_label(line).next().is_none(), "{l:?}: a fill is no `{line}` line");
+    }
+}
+
 fn line_styles(h: &mut Harness<BimApp>) {
     press(h, "Manage");
     press(h, "Line Styles");

@@ -124,17 +124,21 @@ impl FillPatternsDialog {
         let brought = names.iter().filter_map(|n| scratch.model.fill_patterns.get(*n).map(|p| (n.to_string(), p.clone()))).collect();
         self.import(brought);
         let out: Vec<String> = (reply["left_out"].as_array().into_iter().flatten())
-            .map(|l| format!("{} ({})", short(l["name"].as_str().unwrap_or_default()), short(l["why"].as_str().unwrap_or_default())))
+            .map(|l| {
+                let name = l["name"].as_str().unwrap_or_default();
+                format!("{} ({})", short(name, 30), short(reason(name, l["why"].as_str().unwrap_or_default()), 70))
+            })
             .collect();
         let n = names.len().to_string();
+        let one = names.len() == 1;
         // The reply names the first few it left out and counts them all.
         let left = reply["left_out_count"].as_u64().map_or(0, |c| usize::try_from(c).unwrap_or(usize::MAX)).max(out.len());
         Ok(match left {
-            0 => (tf("{} patterns imported.", &[&n]), false),
+            0 => (tf(if one { "{} pattern imported." } else { "{} patterns imported." }, &[&n]), false),
             k => {
                 let list = out.iter().take(LEFT_OUT_SHOWN).cloned().collect::<Vec<_>>().join("; ");
                 let list = if k > LEFT_OUT_SHOWN { tf("{}; and {} more", &[&list, &(k - LEFT_OUT_SHOWN).to_string()]) } else { list };
-                (tf("{} patterns imported; left out: {}", &[&n, &list]), true)
+                (tf(if one { "{} pattern imported; left out: {}" } else { "{} patterns imported; left out: {}" }, &[&n, &list]), true)
             }
         })
     }
@@ -213,12 +217,19 @@ impl FillPatternsDialog {
 /// How many of the patterns a file left out the dialog names; the rest it counts.
 const LEFT_OUT_SHOWN: usize = 5;
 
-/// `text` cut to 40 characters, as a name or a reason is told in a message.
-fn short(text: &str) -> String {
-    match text.char_indices().nth(40) {
-        Some((i, _)) => format!("{}…", &text[..i]),
-        None => text.to_string(),
-    }
+/// `text` cut to at most `most` characters at a word's end, as a name or a reason is told in a message: a word cut in two is a
+/// reason lost (a text of one word is cut where it must be).
+fn short(text: &str, most: usize) -> String {
+    let Some((end, _)) = text.char_indices().nth(most) else { return text.to_string() };
+    let cut = &text[..end];
+    let cut =
+        if text[end..].starts_with(char::is_whitespace) { cut } else { cut.rsplit_once(char::is_whitespace).map_or(cut, |(head, _)| head) };
+    format!("{}…", cut.trim_end())
+}
+
+/// Why the core left pattern `name` out, without the pattern's name it begins with (the message names it, and the dialog does).
+fn reason<'a>(name: &str, why: &'a str) -> &'a str {
+    why.strip_prefix(&format!("fill pattern `{name}`")).map_or(why, |rest| rest.trim_start_matches([':', ' ']))
 }
 
 /// `base` and a number, the first that `taken` hasn't: `Pattern 1`, `Pattern 2`…
@@ -540,7 +551,7 @@ fn patterns_tab(ui: &mut Ui, d: &mut FillPatternsDialog, below: f32) -> Option<F
                         }
                     }
                     None if r.pattern.is_solid() => {
-                        ui.label(t("Solid"));
+                        ui.label(t("Solid Fill"));
                         ui.label("");
                         ui.label("");
                     }

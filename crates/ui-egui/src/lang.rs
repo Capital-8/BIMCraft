@@ -3333,6 +3333,8 @@ const WORDS: &[[&str; 3]] = &[
         "Estes padrões para um arquivo PAT, exceto os sólidos",
         "Estos patrones a un archivo PAT, salvo los sólidos",
     ],
+    ["{} pattern imported.", "{} padrão importado.", "{} patrón importado."],
+    ["{} pattern imported; left out: {}", "{} padrão importado; deixados de fora: {}", "{} patrón importado; omitidos: {}"],
     ["{} patterns imported.", "{} padrões importados.", "{} patrones importados."],
     ["{} patterns imported; left out: {}", "{} padrões importados; deixados de fora: {}", "{} patrones importados; omitidos: {}"],
     ["Fill patterns exported to {}", "Padrões de preenchimento exportados para {}", "Patrones de relleno exportados a {}"],
