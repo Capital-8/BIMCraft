@@ -726,7 +726,7 @@ pub(crate) fn plan_extent(m: &Model, level: impl Key) -> Vec<P2> {
 }
 
 /// Everything a plan of `level` shows, uncropped: its walls, floors, rooms, dimensions, tags,
-/// notes and spot elevations, the grids, and the marks of the sections and elevations.
+/// notes and spot elevations, the grids, the marks of the sections and elevations, and its CAD imports.
 pub(crate) fn plan_shows(m: &Model, plan: impl Key) -> Vec<P2> {
     // The plan's own guid says what it is: its graphics, range and annotation; its level is what it shows of the model.
     let key = m.guid(plan);
@@ -736,8 +736,11 @@ pub(crate) fn plan_shows(m: &Model, plan: impl Key) -> Vec<P2> {
     let index = walls::Index::new(m);
     let mut extent: Vec<P2> = cut_outlines(m, r.cut, &look, &index).into_iter().flat_map(|(_, o)| o).collect();
     extent.extend(seen_below(m, &r, &look, &index).into_iter().flat_map(|(_, o, _)| o));
-    for (_, e) in m.elements.iter().filter(|(id, _)| look.shows(**id)) {
+    for (id, e) in m.elements.iter().filter(|(id, _)| look.shows(**id)) {
         match e {
+            Element::CadImport(ci) if ci.level == level && ci.view.is_none_or(|v| v == key) => {
+                extent.extend(m.cad_box(*id).into_iter().flatten())
+            }
             Element::Floor(Floor { level: l, boundary, .. })
             | Element::Ceiling(Ceiling { level: l, boundary, .. })
             | Element::Shaft(Shaft { level: l, boundary, .. })
