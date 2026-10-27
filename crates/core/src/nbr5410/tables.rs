@@ -1,5 +1,5 @@
 //! The tables of NBR 5410:2004 the circuit sizing reads, as the standard prints them (Tabelas 36, 37, 40, 41, 42, 45, 48) with the
-//! conductors' resistance of IEC 60228 and of a maker's flexible cable. Generated once from the checked tables; each was read against the
+//! conductors' resistance of IEC 60228 and of Prysmian's flexible cable. Generated once from the checked tables; each was read against the
 //! rendered page of the standard's own tables.
 //!
 //! Source: NBR 5410:2004 is a paid ABNT standard, not a public one. The values are engineering facts (currents, factors, sections)
@@ -163,7 +163,7 @@ pub const RESISTANCE_20: &[(f64, f64)] = &[
     (1000.0, 0.0176),
 ];
 
-/// The same for a flexible conductor (classes 4 and 5), as a 750 V flexible cable maker prints it (0.5 to 240 mm²).
+/// The same for a flexible conductor (classes 4 and 5), as Prysmian prints it for its 750 V flexible cables (Afumex 750 and Afumex Flex VFD catalogues, br.prysmian.com, column "Rcc máx. a 20 ºC"); these are the IEC 60228 class 5 maxima (0.5 to 240 mm²).
 pub const RESISTANCE_FLEX: &[(f64, f64)] = &[
     (0.5, 39.0),
     (0.75, 26.0),
