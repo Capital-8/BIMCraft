@@ -795,6 +795,11 @@ impl Model {
 /// Each name `g` holds of a library entry, given to `f` with what it names, which may put another in its place: a view's
 /// template, filters, phase, phase filter, design options and its linework's line styles.
 fn graphics_refs(g: &mut crate::graphics::Graphics, f: &mut dyn FnMut(&Kind, &mut String)) {
+    for o in g.categories.values_mut().chain(g.elements.values_mut()).chain(g.filters.iter_mut().map(|a| &mut a.over)) {
+        for name in o.patterns_mut() {
+            f(&Kind::FillPattern, name);
+        }
+    }
     if let Some(t) = &mut g.template {
         f(&Kind::ViewTemplate, t);
     }
@@ -968,6 +973,11 @@ impl Model {
         }
         for vt in self.view_templates.values_mut() {
             graphics_refs(&mut vt.graphics, f);
+        }
+        for o in self.phase_overrides.values_mut() {
+            for name in o.patterns_mut() {
+                f(&Kind::FillPattern, name);
+            }
         }
         for (set, s) in self.option_sets.iter_mut() {
             s.primary = option_ref(set, &s.primary, f);

@@ -16,6 +16,9 @@ use crate::pen::{MAX_PEN, Pen};
 use crate::render::{Drawing, Part, Prim, Rgb};
 use crate::schedule;
 
+#[cfg(test)]
+mod fill_tests;
+
 /// The categories a plan, a section or a 3D view draws, and so may hide and override: those of the
 /// model, then those of the annotation.
 pub const MODEL: [&str; 25] = [
@@ -173,7 +176,15 @@ mod rgb {
     }
 }
 
-/// How lines and fills draw: a colour, a weight, a dash for lines, a colour for fills.
+/// One overridden pattern layer. No pattern explicitly hides the layer; no layer override inherits it.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct PatternFill {
+    pub pattern: Option<String>,
+    pub color: [u8; 3],
+}
+
+/// How lines and fills draw: line settings, the solid fill colour, and independent pattern layers.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Style {
@@ -185,6 +196,10 @@ pub struct Style {
     pub dash: Option<Dash>,
     #[serde(with = "rgb", skip_serializing_if = "Option::is_none")]
     pub fill: Option<[u8; 3]>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub foreground: Option<PatternFill>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub background: Option<PatternFill>,
 }
 
 impl Style {
@@ -199,6 +214,8 @@ impl Style {
             weight: self.weight.or(base.weight),
             dash: self.dash.or(base.dash),
             fill: self.fill.or(base.fill),
+            foreground: self.foreground.clone().or_else(|| base.foreground.clone()),
+            background: self.background.clone().or_else(|| base.background.clone()),
         }
     }
 
@@ -247,6 +264,25 @@ pub struct Override {
 }
 
 impl Override {
+    pub(crate) fn check_patterns(&self, m: &Model) -> Result<(), String> {
+        for s in [&self.projection, &self.cut] {
+            for name in [&s.foreground, &s.background].into_iter().flatten().filter_map(|p| p.pattern.as_ref()) {
+                if !m.fill_patterns.contains_key(name) {
+                    return Err(format!("there's no fill pattern `{name}`"));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    pub(crate) fn patterns_mut(&mut self) -> impl Iterator<Item = &mut String> {
+        [&mut self.projection, &mut self.cut]
+            .into_iter()
+            .flat_map(|s| [&mut s.foreground, &mut s.background])
+            .flatten()
+            .filter_map(|p| p.pattern.as_mut())
+    }
+
     pub fn is_empty(&self) -> bool {
         *self == Override::default()
     }
@@ -459,6 +495,9 @@ impl Graphics {
             {
                 return Err(format!("Linework edge {i}: there's no line style `{st}`{}", known(m.line_styles.keys())));
             }
+        }
+        for o in self.categories.values().chain(self.elements.values()).chain(self.filters.iter().map(|a| &a.over)) {
+            o.check_patterns(m)?;
         }
         let mut seen = BTreeSet::new();
         for a in &self.filters {
@@ -705,6 +744,21 @@ fn halftone(c: Rgb) -> Rgb {
 }
 
 impl Look {
+    /// The resolved fill layers for the renderer, after category, filter and element precedence.
+    pub(crate) fn pattern_style(&self, id: Id, cut: bool) -> Option<&Style> {
+        let o = self.paint.get(&id)?;
+        let s = if cut { &o.cut } else { &o.projection };
+        (s.foreground.is_some() || s.background.is_some()).then_some(s)
+    }
+
+    pub(crate) fn pattern_styles(&self) -> BTreeMap<Id, [Style; 2]> {
+        self.paint
+            .iter()
+            .filter(|(id, _)| self.pattern_style(**id, false).is_some() || self.pattern_style(**id, true).is_some())
+            .map(|(id, o)| (*id, [o.projection.clone(), o.cut.clone()]))
+            .collect()
+    }
+
     /// What view `view` looks like: nothing hidden or painted when it isn't a view, or has no graphics.
     pub fn of(m: &Model, view: impl Key) -> Look {
         let look = graphics_of(m, view).map_or_else(Look::default, |own| Look::with(m, own));
@@ -810,7 +864,8 @@ impl Look {
     /// otherwise: what the drawing code fills the union of cut walls with.
     pub fn cut_fill(&self, id: Id, default: Rgb) -> Rgb {
         let Some(o) = self.paint.get(&id) else { return default };
-        let c = o.cut.fill.map_or(default, |[r, g, b]| Rgb(r, g, b));
+        let base = if self.pattern_style(id, true).is_some() { crate::render::PAPER } else { default };
+        let c = o.cut.fill.map_or(base, |[r, g, b]| Rgb(r, g, b));
         if o.halftone { halftone(c) } else { c }
     }
 
