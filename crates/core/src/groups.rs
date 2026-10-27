@@ -13,8 +13,9 @@ use crate::model::{Element, heading};
 pub const MAX_MEMBERS: usize = 10_000;
 
 /// The most members a view's detail groups and repeating details place in all: each group places its type's members, each
-/// repeat of a repeating detail places them again, and a view draws every one whenever it is drawn. At 10,000 even big
-/// hatched regions take about half a second to draw (a debug build; 200,000 took 6 s and 30 million primitives).
+/// repeat of a repeating detail places them again, and a view draws every one whenever it is drawn. At 10,000, hatched
+/// regions 3 m across take 0.11 s to draw and 30 m across 0.5 s (2.8 million primitives; measured in a dev build and in
+/// release, the same, as the core is optimized in the dev build too); 200,000 took 6 s and 30 million primitives.
 pub const MAX_PLACED: usize = 10_000;
 
 /// A detail group type: what each one placed draws.

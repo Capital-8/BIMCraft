@@ -252,6 +252,30 @@ fn a_revision_cloud_stays_within_the_points_a_curve_draws_and_never_cuts_a_corne
     assert!(e.contains("cloud") && e.contains("insulation"), "{e}");
 }
 
+/// What `MAX_PLACED` (10,000) hatched regions cost a plan to draw: `cargo test -p bimcraft-core --lib probe_ -- --ignored
+/// --nocapture` (and with `--release`), whose numbers `MAX_PLACED` and the docs quote.
+#[test]
+#[ignore = "a probe: cargo test -p bimcraft-core --lib probe_ -- --ignored --nocapture"]
+fn probe_the_cost_of_the_most_hatched_regions_a_view_may_place() {
+    for (side, of) in [(300.0, "Diagonal Up"), (3000.0, "Diagonal Up"), (30000.0, "Diagonal Up"), (3000.0, "Crosshatch"), (3000.0, "Brick")] {
+        let mut s = Session::new();
+        run(&mut s, "wall", json!({"points": [[0, 0], [8000, 0], [8000, 6000], [0, 6000]], "closed": true}));
+        // Five regions to a group, repeated 2,000 times (the most a repeat takes): 10,000 placed.
+        let regions: Vec<Id> = (0..5)
+            .map(|k| {
+                let at = f64::from(k) * 50.0;
+                let sketch = json!([[[at, 0], [at + side, 0]], [[at + side, 0], [at + side, side]], [[at + side, side], [at, side]], [[at, side], [at, 0]]]);
+                id_of(&run(&mut s, "filled_region", json!({"sketch": sketch, "type": of, "line_style": null})))
+            })
+            .collect();
+        run(&mut s, "create_group", json!({"ids": regions, "name": "Hatched"}));
+        let r = run(&mut s, "repeating_detail", json!({"type": "Hatched", "start": [0, 0], "end": [199_800, 0], "spacing": 100}));
+        let at = std::time::Instant::now();
+        let d = crate::render::plan(&s.model, 100000, 1600, 1000);
+        eprintln!("{} placed, {of} regions {side} mm across: {:?}, {} prims", r["count"], at.elapsed(), d.prims.len());
+    }
+}
+
 #[test]
 fn a_cloud_round_a_huge_circle_is_drawn_without_listing_its_scallops_first() {
     // A span asks for the scallops that fit it, and never more than the most a curve may be cut into (plus the one that

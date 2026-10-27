@@ -1371,6 +1371,34 @@ type {"category": "wall", "name": "Partition", "thickness": 110}"#,
     }
 
     #[test]
+    fn a_file_from_before_the_line_and_fill_styles_opens_with_every_part_keeping_its_id() {
+        let mut s = Session::new();
+        s.script(crate::sample::SAMPLE).unwrap();
+        // Written as 0.8 writes a project: no line patterns or styles, fill patterns or region types, and so none of their
+        // entries; the parts (layers, forms, symbols) hold ids below the entries that were there.
+        let mut m = (*s.model).clone();
+        (m.line_patterns, m.line_styles, m.fill_patterns, m.region_types) = Default::default();
+        m.sync_library();
+        let mut file: Value = serde_json::from_str(&m.to_json().unwrap()).unwrap();
+        for key in ["line_patterns", "line_styles", "fill_patterns", "region_types"] {
+            file.as_object_mut().unwrap().remove(key);
+        }
+        file["format"] = json!(5);
+        let (opened, left_out) = Model::read(&file.to_string()).unwrap();
+        assert!(left_out.is_empty(), "{left_out:?}");
+        let ids = |m: &Model| m.parts_now().into_iter().map(|(id, p)| (id, p.guid)).collect::<Vec<_>>();
+        let (was, now) = (ids(&m), ids(&opened));
+        assert!(was.len() > 100, "{} parts", was.len());
+        let renumbered = was.iter().zip(&now).filter(|(a, b)| a != b).count();
+        assert_eq!((renumbered, was.len()), (0, now.len()), "{renumbered} of {} parts have an id they did not have", was.len());
+        // The entries the file lacked are there, below the parts, and nothing has an id twice.
+        assert!(opened.library.id(&Kind::LineStyle, "Thin Lines").is_some());
+        assert!(opened.library_in_step());
+        let all: std::collections::BTreeSet<Id> = opened.library.entries().map(|(id, _)| id).chain(now.iter().map(|(id, _)| *id)).collect();
+        assert_eq!(all.len(), opened.library.entries().count() + now.len());
+    }
+
+    #[test]
     fn a_family_renamed_keeps_its_types_and_parameters_guids_and_what_uses_them_is_unchanged_in_a_file() {
         let (mut s, c) = boxed();
         let before: Value = serde_json::from_str(&s.model.to_json().unwrap()).unwrap();
