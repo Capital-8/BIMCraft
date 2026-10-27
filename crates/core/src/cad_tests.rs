@@ -110,9 +110,11 @@ fn units_scale_position_angle_layers_and_colours_are_the_users_to_say() {
     // In centimetres instead, its origin on (1000, 2000), turned a quarter.
     let r = run(&mut s, "import_cad", json!({"path": path, "units": "cm", "position": "origin", "at": [1000, 2000], "angle": 90}));
     assert!(near(&r["extents"], [[940.0, 2000.0], [1000.0, 2100.0]]), "{r}");
+    assert_eq!(r["unit"], "cm (its file says m)", "the unit it was read in");
     // A scale of its own, all its layers, in black.
     let r = run(&mut s, "import_cad", json!({"cad": "plan", "scale": 2, "position": "origin", "layers": "all", "colors": "black"}));
     assert!(near(&r["extents"], [[0.0, 0.0], [20.0, 12.0]]), "{r}");
+    assert_eq!(r["unit"], "a scale of its own (its file says m)");
     let e = &run(&mut s, "elements", json!({"category": "cadimport"}))["elements"][1];
     assert_eq!((e.get("hidden"), e["colors"].as_str()), (None, Some("black")), "{e}");
     // A list of the layers to show hides the rest.
@@ -550,4 +552,24 @@ fn a_plan_snaps_to_an_imports_ends_middles_crossings_and_centres_so_walls_can_be
     run(&mut s, "wall", json!({"points": [[a.0, a.1], [b.0, b.1]]}));
     let w = &run(&mut s, "elements", json!({"category": "wall"}))["elements"][0];
     assert_eq!((&w["start"], &w["end"]), (&json!([1000.0, 1000.0]), &json!([11000.0, 1000.0])));
+}
+
+#[test]
+fn a_plan_fits_to_its_imports_as_to_the_rest_it_shows() {
+    let mut s = Session::new();
+    let id = run(&mut s, "import_cad", json!({"path": file("fit", "plan.dxf", &plan()), "at": [80_000, -40_000]}))["id"].as_u64().unwrap();
+    let (one, two) = levels(&s);
+    let d = render::plan(&s.model, one, 600, 600);
+    assert!(drawn(&d, reddish) > 300, "the plan is fitted to the drawing, far from the origin");
+    assert!(d.pick(d.view.px(P2(80_000.0, -43_000.0)), 3.0) == Some(id), "its south wall is on screen");
+    // A plan of another level, or one an import isn't in, isn't fitted to it.
+    assert!(render::plan_shows(&s.model, two).is_empty());
+    let other = run(&mut s, "duplicate_view", json!({"view": one}))["id"].as_u64().unwrap();
+    let mut t = Session::new();
+    let (one, _) = levels(&t);
+    let other_t = run(&mut t, "duplicate_view", json!({"view": one}))["id"].as_u64().unwrap();
+    run(&mut t, "import_cad", json!({"path": file("fit", "plan.dxf", &plan()), "view": other_t, "at": [80_000, 0]}));
+    assert!(render::plan_shows(&t.model, one).is_empty());
+    assert!(!render::plan_shows(&t.model, other_t).is_empty());
+    assert!(!render::plan_shows(&s.model, other).is_empty());
 }

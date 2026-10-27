@@ -3659,7 +3659,13 @@ fn import_cad(s: &mut Session, p: &Value) -> R {
         None => Colors::Preserve,
         Some(n) => Colors::from_name(&n).ok_or_else(|| bad(c, format!("`colors` is preserve, invert or black, not {n}")))?,
     };
-    let unit = if dxf.scale.is_some() { dxf.unit.clone() } else { format!("{} (read as mm unless `units` says)", dxf.unit) };
+    // The unit it was read in: the one given, else its file's.
+    let unit = match string(c, p, "units")?.filter(|u| u != "auto") {
+        Some(u) => format!("{u} (its file says {})", dxf.unit),
+        None if p.get("scale").is_some_and(|v| !v.is_null()) => format!("a scale of its own (its file says {})", dxf.unit),
+        None if dxf.scale.is_some() => dxf.unit.clone(),
+        None => format!("{} (read as mm unless `units` says)", dxf.unit),
+    };
     let (entities, layers, far, left_out) = (dxf.entities.len(), dxf.layers.len(), cad.far(), dxf.left_out.clone());
     let source = cad.source().to_string();
     let m = s.model_mut();

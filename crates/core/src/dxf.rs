@@ -260,12 +260,18 @@ pub fn union(boxes: impl IntoIterator<Item = [P2; 2]>) -> Option<[P2; 2]> {
 }
 
 impl Shape {
-    /// The box round it, drawing units: an arc's or circle's whole circle, a text's point.
+    /// The box round it, drawing units: a circle's whole circle, an arc's sweep, a text's point.
     pub fn bounds(&self) -> [P2; 2] {
         let pts: Vec<P2> = match self {
             Shape::Line(a, b) => vec![*a, *b],
             Shape::Polyline { pts, .. } => pts.clone(),
-            Shape::Circle { c, r } | Shape::Arc { c, r, .. } => vec![*c - P2(*r, *r), *c + P2(*r, *r)],
+            Shape::Circle { c, r } => vec![*c - P2(*r, *r), *c + P2(*r, *r)],
+            // Its ends, and where it passes east, north, west or south of its centre.
+            Shape::Arc { c, r, start, end } => {
+                let at = |deg: f64| *c + P2(deg.to_radians().cos(), deg.to_radians().sin()) * *r;
+                let quarters = (0..8).map(|k| f64::from(k) * 90.0).filter(|q| q > start && q < end);
+                [*start, *end].into_iter().chain(quarters).map(at).collect()
+            }
             Shape::Point(p) | Shape::Text { at: p, .. } => vec![*p],
             Shape::Fill { rings, .. } => rings.iter().flatten().copied().collect(),
         };
@@ -1396,6 +1402,21 @@ impl Cursor<'_, '_> {
 mod tests {
     use super::*;
 
+    #[test]
+    fn an_arcs_box_is_round_its_sweep_not_its_circle() {
+        let near = |a: [P2; 2], b: [P2; 2]| a.iter().zip(&b).all(|(p, q)| p.dist(*q) < 1e-6);
+        // A quarter from east to north.
+        let quarter = arc(P2(0.0, 0.0), 10.0, 0.0, 90.0);
+        assert!(near(quarter.bounds(), [P2(0.0, 0.0), P2(10.0, 10.0)]), "{:?}", quarter.bounds());
+        // From north-east to south-east the long way: through north, west and south.
+        let most = arc(P2(0.0, 0.0), 10.0, 45.0, 315.0);
+        assert!(near(most.bounds(), [P2(-10.0, -10.0), P2(45f64.to_radians().cos() * 10.0, 10.0)]), "{:?}", most.bounds());
+        // Across east, from 350 to 10 degrees: a sliver of a great circle, as a near-straight wall is drawn.
+        let sliver = arc(P2(0.0, 0.0), 30_000.0, 359.0, 1.0);
+        let [lo, hi] = sliver.bounds();
+        assert!(hi.0 - lo.0 < 10.0 && hi.1 - lo.1 < 1100.0 && (hi.0 - 30_000.0).abs() < 1e-6, "{lo:?} {hi:?}");
+    }
+
     /// Pairs as a file writes them: a code line, then its value.
     fn pairs(list: &[(i32, &str)]) -> String {
         list.iter().map(|(c, v)| format!("{c}\n{v}\n")).collect()
@@ -1471,7 +1492,7 @@ mod tests {
         let names: Vec<&str> = d.layers.iter().map(|l| l.name.as_str()).collect();
         assert_eq!(names, ["WALLS", "COLS", "0"]);
         assert_eq!(d.layer("COLS").map(|l| (l.color, l.off, l.frozen)), Some((Color::Index(7), false, false)));
-        assert_eq!(d.bounds(), Some([P2(-10.0, -10.0), P2(4000.0, 250.0)]));
+        assert_eq!(d.bounds(), Some([P2(-10.0, 0.0), P2(4000.0, 250.0)]), "the arc from north to west, not its circle");
         assert!(d.left_out.is_empty(), "{:?}", d.left_out);
         assert_eq!((d.scale, d.unit.as_str()), (None, "unitless"));
     }
