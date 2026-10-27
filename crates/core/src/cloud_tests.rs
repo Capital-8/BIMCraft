@@ -517,13 +517,14 @@ fn a_snap_on_a_big_scan_looks_only_near_the_cursor() {
     let reach = Reach { point: 80.0, line: 80.0 };
     let first = snap(&s.model, level, P2(50_010.0, 50_020.0), reach, &[], false, &Snaps::default());
     assert_eq!((first.kind, first.at), (Kind::Point, P2(50_000.0, 50_000.0)));
-    let started = std::time::Instant::now();
+    let before = crate::cloud::LOOKED.with(std::cell::Cell::get);
     for i in 0..100 {
         let p = P2(1000.0 + f64::from(i) * 917.0, 2000.0 + f64::from(i) * 613.0);
         assert_eq!(snap(&s.model, level, p, reach, &[], false, &Snaps::default()).kind, Kind::Point);
     }
-    let each = started.elapsed() / 100;
-    assert!(each < std::time::Duration::from_millis(5), "{each:?} a snap");
+    // Not the million points it holds, nor a thousandth of them: those the squares of the reach touch.
+    let each = (crate::cloud::LOOKED.with(std::cell::Cell::get) - before) / 100;
+    assert!(each <= 2_000, "{each} points looked at for a snap");
 }
 
 /// A project of `n` two-point scans, as it is written to a file.

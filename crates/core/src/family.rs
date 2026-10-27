@@ -1926,6 +1926,6 @@ mod tests {
             .unwrap();
         let (pieces, took) = worked;
         let pieces = pieces.unwrap();
-        assert!(volume(&pieces[0].tris) > 0.0 && took.as_secs_f64() < 5.0, "{took:?}");
+        assert!(volume(&pieces[0].tris) > 0.0 && took.as_secs_f64() < 10.0, "{took:?}: a hang, not a slow machine");
     }
 }

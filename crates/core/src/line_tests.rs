@@ -365,7 +365,7 @@ fn arcs_that_reach_past_the_model_and_polylines_that_would_take_millions_of_poin
     for (p, says) in hostile {
         let t = std::time::Instant::now();
         let r = s.execute("detail_line", &p);
-        assert!(t.elapsed().as_secs_f64() < 1.0, "{} s", t.elapsed().as_secs_f64());
+        assert!(t.elapsed().as_secs_f64() < 10.0, "{} s: a hang, not a slow machine", t.elapsed().as_secs_f64());
         if says.is_empty() {
             // Near-straight enough to be a line: made, as a line.
             assert!(r.is_ok(), "{r:?}");

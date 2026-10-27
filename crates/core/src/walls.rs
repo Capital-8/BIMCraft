@@ -485,9 +485,18 @@ pub(crate) fn convex_pieces(ring: &[P2]) -> Vec<Vec<P2>> {
     geom::triangulate(&ccw).into_iter().map(|t| t.iter().filter_map(|i| ccw.get(*i).copied()).collect()).collect()
 }
 
+#[cfg(test)]
+thread_local! {
+    /// The polygons cut by [`split`] on this thread: the tests of what is drawn assert on it, not on time, which varies with the
+    /// load of the machine.
+    pub(crate) static SPLITS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 /// `ring` cut by the convex counter-clockwise `piece`: the part inside it (if any), and the parts
 /// outside, apart. A repeated point of the piece's is no edge to cut by.
 pub(crate) fn split(ring: Vec<P2>, piece: &[P2]) -> (Option<Vec<P2>>, Vec<Vec<P2>>) {
+    #[cfg(test)]
+    SPLITS.with(|n| n.set(n.get() + 1));
     let big = |r: &Vec<P2>| r.len() >= 3 && geom::area(r).abs() > 1.0;
     let mut inside = ring;
     let mut outside = Vec::new();

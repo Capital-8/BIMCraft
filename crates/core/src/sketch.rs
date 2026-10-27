@@ -294,6 +294,18 @@ impl Profile {
     }
 }
 
+#[cfg(test)]
+thread_local! {
+    /// What the sketches solved on this thread have taken, in steps: the pieces they were cut into, the pairs of pieces looked at,
+    /// the points of loops looked into. The hostile tests assert on it, as time varies with the load of the machine.
+    static SPENT: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+#[cfg(test)]
+fn spent(n: usize) {
+    SPENT.with(|s| s.set(s.get().saturating_add(n)));
+}
+
 /// The lines solved into loops, nested into regions; or every problem found (up to [`MAX_PROBLEMS`]), what to fix first
 /// first ([`Problem::rank`]).
 pub fn solve(lines: &[SketchLine]) -> Result<Profile, Vec<Problem>> {
@@ -379,6 +391,8 @@ pub fn solve(lines: &[SketchLine]) -> Result<Profile, Vec<Problem>> {
         }
         found.len() <= MAX_PROBLEMS
     });
+    #[cfg(test)]
+    spent(pieces.len() + work);
     let Ok(walked) = walked else { return Err(vec![Problem::TooMany { count: work, what: "steps" }]) };
     problems.extend(found.into_values().map(|(_, _, problem)| problem));
     if !walked {
@@ -475,9 +489,13 @@ pub fn solve(lines: &[SketchLine]) -> Result<Profile, Vec<Problem>> {
             steps <= MAX_NEST
         });
         if steps > MAX_NEST {
+            #[cfg(test)]
+            spent(steps);
             return Err(vec![Problem::TooMany { count: steps, what: "loops" }]);
         }
     }
+    #[cfg(test)]
+    spent(steps);
     let mut regions: Vec<Region> = Vec::new();
     let mut region_of = vec![usize::MAX; loops.len()];
     for (i, (ring, _)) in loops.iter().enumerate() {
@@ -1508,7 +1526,8 @@ mod command_tests {
     }
 }
 
-/// Hostile and dense sketches: each finishes well under a second.
+/// Hostile and dense sketches: each takes a few steps, or is refused after the most a sketch is given. (Steps, not seconds: a
+/// test that asserts a time fails on a busy machine. The bounds are about twice what each took when they were written.)
 #[cfg(test)]
 mod hostile_tests {
     use std::time::Instant;
@@ -1517,13 +1536,14 @@ mod hostile_tests {
 
     use crate::engine::Session;
 
-    /// Runs `id` and says how long it took, seconds.
-    fn timed(s: &mut Session, id: &str, p: &Value) -> (Result<Value, String>, f64) {
-        let t = Instant::now();
+    /// Runs `id` and says how many steps the sketches it solved took ([`super::SPENT`]). Not how long: that varies with the
+    /// load of the machine, steps do not (the seconds go to stderr, for whoever reads them).
+    fn timed(s: &mut Session, id: &str, p: &Value) -> (Result<Value, String>, usize) {
+        let (t, before) = (Instant::now(), super::SPENT.with(std::cell::Cell::get));
         let r = s.execute(id, p);
-        let took = t.elapsed().as_secs_f64();
-        eprintln!("{id}: {took:.3} s");
-        (r, took)
+        let steps = super::SPENT.with(std::cell::Cell::get) - before;
+        eprintln!("{id}: {steps} steps, {:.3} s", t.elapsed().as_secs_f64());
+        (r, steps)
     }
 
     /// `n` concentric circles from radius `r0`, `step` mm apart, as sketch lines.
@@ -1534,9 +1554,9 @@ mod hostile_tests {
     #[test]
     fn ten_thousand_parallel_lines_are_named_open_at_once() {
         let lines: Vec<Value> = (0..10_000).map(|i| json!([[0, i * 5], [1000, i * 5]])).collect();
-        let (r, took) = timed(&mut Session::new(), "sketch", &json!({"lines": lines}));
+        let (r, steps) = timed(&mut Session::new(), "sketch", &json!({"lines": lines}));
         assert!(r.unwrap_err().contains("open"));
-        assert!(took < 1.0, "{took} s");
+        assert!(steps <= 700_000, "{steps} steps");
     }
 
     #[test]
@@ -1551,23 +1571,23 @@ mod hostile_tests {
             json!({"points": pts, "closed": true})
         };
         let lines: Vec<Value> = (0..5).map(|k| ring(1.0e6 + 2.0e4 * k as f64)).collect();
-        let (r, took) = timed(&mut Session::new(), "sketch", &json!({"lines": lines}));
+        let (r, steps) = timed(&mut Session::new(), "sketch", &json!({"lines": lines}));
         assert!(r.is_ok(), "{r:?}");
-        assert!(took < 1.0, "{took} s");
+        assert!(steps <= 1_500_000, "{steps} steps");
     }
 
     #[test]
     fn concentric_circles_at_the_cap_solve_at_once_and_past_it_are_refused_at_once() {
         let mut s = Session::new();
-        let (r, took) = timed(&mut s, "sketch", &json!({"lines": circles(10, 1.0e6, 1000.0)}));
+        let (r, steps) = timed(&mut s, "sketch", &json!({"lines": circles(10, 1.0e6, 1000.0)}));
         assert_eq!(r.map(|v| v["regions"].as_array().map(Vec::len)), Ok(Some(5)));
-        assert!(took < 1.0, "{took} s");
-        let (r, took) = timed(&mut s, "sketch", &json!({"lines": circles(40, 1.0e6, 1000.0)}));
+        assert!(steps <= 2_000_000, "{steps} steps");
+        let (r, steps) = timed(&mut s, "sketch", &json!({"lines": circles(40, 1.0e6, 1000.0)}));
         assert!(r.is_ok() || r.as_ref().is_err_and(|e| e.contains("pieces")), "{r:?}");
-        assert!(took < 1.0, "{took} s");
-        let (r, took) = timed(&mut s, "sketch", &json!({"lines": circles(100, 1.0e6, 1000.0)}));
+        assert!(steps <= 14_000_000, "{steps} steps");
+        let (r, steps) = timed(&mut s, "sketch", &json!({"lines": circles(100, 1.0e6, 1000.0)}));
         assert!(r.unwrap_err().contains("pieces"));
-        assert!(took < 1.0, "{took} s");
+        assert!(steps <= 1_000, "{steps} steps");
     }
 
     /// `n` rectangles inside one another, 20 mm apart, each a closed polyline of 640 points, as sketch lines.
@@ -1593,22 +1613,22 @@ mod hostile_tests {
     #[test]
     fn rectangles_of_six_hundred_points_inside_one_another_are_refused_not_waited_for() {
         // 180,000 pieces, each loop inside every one outside it: 25 million points to ask about.
-        let (r, took) = timed(&mut Session::new(), "sketch", &json!({"lines": nested_rectangles(280)}));
+        let (r, steps) = timed(&mut Session::new(), "sketch", &json!({"lines": nested_rectangles(280)}));
         let e = r.unwrap_err();
         assert!(e.contains("nested too deeply"), "{e}");
-        assert!(took < 1.0, "{took} s");
+        assert!(steps <= 36_000_000, "{steps} steps");
         // Half as many are a quarter of that: solved, every other one a hole.
-        let (r, took) = timed(&mut Session::new(), "sketch", &json!({"lines": nested_rectangles(140)}));
+        let (r, steps) = timed(&mut Session::new(), "sketch", &json!({"lines": nested_rectangles(140)}));
         assert_eq!(r.map(|v| v["regions"].as_array().map(Vec::len)), Ok(Some(70)));
-        assert!(took < 1.0, "{took} s");
+        assert!(steps <= 16_000_000, "{steps} steps");
     }
 
     #[test]
     fn a_hundred_wide_arcs_are_solved_or_refused_at_once() {
         let arcs: Vec<Value> = (0..100).map(|k| json!([[0, k], [2.0e6, k], [1.0e6, 1.0e6 + k as f64]])).collect();
-        let (r, took) = timed(&mut Session::new(), "sketch", &json!({"lines": arcs}));
+        let (r, steps) = timed(&mut Session::new(), "sketch", &json!({"lines": arcs}));
         assert!(r.is_err());
-        assert!(took < 1.0, "{took} s");
+        assert!(steps <= 1_000, "{steps} steps");
     }
 
     #[test]
@@ -1619,34 +1639,34 @@ mod hostile_tests {
                 json!([(1.0e6 * a.cos()).round(), (1.0e6 * a.sin()).round()])
             })
             .collect();
-        let (r, took) = timed(&mut Session::new(), "floor", &json!({"boundary": pts}));
+        let (r, steps) = timed(&mut Session::new(), "floor", &json!({"boundary": pts}));
         assert!(r.is_ok(), "{r:?}");
-        assert!(took < 1.0, "{took} s");
+        assert!(steps <= 200_000, "{steps} steps");
     }
 
     #[test]
     fn ten_thousand_parallel_diagonals_are_refused_not_waited_for() {
         // Every box holds every other: fifty million pairs to look at, none of them crossing.
         let lines: Vec<Value> = (0..10_000).map(|i| json!([[0, i * 100], [1.0e6, 1.0e6 + i as f64 * 100.0]])).collect();
-        let (r, took) = timed(&mut Session::new(), "sketch", &json!({"lines": lines}));
+        let (r, steps) = timed(&mut Session::new(), "sketch", &json!({"lines": lines}));
         let e = r.unwrap_err();
         assert!(e.contains("too close together"), "{e}");
-        assert!(took < 1.0, "{took} s");
+        assert!(steps <= 12_000_000, "{steps} steps");
     }
 
     #[test]
     fn a_sketch_kept_with_too_many_pieces_is_refused_by_the_model_as_the_command_refuses_it() {
         let mut s = Session::new();
         let f = s.execute("floor", &json!({"boundary": [[0, 0], [4000, 0], [4000, 4000], [0, 4000]]})).unwrap()["id"].clone();
-        let (r, took) = timed(&mut s, "modify", &json!({"id": f, "sketch": circles(100, 1.0e6, 1000.0)}));
+        let (r, steps) = timed(&mut s, "modify", &json!({"id": f, "sketch": circles(100, 1.0e6, 1000.0)}));
         assert!(r.unwrap_err().contains("straight pieces"));
-        assert!(took < 1.0, "{took} s");
+        assert!(steps <= 1_000, "{steps} steps");
     }
 
     #[test]
     fn twenty_circles_in_a_filled_region_solve_at_once() {
-        let (r, took) = timed(&mut Session::new(), "filled_region", &json!({"sketch": circles(20, 1.0e6, 1000.0)}));
+        let (r, steps) = timed(&mut Session::new(), "filled_region", &json!({"sketch": circles(20, 1.0e6, 1000.0)}));
         assert!(r.is_ok(), "{r:?}");
-        assert!(took < 1.0, "{took} s");
+        assert!(steps <= 10_000_000, "{steps} steps");
     }
 }

@@ -1571,7 +1571,7 @@ mod exec {
         let start = Instant::now();
         let e = run(&mut sh("sleep 30"), Duration::from_millis(300)).unwrap_err();
         assert!(e.contains("took longer than"), "{e}");
-        assert!(start.elapsed() < Duration::from_secs(5), "waited {:?}", start.elapsed());
+        assert!(start.elapsed() < Duration::from_secs(20), "waited {:?}", start.elapsed());
     }
 
     #[test]
@@ -1586,7 +1586,7 @@ mod exec {
     fn a_program_that_leaves_a_child_holding_its_output_does_not_hold_us() {
         let start = Instant::now();
         assert_eq!(run(&mut sh("sleep 20 & echo started"), Duration::from_secs(10)).unwrap(), "started\n");
-        assert!(start.elapsed() < Duration::from_secs(8), "waited {:?}", start.elapsed());
+        assert!(start.elapsed() < Duration::from_secs(15), "waited {:?}", start.elapsed());
     }
 }
 

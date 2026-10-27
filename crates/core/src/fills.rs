@@ -133,10 +133,6 @@ impl FillPattern {
 /// How short a dot draws, in the pattern's lengths.
 const DOT: f64 = 0.15;
 
-/// The pattern's strokes over the area inside `rings` (outlines and holes, either way round: inside is inside an odd number
-/// of them), each as a straight piece in model mm, `k` model mm to each of the pattern's (the view's scale for a drafting
-/// pattern, 1 for a model one); within `window` (its lowest and its highest corner), and no more than `max` of them. None
-/// when it would take more, too dense to draw.
 /// As [`strokes`], the pattern started at `origin` and turned `angle` degrees counter-clockwise.
 pub fn strokes_placed(
     p: &FillPattern,
@@ -166,6 +162,10 @@ pub fn strokes_placed(
     Some(strokes(p, &rings, k, w, max)?.into_iter().map(|[a, b]| [back(a), back(b)]).collect())
 }
 
+/// The pattern's strokes over the area inside `rings` (outlines and holes, either way round: inside is inside an odd number
+/// of them), each as a straight piece in model mm, `k` model mm to each of the pattern's (the view's scale for a drafting
+/// pattern, 1 for a model one); within `window` (its lowest and its highest corner), and no more than `max` of them. None
+/// when it would take more, too dense to draw.
 pub fn strokes(p: &FillPattern, rings: &[Vec<P2>], k: f64, window: (P2, P2), max: usize) -> Option<Vec<[P2; 2]>> {
     let mut out = Vec::new();
     let pts = rings.iter().flatten();
@@ -228,6 +228,8 @@ pub fn strokes(p: &FillPattern, rings: &[Vec<P2>], k: f64, window: (P2, P2), max
                             s += len;
                         }
                         r += 1.0;
+                        #[cfg(test)]
+                        done(dashes.len());
                         work = work.saturating_add(dashes.len());
                         if out.len() > max || work > MAX_WORK {
                             return None;
@@ -246,6 +248,18 @@ pub fn strokes(p: &FillPattern, rings: &[Vec<P2>], k: f64, window: (P2, P2), max
 
 /// The most work (an edge tried against a line, a dash stepped over) one pattern may ask of a drawing, however dense it is.
 pub const MAX_WORK: usize = 5_000_000;
+
+#[cfg(test)]
+thread_local! {
+    /// What [`strokes`] has done on this thread: the edges tried against a line, the dashes stepped over. The tests assert on it,
+    /// not on time, which varies with the load of the machine.
+    static DONE: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+#[cfg(test)]
+fn done(n: usize) {
+    DONE.with(|d| d.set(d.get().saturating_add(n)));
+}
 
 /// The stretch of the line through `base` along unit `u` that lies in the box from `lo` to `hi`, as distances from `base`.
 fn reach(base: P2, u: P2, lo: P2, hi: P2) -> Option<(f64, f64)> {
@@ -266,6 +280,8 @@ fn reach(base: P2, u: P2, lo: P2, hi: P2) -> Option<(f64, f64)> {
 /// Where the line through `base` along unit `u` (`n` square to it) is inside `rings`, as runs along it from `base`: it
 /// crosses a ring's edge where the edge's ends lie on either side, and between each two crossings it's in or out by turns.
 fn spans(rings: &[Vec<P2>], base: P2, u: P2, n: P2) -> Vec<(f64, f64)> {
+    #[cfg(test)]
+    done(rings.iter().map(Vec::len).sum());
     let mut ts: Vec<f64> = Vec::new();
     for (a, b) in rings.iter().flat_map(|r| geom::ring_edges(r)) {
         let (sa, sb) = ((a - base).dot(n), (b - base).dot(n));
@@ -826,9 +842,10 @@ mod tests {
         assert!(s.execute("modify", &json!({"id": id, "pattern_angle": f64::MAX})).is_err());
     }
 
-    fn timed<T>(f: impl FnOnce() -> T) -> (T, std::time::Duration) {
-        let at = std::time::Instant::now();
-        (f(), at.elapsed())
+    /// What `f` did, in [`super::done`]'s steps.
+    fn counted<T>(f: impl FnOnce() -> T) -> (T, usize) {
+        let before = super::DONE.with(std::cell::Cell::get);
+        (f(), super::DONE.with(std::cell::Cell::get) - before)
     }
 
     #[test]
@@ -891,9 +908,10 @@ mod tests {
                 P2(1e5 * a.cos(), 1e5 * a.sin())
             })
             .collect();
-        let (r, took) = timed(|| strokes(&p, &[ring], 1.0, (P2(-1e5, -1e5), P2(1e5, 1e5)), 50_000));
+        let (r, steps) = counted(|| strokes(&p, &[ring], 1.0, (P2(-1e5, -1e5), P2(1e5, 1e5)), 50_000));
         assert_eq!(r, None);
-        assert!(took < std::time::Duration::from_millis(500), "{took:?}");
+        // Refused from the count of lines times the count of edges, before any line was tried against one.
+        assert_eq!(steps, 0, "{steps} steps");
     }
 
     #[test]
@@ -901,9 +919,9 @@ mod tests {
         let p =
             FillPattern { target: Target::Model, lines: vec![HatchLine { dashes: vec![0.0, -0.05], ..HatchLine::simple(0.0, 10_000.0) }] };
         assert_eq!(p.check("dots"), Ok(()));
-        let (r, took) = timed(|| strokes(&p, &[square(0.0, 0.0, 100_000.0)], 1.0, (P2(-1.0, -1.0), P2(101_000.0, 101_000.0)), 50_000));
+        let (r, steps) = counted(|| strokes(&p, &[square(0.0, 0.0, 100_000.0)], 1.0, (P2(-1.0, -1.0), P2(101_000.0, 101_000.0)), 50_000));
         assert_eq!(r, None);
-        assert!(took < std::time::Duration::from_millis(900), "{took:?}");
+        assert!(steps <= super::MAX_WORK, "{steps} steps");
     }
 
     #[test]

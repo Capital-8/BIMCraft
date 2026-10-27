@@ -510,6 +510,13 @@ pub struct Sketch<'a> {
     pub editing: Option<Id>,
 }
 
+#[cfg(test)]
+thread_local! {
+    /// The outlines [`in_sketch`] has built on this thread: the tests assert on it, not on time, which varies with the load of
+    /// the machine.
+    static BUILT: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 /// Snap a boundary to visible model edges, view-specific detail, and the sketch's own lines, with the same snap switches
 /// and guides as placement. All front ends use the same candidates for preview and the point they commit.
 pub fn in_sketch(m: &Model, sk: Sketch<'_>, p: P2, reach: Reach, from: &[P2], square: bool, o: &Snaps) -> Found {
@@ -540,6 +547,8 @@ pub fn in_sketch(m: &Model, sk: Sketch<'_>, p: P2, reach: Reach, from: &[P2], sq
         // One index for all of them, so each wall's joins are found among the walls its height meets.
         let index = near.iter().any(|(_, id)| matches!(m.elements.get(*id), Some(Element::Wall(_)))).then(|| crate::walls::Index::new(m));
         for (_, id) in near {
+            #[cfg(test)]
+            BUILT.with(|n| n.set(n.get() + 1));
             match m.elements.get(id) {
                 Some(Element::Wall(_)) => scene.polyline(&crate::walls::outline_in(m, id, index.as_ref()), true),
                 Some(Element::Floor(Floor { boundary, openings, .. }) | Element::Ceiling(Ceiling { boundary, openings, .. })) => {
@@ -1165,23 +1174,13 @@ mod tests {
         // By the service core's corner, where walls of every storey meet.
         let p = P2(18030.0, 12020.0);
         let sk = |_: ()| Sketch { view: level, lines: &[], editing: None };
-        let best = |f: &dyn Fn() -> Found| {
-            (0..5)
-                .map(|_| {
-                    let at = std::time::Instant::now();
-                    let found = f();
-                    (at.elapsed(), found)
-                })
-                .min_by_key(|(took, _)| *took)
-                .unwrap()
-        };
-        let (took, f) = best(&|| in_sketch(&m, sk(()), p, REACH, &[], false, &Snaps::default()));
-        let (plain, _) = best(&|| snap(&m, level, p, REACH, &[], false, &Snaps::default()));
-        eprintln!(
-            "{} walls: in_sketch {took:?}, snap {plain:?} -> {f:?}",
-            m.elements.values().filter(|e| matches!(e, Element::Wall(_))).count()
-        );
+        let before = BUILT.with(std::cell::Cell::get);
+        let f = in_sketch(&m, sk(()), p, REACH, &[], false, &Snaps::default());
+        let built = BUILT.with(std::cell::Cell::get) - before;
+        let walls = m.elements.values().filter(|e| matches!(e, Element::Wall(_))).count();
+        eprintln!("{walls} walls: in_sketch built {built} outlines -> {f:?}");
         assert!(f.kind == Kind::Endpoint && f.at.dist(P2(18000.0, 12000.0)) < 400.0, "a corner of the core's walls: {f:?}");
-        assert!(took < plain * 8 + std::time::Duration::from_millis(2), "{took:?} against {plain:?} for a plain snap");
+        // The outlines of the walls near the cursor, not of the hundreds there are.
+        assert!(built <= MAX_OUTLINES && built * 10 < walls, "{built} outlines built of {walls} walls");
     }
 }

@@ -267,10 +267,23 @@ fn a_picture_at_twice_the_pixels_gives_ink_in_the_pixels_of_the_view() {
     }
 }
 
-/// The time `f` takes.
+/// The time `f` takes (to look at: no test asserts a time, which varies with the load of the machine).
 fn timed<T>(f: impl FnOnce() -> T) -> (T, Duration) {
     let at = Instant::now();
     (f(), at.elapsed())
+}
+
+/// What `f` costs in steps: the points of rings it cut lines by ([`super::spend`]) and the polygons it cut ([`walls::SPLITS`]).
+fn counted<T>(f: impl FnOnce() -> T) -> (T, usize) {
+    let now = || super::SPENT.with(std::cell::Cell::get) + crate::walls::SPLITS.with(std::cell::Cell::get);
+    let before = now();
+    (f(), now() - before)
+}
+
+/// The pictures of sections `f` draws.
+fn pictured<T>(f: impl FnOnce() -> T) -> (T, usize) {
+    let before = super::PICTURES.with(std::cell::Cell::get);
+    (f(), super::PICTURES.with(std::cell::Cell::get) - before)
 }
 
 /// A tower of `storeys` storeys, 42 walls each, and an elevation of it (or a section across its middle) with a non-masking region
@@ -302,11 +315,10 @@ fn a_section_with_the_picture_in_hand_draws_its_region_ink_without_drawing_the_p
     let (s, id) = tower(5, true, true);
     let view = render::section_fit(&s.model, id, 800, 600);
     let picture = render::section_image(&s.model, &crate::view3d::Scene::new(&s.model), id, view, &[]).unwrap();
-    let (with, fast) = timed(|| render::section_over(&s.model, id, view, &picture));
-    let (alone, slow) = timed(|| render::section(&s.model, id, view));
+    let (with, drawn) = pictured(|| render::section_over(&s.model, id, view, &picture));
+    let (alone, drawn_alone) = pictured(|| render::section(&s.model, id, view));
     assert_eq!(with.prims.len(), alone.prims.len(), "the same ink either way");
-    eprintln!("section over a picture {fast:?}, drawing the picture itself {slow:?}");
-    assert!(fast < slow, "{fast:?} against {slow:?}");
+    assert_eq!((drawn, drawn_alone), (0, 1), "the picture in hand is not drawn again; without it, it is drawn once");
 }
 
 #[test]
@@ -341,9 +353,9 @@ fn masked(n: usize) -> Session {
 fn overlapping_concave_masks_cost_a_draw_milliseconds_not_seconds() {
     let s = masked(400);
     let view = View { scale: 0.1, cx: 0.0, cy: 0.0, width: 700, height: 700 };
-    let (d, took) = timed(|| render::draw(&s.model, 100000, view));
-    eprintln!("400 corners: {took:?}, {} prims", d.prims.len());
-    assert!(took < Duration::from_secs(1), "{took:?}");
+    let (d, steps) = counted(|| render::draw(&s.model, 100000, view));
+    eprintln!("400 corners: {steps} steps, {} prims", d.prims.len());
+    assert!(steps <= 8_000, "{steps} steps");
 }
 
 #[test]
@@ -370,19 +382,19 @@ fn holed(n: usize, of: &str) -> Session {
 fn a_hatched_region_with_a_big_hole_is_not_cut_into_convex_pieces() {
     let s = holed(400, "Diagonal Up");
     let view = View { scale: 0.1, cx: 0.0, cy: 0.0, width: 700, height: 700 };
-    let (d, took) = timed(|| render::draw(&s.model, 100000, view));
-    eprintln!("hatch, 400 corners: {took:?}, {} prims", d.prims.len());
+    let (d, steps) = counted(|| render::draw(&s.model, 100000, view));
+    eprintln!("hatch, 400 corners: {steps} steps, {} prims", d.prims.len());
     assert!(d.prims.len() > 100, "its hatch is drawn");
-    assert!(took < Duration::from_secs(1), "{took:?}");
+    assert_eq!(steps, 0, "a hatch runs through the rings as they are, and cuts no polygon: {steps} steps");
 }
 
 #[test]
 fn a_solid_region_with_a_big_hole_is_cut_into_pieces_quickly() {
     let s = holed(400, "Solid Black");
     let view = View { scale: 0.1, cx: 0.0, cy: 0.0, width: 700, height: 700 };
-    let (_, took) = timed(|| render::draw(&s.model, 100000, view));
-    eprintln!("solid, 400 corners: {took:?}");
-    assert!(took < Duration::from_secs(1), "{took:?}");
+    let (_, steps) = counted(|| render::draw(&s.model, 100000, view));
+    eprintln!("solid, 400 corners: {steps} steps");
+    assert!(steps <= 150_000, "{steps} steps");
 }
 
 #[test]

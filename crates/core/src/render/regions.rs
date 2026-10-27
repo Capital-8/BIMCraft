@@ -44,6 +44,20 @@ pub(super) fn wanted(m: &Model, view: Id) -> bool {
     })
 }
 
+#[cfg(test)]
+thread_local! {
+    /// What drawing regions has cost on this thread, in steps: the points of rings a line was cut by, of polygons a fill was.
+    /// The tests assert on it, not on time, which varies with the load of the machine.
+    static SPENT: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    /// The pictures of sections drawn on this thread.
+    static PICTURES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+#[cfg(test)]
+fn spend(n: usize) {
+    SPENT.with(|s| s.set(s.get().saturating_add(n)));
+}
+
 struct Ink {
     prim: Prim,
     owner: Option<Id>,
@@ -168,6 +182,8 @@ fn visible(d: &Drawing, m: &Model, picture: Option<Vec<Prim>>) -> Vec<Ink> {
     let picture = match (picture, d.regions.section) {
         (Some(runs), _) => runs,
         (None, Some(section)) => {
+            #[cfg(test)]
+            PICTURES.with(|n| n.set(n.get() + 1));
             section_image(m, &Scene::new(m), section, d.view, &[]).map(|image| runs(&image, d.view)).unwrap_or_default()
         }
         (None, None) => Vec::new(),
@@ -272,6 +288,8 @@ fn outside(prim: &Prim, view: View, rings: &[Vec<P2>]) -> Vec<Prim> {
     struct Outside<'a>(&'a [Vec<P2>]);
     impl Keep for Outside<'_> {
         fn spans(&self, a: P2, u: P2, len: f64) -> Vec<(f64, f64)> {
+            #[cfg(test)]
+            spend(self.0.iter().map(Vec::len).sum());
             let over = self.0.iter().flat_map(|r| view3d::crossings(r, a, u)).map(|(lo, hi)| (lo.max(0.0), hi.min(len)));
             gaps(joined(over.filter(|(lo, hi)| hi - lo > EPS).collect()), len)
         }
@@ -289,7 +307,15 @@ fn outside(prim: &Prim, view: View, rings: &[Vec<P2>]) -> Vec<Prim> {
         Prim::Line { .. } => cut(prim, view, &Outside(rings)),
         Prim::Fill { rings: source, color } => {
             let source: Vec<Vec<P2>> = source.iter().map(|r| r.iter().map(|p| view.mm(*p)).collect()).collect();
-            fill(rings.iter().fold(source, |pieces, r| walls::minus(&pieces, r)), view, *color)
+            fill(
+                rings.iter().fold(source, |pieces, r| {
+                    #[cfg(test)]
+                    spend(pieces.iter().map(Vec::len).sum::<usize>() + r.len());
+                    walls::minus(&pieces, r)
+                }),
+                view,
+                *color,
+            )
         }
         Prim::Image { .. } => Vec::new(),
     }
@@ -461,13 +487,21 @@ impl<'a> Area<'a> {
                 let mut parts: Vec<Vec<P2>> = Vec::new();
                 for r in source.iter().flat_map(|r| walls::convex_pieces(r)) {
                     let Some(rb) = bounds(&r) else { continue };
-                    parts.extend(clips.iter().filter(|(_, cb)| overlap(rb, *cb)).filter_map(|(c, _)| walls::split(r.clone(), c).0));
+                    parts.extend(clips.iter().filter(|(_, cb)| overlap(rb, *cb)).filter_map(|(c, _)| {
+                        #[cfg(test)]
+                        spend(r.len() + c.len());
+                        walls::split(r.clone(), c).0
+                    }));
                 }
                 for mask in self.masks {
                     parts = parts
                         .into_iter()
                         .flat_map(|p| match bounds(&p) {
-                            Some(b) if overlap(b, (mask.lo, mask.hi)) => walls::split(p, &mask.ring).1,
+                            Some(b) if overlap(b, (mask.lo, mask.hi)) => {
+                                #[cfg(test)]
+                                spend(p.len() + mask.ring.len());
+                                walls::split(p, &mask.ring).1
+                            }
                             _ => vec![p],
                         })
                         .collect();
@@ -482,6 +516,8 @@ impl<'a> Area<'a> {
     fn pieces(&self) -> &[(Vec<P2>, Extent)] {
         self.pieces.get_or_init(|| {
             let (outline, holes) = self.rings.split_first().map_or((&[][..], &[][..]), |(o, h)| (o.as_slice(), h));
+            #[cfg(test)]
+            spend(self.rings.iter().map(Vec::len).sum());
             let cut = holes.iter().fold(walls::convex_pieces(outline), |ps, hole| walls::minus(&ps, hole));
             cut.into_iter().filter_map(|p| Some((bounds(&p)?, p))).map(|(b, p)| (p, b)).collect()
         })
@@ -504,6 +540,8 @@ impl Keep for Within<'_> {
             return Vec::new();
         }
         let near: Vec<&Vec<P2>> = area.rings.iter().zip(&area.boxes).filter(|(_, bx)| overlap(reach, **bx)).map(|(r, _)| r).collect();
+        #[cfg(test)]
+        spend(near.iter().map(|r| r.len()).sum());
         // Inside an odd number of rings: between the crossings of their edges, paired off; a vertex on the line counts as
         // just under it.
         let n = u.perp();
@@ -529,7 +567,11 @@ impl Keep for Within<'_> {
             .masks
             .iter()
             .filter(|mk| overlap(seg, (mk.lo, mk.hi)))
-            .flat_map(|mk| view3d::crossings(&mk.ring, a, u))
+            .flat_map(|mk| {
+                #[cfg(test)]
+                spend(mk.ring.len());
+                view3d::crossings(&mk.ring, a, u)
+            })
             .map(|(x, y)| (x.max(0.0), y.min(len)))
             .filter(|(x, y)| y - x > EPS)
             .collect();

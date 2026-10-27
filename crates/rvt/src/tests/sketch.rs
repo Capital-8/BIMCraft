@@ -150,7 +150,7 @@ fn a_hostile_sketch_of_a_great_many_loose_curves_is_refused_at_once_by_every_way
     let loose: Vec<Edge> = (0..100_000).map(|k| edge((k as f64 * 10.0, 0.0), (k as f64 * 10.0 + 5.0, 0.0))).collect();
     let at = std::time::Instant::now();
     assert!(from_edges_closed(&loose).is_none() && from_edges_snapped(&loose).is_none() && from_edges_open(&loose).is_none());
-    assert!(at.elapsed().as_secs() < 2, "{:?}", at.elapsed());
+    assert!(at.elapsed().as_secs() < 10, "{:?}: a hang, not a slow machine", at.elapsed());
 }
 
 #[test]

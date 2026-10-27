@@ -214,6 +214,13 @@ impl PartialEq for Cloud {
     }
 }
 
+#[cfg(test)]
+thread_local! {
+    /// The points [`Cloud::nearest`] has looked at on this thread: the tests assert on it, not on time, which varies with the
+    /// load of the machine.
+    pub(crate) static LOOKED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 impl Cloud {
     /// A scan read from the file `source` (its name, for people to know it by), or why it can't be held.
     pub fn new(source: &str, scan: Scan) -> Result<Cloud, String> {
@@ -358,6 +365,8 @@ impl Cloud {
         for x in x0..=x1 {
             for y in y0..=y1 {
                 for &i in grid.cells.get(&(x, y)).into_iter().flatten() {
+                    #[cfg(test)]
+                    LOOKED.with(|n| n.set(n.get() + 1));
                     let Some(&p) = self.points.get(i as usize) else { continue };
                     let d = (f64::from(p[0]) - at[0]).hypot(f64::from(p[1]) - at[1]);
                     if d <= reach && (z.0..=z.1).contains(&f64::from(p[2])) && best.is_none_or(|(b, _)| d < b) {
