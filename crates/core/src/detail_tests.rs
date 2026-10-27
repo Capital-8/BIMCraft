@@ -163,6 +163,47 @@ fn linework_remove_takes_nothing_off_when_the_edge_nearest_the_pick_has_none() {
 }
 
 #[test]
+fn linework_is_found_again_from_any_other_pick_on_its_edge_whatever_the_ends_of_the_wall() {
+    let mut s = Session::new();
+    run(&mut s, "type", json!({"category": "wall", "name": "Partition", "thickness": 100}));
+    let mut seed = 17u64;
+    let mut next = |lo: f64, hi: f64| {
+        seed = crate::model::mix(seed);
+        lo + (seed % 1_000_000) as f64 / 1_000_000.0 * (hi - lo)
+    };
+    let micron = |v: f64| (v * 1000.0).round() / 1000.0;
+    let held = |s: &Session| crate::graphics::graphics_of(&s.model, 100000).map_or(0, |g| g.linework.len());
+    // 80 walls of a few metres at any angle, each in a cell of its own, and 3 of 0.3, 3 and 30 km, with ends to the micron far
+    // from the origin: the ends a pick finds are rounded to a pixel's f32 round that pick, so they differ a little from
+    // another pick's, and the more the further they lie.
+    let mut walls: Vec<(P2, P2)> = Vec::new();
+    for i in 0..83 {
+        let (len, angle) = (if i < 80 { next(2000.0, 8000.0) } else { 3.0e5 * 10f64.powi(i - 80) }, next(0.0, 360.0f64).to_radians());
+        let (col, row) = (f64::from(i % 10), f64::from(i / 10));
+        let a = P2(micron(5000.0 + col * 20000.0 + next(0.0, 900.0)), micron(300000.0 + row * 20000.0 + next(0.0, 900.0)));
+        walls.push((a, P2(micron(a.0 + len * angle.cos()), micron(a.1 + len * angle.sin()))));
+    }
+    for (i, (a, b)) in walls.iter().enumerate() {
+        let w =
+            run(&mut s, "wall", json!({"points": [[a.0, a.1], [b.0, b.1]], "type": "Partition"}))["ids"][0].as_u64().unwrap_or_default();
+        // A point of the wall's north-west face, 50 mm off its centre line, `t` of the way along.
+        let n = (*b - *a).unit().perp();
+        let at = |t: f64| {
+            let p = *a + (*b - *a) * t + n * 50.0;
+            json!([micron(p.0), micron(p.1)])
+        };
+        let before = held(&s);
+        run(&mut s, "linework", json!({"view": 100000, "id": w, "at": at(0.3), "style": "Wide Lines"}));
+        assert_eq!(held(&s), before + 1, "wall {i}");
+        // Styled again from a third pick: the edge takes the newer style, it is not listed twice.
+        run(&mut s, "linework", json!({"view": 100000, "id": w, "at": at(0.8), "invisible": true}));
+        assert_eq!(held(&s), before + 1, "wall {i} {a:?} {b:?}: styled twice");
+        let r = run(&mut s, "linework", json!({"view": 100000, "id": w, "at": at(0.6), "remove": true}));
+        assert_eq!((r["removed"].clone(), held(&s)), (json!(1), before), "wall {i} {a:?} {b:?}: {r}");
+    }
+}
+
+#[test]
 fn an_unknown_field_in_a_group_members_element_is_left_out_as_it_is_in_any_elements() {
     let mut s = Session::new();
     run(&mut s, "wall", json!({"points": [[0, 0], [4000, 0]]}));
