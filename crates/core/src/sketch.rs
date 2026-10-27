@@ -628,21 +628,38 @@ impl Model {
                         continue;
                     }
                     let said = say(&problems, &|i| format!("edge {i}"));
-                    // A command that made it has nothing to redraw (the engine takes it back): it is told to give a simple one.
+                    // What to do about it depends on where it came from. One that is there is redrawn with `edit_boundary`, which edits
+                    // everything but a roof's openings (a dormer's or given). A command that made it has nothing to redraw (the
+                    // engine takes it back): it is told to give a simple one, or the mass it comes from to be redrawn.
+                    let category = e.category();
                     return Err(match before.elements.get(id) {
-                        Some(_) => {
-                            format!("{} {id}: its {name} isn't a simple outline: {said}; redraw it with `edit_boundary`", e.category())
-                        }
-                        None => format!(
-                            "{}: its {name} isn't a simple outline: {said}; give a simple `boundary` or `sketch` \
-                             (walls, or boxes of walls, that touch at a corner enclose no simple outline of their own)",
-                            e.category()
+                        Some(_) if matches!(e, Element::Roof(_)) && name.starts_with("opening") => format!(
+                            "{category} {id}: its {name} isn't a simple outline: {said}; give `modify` a simple `openings`, or change the \
+                             dormer's width, height or position"
                         ),
+                        Some(_) => format!("{category} {id}: its {name} isn't a simple outline: {said}; redraw it with `edit_boundary`"),
+                        None => format!("{category}: its {name} isn't a simple outline: {said}; {}", instead(self, e, params)),
                     });
                 }
             }
         }
         Ok(())
+    }
+}
+
+/// What to say to whoever made `e`, in `m`, with a ring that is not simple, by where its outline came from: the mass it was
+/// made from, the `boundary` or `sketch` the command was given in `params`, or (if it was given none) the walls it was found in.
+fn instead(m: &Model, e: &Element, params: &serde_json::Value) -> String {
+    let mass = e.params().and_then(|p| crate::massing::refs(p).first().copied()).and_then(|g| m.elements.id(g));
+    if let Some(mass) = mass {
+        return format!("it is the outline of mass {mass}, which crosses itself: redraw the mass");
+    }
+    let given = ["boundary", "sketch", "openings", "courtyards"].iter().any(|k| params.get(k).is_some_and(|v| !v.is_null()));
+    let say = "give a simple `boundary` or `sketch`";
+    if given {
+        say.into()
+    } else {
+        format!("{say} (walls, or boxes of walls, that touch at a corner enclose no simple outline of their own)")
     }
 }
 
@@ -1545,6 +1562,57 @@ mod command_tests {
         let f = run(&mut s, "floor", json!({"boundary": [[0, 0], [4000, 0], [4000, 4000], [0, 4000]]}))["id"].clone();
         let e = s.execute("modify", &json!({"id": f, "boundary": BOW})).unwrap_err();
         assert!(e.contains(&format!("floor {f}")) && e.contains("edit_boundary"), "{e}");
+    }
+
+    #[test]
+    fn a_dormer_that_makes_a_hole_cross_itself_is_told_what_to_change_not_to_edit_the_boundary() {
+        let mut s = Session::new();
+        let roof = run(&mut s, "roof", json!({"boundary": [[0, 0], [12000, 0], [12000, 8000], [0, 8000]], "slope": 60, "offset": 1000}));
+        // A low dormer on a steep roof: the hole its cheeks cut crosses itself.
+        let before = s.model.clone();
+        let e =
+            s.execute("dormer", &json!({"host": roof["id"], "at": [6000, 1500], "width": 1600, "height": 100, "slope": 30})).unwrap_err();
+        assert!(e.contains("opening 0 isn't a simple outline") && e.contains("dormer's width, height or position"), "{e}");
+        // `edit_boundary` redraws a roof's footprint and courtyards, not its openings.
+        assert!(!e.contains("edit_boundary"), "{e}");
+        assert_eq!(s.model, before);
+        // An opening given to `modify` is told to give a simple one; a courtyard still goes to `edit_boundary`.
+        let e = s.execute("modify", &json!({"id": roof["id"], "openings": [BOW_HOLE]})).unwrap_err();
+        assert!(e.contains("opening 0") && e.contains("`modify`") && !e.contains("edit_boundary"), "{e}");
+        let e = s.execute("modify", &json!({"id": roof["id"], "courtyards": [BOW_HOLE]})).unwrap_err();
+        assert!(e.contains("courtyard 0") && e.contains("edit_boundary"), "{e}");
+    }
+
+    #[test]
+    fn what_a_mass_with_a_bow_tie_outline_makes_is_refused_saying_the_mass_crosses_itself() {
+        let mut s = Session::new();
+        // A mass is let have the outline (as it always was), and what it makes is refused.
+        let mass = run(&mut s, "mass", json!({"boundary": BOW, "height": 3000}))["id"].clone();
+        for (cmd, p) in
+            [("mass_floors", json!({"mass": mass})), ("floor_by_face", json!({"mass": mass})), ("roof_by_face", json!({"mass": mass}))]
+        {
+            let before = s.model.clone();
+            let e = s.execute(cmd, &p).unwrap_err();
+            assert!(e.contains(&format!("mass {mass}")) && e.contains("crosses itself") && e.contains("redraw the mass"), "{cmd}: {e}");
+            // No `boundary` or `sketch` was given to `mass_floors`, `floor_by_face` or `roof_by_face`, and no walls to touch.
+            assert!(!e.contains("`boundary`") && !e.contains("walls"), "{cmd}: {e}");
+            assert_eq!(s.model, before);
+        }
+    }
+
+    #[test]
+    fn the_walls_that_touch_at_a_corner_are_named_only_for_an_outline_taken_from_walls() {
+        let mut s = Session::new();
+        for x in [0, 4000] {
+            run(&mut s, "wall", json!({"points": [[x, x], [x + 4000, x], [x + 4000, x + 4000], [x, x + 4000]], "closed": true}));
+        }
+        let aside = "that touch at a corner";
+        let e = s.execute("floor", &json!({})).unwrap_err();
+        assert!(e.contains(aside), "an outline from walls: {e}");
+        for (cmd, p) in [("floor", json!({"boundary": BOW})), ("ceiling", json!({"boundary": BOW})), ("shaft", json!({"boundary": BOW}))] {
+            let e = s.execute(cmd, &p).unwrap_err();
+            assert!(e.contains("give a simple `boundary` or `sketch`") && !e.contains(aside), "{cmd} {p}: {e}");
+        }
     }
 
     /// A bow tie inside a 4 m square, for a hole.
