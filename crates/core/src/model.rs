@@ -1727,16 +1727,16 @@ pub struct Model {
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub object_styles: BTreeMap<String, crate::styles::ObjectStyle>,
     /// Its line patterns, by name: dashes, dots and spaces, mm on paper.
-    #[serde(default = "lines::default_patterns", skip_serializing_if = "lines::is_default_patterns")]
+    #[serde(default = "lines::default_patterns")]
     pub line_patterns: BTreeMap<String, LinePattern>,
     /// Its line styles, by name: a pen, a colour and a pattern, what detail lines draw in.
-    #[serde(default = "lines::default_styles", skip_serializing_if = "lines::is_default_styles")]
+    #[serde(default = "lines::default_styles")]
     pub line_styles: BTreeMap<String, LineStyle>,
     /// Its fill patterns, by name: families of lines, drafting (mm on paper) or model (mm in the building); none, solid.
-    #[serde(default = "fills::default_patterns", skip_serializing_if = "fills::is_default_patterns")]
+    #[serde(default = "fills::default_patterns")]
     pub fill_patterns: BTreeMap<String, FillPattern>,
     /// Its filled region types, by name: a foreground and a background pattern and their colours, masking or not.
-    #[serde(default = "fills::default_region_types", skip_serializing_if = "fills::is_default_region_types")]
+    #[serde(default = "fills::default_region_types")]
     pub region_types: BTreeMap<String, FilledRegionType>,
     /// Its detail group types, by name: the members each one placed draws.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
@@ -2611,7 +2611,7 @@ impl Model {
     /// with, else the first by name.
     pub fn default_type(&self, category: &str) -> Option<&str> {
         let preferred = match crate::commands::category(category).as_str() {
-            "region" => self.language.word(fills::SOLID_BLACK),
+            "region" => return fills::default_region_type(&self.region_types, self.language).map(String::as_str),
             "wall" | "floor" => "Generic - 200mm",
             "door" => "Single 900 x 2100",
             "column" => "Rectangular 400 x 400",

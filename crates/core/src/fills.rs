@@ -133,10 +133,6 @@ impl FillPattern {
 /// How short a dot draws, in the pattern's lengths.
 const DOT: f64 = 0.15;
 
-/// The pattern's strokes over the area inside `rings` (outlines and holes, either way round: inside is inside an odd number
-/// of them), each as a straight piece in model mm, `k` model mm to each of the pattern's (the view's scale for a drafting
-/// pattern, 1 for a model one); within `window` (its lowest and its highest corner), and no more than `max` of them. None
-/// when it would take more, too dense to draw.
 /// As [`strokes`], the pattern started at `origin` and turned `angle` degrees counter-clockwise.
 pub fn strokes_placed(
     p: &FillPattern,
@@ -166,6 +162,10 @@ pub fn strokes_placed(
     Some(strokes(p, &rings, k, w, max)?.into_iter().map(|[a, b]| [back(a), back(b)]).collect())
 }
 
+/// The pattern's strokes over the area inside `rings` (outlines and holes, either way round: inside is inside an odd number
+/// of them), each as a straight piece in model mm, `k` model mm to each of the pattern's (the view's scale for a drafting
+/// pattern, 1 for a model one); within `window` (its lowest and its highest corner), and no more than `max` of them. None
+/// when it would take more, too dense to draw.
 pub fn strokes(p: &FillPattern, rings: &[Vec<P2>], k: f64, window: (P2, P2), max: usize) -> Option<Vec<[P2; 2]>> {
     let mut out = Vec::new();
     let pts = rings.iter().flatten();
@@ -228,6 +228,8 @@ pub fn strokes(p: &FillPattern, rings: &[Vec<P2>], k: f64, window: (P2, P2), max
                             s += len;
                         }
                         r += 1.0;
+                        #[cfg(test)]
+                        done(dashes.len());
                         work = work.saturating_add(dashes.len());
                         if out.len() > max || work > MAX_WORK {
                             return None;
@@ -246,6 +248,18 @@ pub fn strokes(p: &FillPattern, rings: &[Vec<P2>], k: f64, window: (P2, P2), max
 
 /// The most work (an edge tried against a line, a dash stepped over) one pattern may ask of a drawing, however dense it is.
 pub const MAX_WORK: usize = 5_000_000;
+
+#[cfg(test)]
+thread_local! {
+    /// What [`strokes`] has done on this thread: the edges tried against a line, the dashes stepped over. The tests assert on it,
+    /// not on time, which varies with the load of the machine.
+    static DONE: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+#[cfg(test)]
+fn done(n: usize) {
+    DONE.with(|d| d.set(d.get().saturating_add(n)));
+}
 
 /// The stretch of the line through `base` along unit `u` that lies in the box from `lo` to `hi`, as distances from `base`.
 fn reach(base: P2, u: P2, lo: P2, hi: P2) -> Option<(f64, f64)> {
@@ -266,6 +280,8 @@ fn reach(base: P2, u: P2, lo: P2, hi: P2) -> Option<(f64, f64)> {
 /// Where the line through `base` along unit `u` (`n` square to it) is inside `rings`, as runs along it from `base`: it
 /// crosses a ring's edge where the edge's ends lie on either side, and between each two crossings it's in or out by turns.
 fn spans(rings: &[Vec<P2>], base: P2, u: P2, n: P2) -> Vec<(f64, f64)> {
+    #[cfg(test)]
+    done(rings.iter().map(Vec::len).sum());
     let mut ts: Vec<f64> = Vec::new();
     for (a, b) in rings.iter().flat_map(|r| geom::ring_edges(r)) {
         let (sa, sb) = ((a - base).dot(n), (b - base).dot(n));
@@ -372,10 +388,6 @@ pub fn default_patterns() -> BTreeMap<String, FillPattern> {
     patterns(Language::English)
 }
 
-pub fn is_default_patterns(p: &BTreeMap<String, FillPattern>) -> bool {
-    *p == default_patterns()
-}
-
 /// The filled region types a project starts with, named in `language`.
 pub fn region_types(language: Language) -> BTreeMap<String, FilledRegionType> {
     let fg = |p: &str| FilledRegionType { foreground: Some(language.word(p).to_string()), ..Default::default() };
@@ -396,8 +408,13 @@ pub fn default_region_types() -> BTreeMap<String, FilledRegionType> {
     region_types(Language::English)
 }
 
-pub fn is_default_region_types(t: &BTreeMap<String, FilledRegionType>) -> bool {
-    *t == default_region_types()
+/// The type a filled region takes unless told another, of `types` in `language`: Solid Black by the name the language gives it,
+/// else by its English name (the types of a file from before they were named in a language), else the first.
+pub fn default_region_type(types: &BTreeMap<String, FilledRegionType>, language: Language) -> Option<&String> {
+    [language.word(SOLID_BLACK), SOLID_BLACK]
+        .into_iter()
+        .find_map(|n| types.get_key_value(n).map(|(k, _)| k))
+        .or_else(|| types.keys().next())
 }
 
 #[cfg(test)]
@@ -566,6 +583,37 @@ mod tests {
         run(&mut s, "filled_region", json!({"sketch": lines(0.0, 0.0, 1000.0), "type": "Earth"}));
         let e = s.execute("filled_region_type", &json!({"name": "Earth", "delete": true})).unwrap_err();
         assert!(e.contains("is of `Earth`"), "{e}");
+    }
+
+    #[test]
+    fn a_region_with_no_type_takes_solid_black_in_a_file_from_before_the_types_were_named_in_its_language() {
+        for (language, solid) in [(Language::Portuguese, "Preto sólido"), (Language::Spanish, "Negro sólido")] {
+            // A new project of the language names its types in it; a file written before the types were (format 5, with no
+            // line or fill styles) reads with the English ones, whatever its language.
+            let fresh = crate::model::Model::new_in("p", language);
+            assert!(fresh.region_types.contains_key(solid), "{solid}");
+            assert_eq!(default_region_type(&fresh.region_types, language).map(String::as_str), Some(solid));
+            let file = fresh.to_json().unwrap();
+            let mut v: Value = serde_json::from_str(&file).unwrap();
+            let keys = ["line_styles", "line_patterns", "fill_patterns", "region_types"];
+            for key in keys {
+                assert!(v.as_object_mut().and_then(|o| o.remove(key)).is_some(), "{key}");
+            }
+            v["format"] = json!(5);
+            let (m, left_out) = crate::model::Model::read(&v.to_string()).unwrap();
+            assert!(left_out.is_empty(), "{left_out:?}");
+            assert!(m.region_types.contains_key(SOLID_BLACK) && !m.region_types.contains_key(solid));
+            let mut s = Session::new();
+            s.reset(m, None);
+            let id = run(&mut s, "filled_region", json!({"sketch": lines(0.0, 0.0, 1000.0)}))["id"].as_u64().unwrap();
+            let Some(Element::FilledRegion(r)) = s.model.elements.get(id) else { panic!("no region") };
+            assert_eq!(r.type_name, SOLID_BLACK, "{language:?}");
+            assert_eq!(s.model.default_type("region"), Some(SOLID_BLACK));
+        }
+        // Without Solid Black by either name, the first.
+        let mut types = default_region_types();
+        types.remove(SOLID_BLACK);
+        assert_eq!(default_region_type(&types, Language::English).map(String::as_str), types.keys().next().map(String::as_str));
     }
 
     #[test]
@@ -826,9 +874,10 @@ mod tests {
         assert!(s.execute("modify", &json!({"id": id, "pattern_angle": f64::MAX})).is_err());
     }
 
-    fn timed<T>(f: impl FnOnce() -> T) -> (T, std::time::Duration) {
-        let at = std::time::Instant::now();
-        (f(), at.elapsed())
+    /// What `f` did, in [`super::done`]'s steps.
+    fn counted<T>(f: impl FnOnce() -> T) -> (T, usize) {
+        let before = super::DONE.with(std::cell::Cell::get);
+        (f(), super::DONE.with(std::cell::Cell::get) - before)
     }
 
     #[test]
@@ -883,6 +932,34 @@ mod tests {
     }
 
     #[test]
+    fn what_a_drawing_could_not_draw_is_in_the_notes_of_every_reply_that_draws_it() {
+        let mut s = Session::new();
+        run(&mut s, "wall", json!({"points": [[0, 0], [6000, 0]], "height": 3000}));
+        let elevation = run(&mut s, "elevation", json!({"facing": "south"}))["id"].as_u64().unwrap();
+        let Some(Element::Elevation(e)) = s.model.elements.get(elevation) else { panic!("no elevation") };
+        let start = e.start;
+        // 32 families of lines 4 mm apart: the view is 0.29 px to the mm, so they are 1.2 px apart, and far more than a view holds.
+        let families: Vec<Value> = (0..32).map(|i| json!({"angle": f64::from(i) * 5.6, "spacing": 4})).collect();
+        run(&mut s, "fill_pattern", json!({"name": "Mesh", "target": "model", "lines": families}));
+        run(&mut s, "filled_region_type", json!({"name": "Meshed", "foreground": "Mesh"}));
+        let sketch = lines(-200.0 - start.0, -600.0, 6600.0);
+        run(&mut s, "filled_region", json!({"view": elevation, "type": "Meshed", "line_style": null, "sketch": sketch}));
+        let said = |r: &Value| r["notes"][0].as_str().is_some_and(|n| n.contains("more lines"));
+        // The elevation's reply says it, as the plan's does.
+        let r = run(&mut s, "render", json!({"view": elevation, "width": 4096, "height": 2048}));
+        assert!(said(&r), "{r}");
+        // And the sheet's, as a PNG and as a PDF.
+        let sheet = run(&mut s, "sheet", json!({}))["id"].as_u64().unwrap();
+        run(&mut s, "place", json!({"sheet": "A101", "view": elevation, "at": [200, 150], "scale": 1}));
+        let r = run(&mut s, "render", json!({"view": sheet}));
+        assert!(said(&r), "the sheet as a PNG: {}", r["notes"]);
+        let path = std::env::temp_dir().join(format!("bimcraft-notes-{}.pdf", std::process::id()));
+        let r = run(&mut s, "render", json!({"view": sheet, "path": path}));
+        let _ = std::fs::remove_file(&path);
+        assert!(said(&r), "the sheet as a PDF: {}", r["notes"]);
+    }
+
+    #[test]
     fn a_dense_pattern_over_an_outline_of_thousands_of_corners_is_refused_in_time() {
         let p = FillPattern { target: Target::Model, lines: (0..32).map(|i| HatchLine::simple(f64::from(i) * 5.0, 20.0)).collect() };
         let ring: Vec<P2> = (0..10_000)
@@ -891,9 +968,10 @@ mod tests {
                 P2(1e5 * a.cos(), 1e5 * a.sin())
             })
             .collect();
-        let (r, took) = timed(|| strokes(&p, &[ring], 1.0, (P2(-1e5, -1e5), P2(1e5, 1e5)), 50_000));
+        let (r, steps) = counted(|| strokes(&p, &[ring], 1.0, (P2(-1e5, -1e5), P2(1e5, 1e5)), 50_000));
         assert_eq!(r, None);
-        assert!(took < std::time::Duration::from_millis(500), "{took:?}");
+        // Refused from the count of lines times the count of edges, before any line was tried against one.
+        assert_eq!(steps, 0, "{steps} steps");
     }
 
     #[test]
@@ -901,9 +979,9 @@ mod tests {
         let p =
             FillPattern { target: Target::Model, lines: vec![HatchLine { dashes: vec![0.0, -0.05], ..HatchLine::simple(0.0, 10_000.0) }] };
         assert_eq!(p.check("dots"), Ok(()));
-        let (r, took) = timed(|| strokes(&p, &[square(0.0, 0.0, 100_000.0)], 1.0, (P2(-1.0, -1.0), P2(101_000.0, 101_000.0)), 50_000));
+        let (r, steps) = counted(|| strokes(&p, &[square(0.0, 0.0, 100_000.0)], 1.0, (P2(-1.0, -1.0), P2(101_000.0, 101_000.0)), 50_000));
         assert_eq!(r, None);
-        assert!(took < std::time::Duration::from_millis(900), "{took:?}");
+        assert!(steps <= super::MAX_WORK, "{steps} steps");
     }
 
     #[test]

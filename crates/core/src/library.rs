@@ -305,6 +305,11 @@ impl Library {
         held.chain((self.lowest != 0).then_some(self.lowest)).min()
     }
 
+    /// Ids down to `id` are held by something, so new ones count down from below it.
+    fn hold(&mut self, id: Id) {
+        self.lowest = if self.lowest == 0 { id } else { self.lowest.min(id) };
+    }
+
     fn remove(&mut self, id: Id) {
         if let Some(e) = self.by_id.remove(&id) {
             self.by_name.remove(&(e.kind, e.name));
@@ -711,6 +716,11 @@ impl Model {
             self.library.entries().filter(|(_, e)| !keep.contains(&(e.kind.clone(), e.name.clone()))).map(|(id, _)| id).collect();
         for id in gone {
             self.library.remove(id);
+        }
+        // Parts hold their ids themselves, and a file from before a new kind of entry has them right below its entries: the
+        // new entries count down from below them too, so that none of the parts is given another id.
+        if let Some(lowest) = self.parts_now().into_iter().map(|(id, _)| id).filter(|id| !crate::ids::unset(id)).min() {
+            self.library.hold(lowest);
         }
         for (kind, name) in now {
             if self.library.id(&kind, &name).is_none() {
@@ -1368,6 +1378,37 @@ type {"category": "wall", "name": "Partition", "thickness": 110}"#,
         assert!(copy.iter().all(|c| !after.contains(c) && !after.iter().any(|a| a.0 == c.0 || a.1 == c.1)), "{copy:?}");
         assert_eq!(ident(&s.model), after, "the original keeps its own");
         assert_eq!(s.model.check(), Ok(()));
+    }
+
+    #[test]
+    fn a_file_from_before_the_line_and_fill_styles_opens_with_every_part_keeping_its_id() {
+        let mut s = Session::new();
+        s.script(crate::sample::SAMPLE).unwrap();
+        // Written as 0.8 writes a project: no line patterns or styles, fill patterns or region types, and so none of their
+        // entries; the parts (layers, forms, symbols) hold ids below the entries that were there.
+        let mut m = (*s.model).clone();
+        (m.line_patterns, m.line_styles, m.fill_patterns, m.region_types) = Default::default();
+        // The library made again, as 0.8 made it: the entries from the top down, and the parts right below the last of them.
+        m.library = Default::default();
+        m.forget_parts();
+        m.sync_library();
+        let mut file: Value = serde_json::from_str(&m.to_json().unwrap()).unwrap();
+        for key in ["line_patterns", "line_styles", "fill_patterns", "region_types"] {
+            file.as_object_mut().unwrap().remove(key);
+        }
+        file["format"] = json!(5);
+        let (opened, left_out) = Model::read(&file.to_string()).unwrap();
+        assert!(left_out.is_empty(), "{left_out:?}");
+        let ids = |m: &Model| m.parts_now().into_iter().map(|(id, p)| (id, p.guid)).collect::<Vec<_>>();
+        let (was, now) = (ids(&m), ids(&opened));
+        assert!(was.len() > 100, "{} parts", was.len());
+        let renumbered = was.iter().zip(&now).filter(|(a, b)| a != b).count();
+        assert_eq!((renumbered, was.len()), (0, now.len()), "{renumbered} of {} parts have an id they did not have", was.len());
+        // The entries the file lacked are there, below the parts, and nothing has an id twice.
+        assert!(opened.library.id(&Kind::LineStyle, "Thin Lines").is_some());
+        assert!(opened.library_in_step());
+        let all: std::collections::BTreeSet<Id> = opened.library.entries().map(|(id, _)| id).chain(now.iter().map(|(id, _)| *id)).collect();
+        assert_eq!(all.len(), opened.library.entries().count() + now.len());
     }
 
     #[test]

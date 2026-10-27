@@ -258,19 +258,92 @@ fn a_picture_at_twice_the_pixels_gives_ink_in_the_pixels_of_the_view() {
         .map(|((p, _), _)| p)
         .collect();
     let runs: Vec<&Prim> = ink.into_iter().filter(|p| matches!(p, Prim::Line { .. })).collect();
-    assert!(runs.len() > 100, "{} runs", runs.len());
+    // The wall's two ends are vertical lines (a run on a run, a line), its top and bottom rows of horizontal ones.
+    assert!(runs.len() >= 4, "{} runs", runs.len());
+    let mut vertical = 0;
     for p in runs {
         let Prim::Line { pts, width, .. } = p else { continue };
-        // One pixel of the picture is half a pixel of the view: its rows lie on the picture's, its width is the row's.
+        // One pixel of the picture is half a pixel of the view: its width is the picture's pixel's, and it lies on the
+        // picture's row (a horizontal run) or column (a vertical one).
         assert!((width - 0.5).abs() < 1e-6, "{width}");
-        assert!(((pts[0].1 * 2.0).fract() - 0.5).abs() < 1e-3, "{pts:?}");
+        if (pts[0].0 - pts[1].0).abs() < 1e-6 {
+            vertical += 1;
+            assert!(((pts[0].0 * 2.0).fract() - 0.5).abs() < 1e-3, "{pts:?}");
+        } else {
+            assert!(((pts[0].1 * 2.0).fract() - 0.5).abs() < 1e-3, "{pts:?}");
+        }
     }
+    assert!(vertical >= 2, "{vertical} vertical lines");
 }
 
-/// The time `f` takes.
+/// An elevation of 200 walls 20 m tall, 100 mm wide and 200 mm apart, with a non-masking region over all of it, if `region`.
+fn many_walls(region: bool) -> (Session, u64) {
+    let mut s = Session::new();
+    for i in 0..200 {
+        let x = f64::from(i) * 200.0;
+        run(&mut s, "wall", json!({"points": [[x, 0], [x + 100.0, 0]], "height": 20000}));
+    }
+    let id = run(&mut s, "elevation", json!({"facing": "south"}))["id"].as_u64().unwrap();
+    let Some(Element::Elevation(e)) = s.model.elements.get(id) else { panic!("no elevation") };
+    let start = e.start;
+    blue(&mut s, false);
+    if region {
+        let sketch = rect(-1000.0 - start.0, -1000.0, 41000.0 - start.0, 21000.0);
+        run(&mut s, "filled_region", json!({"view": id, "type": "Blue", "line_style": null, "sketch": sketch}));
+    }
+    (s, id)
+}
+
+#[test]
+fn an_elevation_of_many_walls_keeps_all_its_ink_above_a_region_at_a_big_size() {
+    // The picture's dark pixels were 700,000 of runs one pixel high; the first 250,000 were kept and the rest of the rows had none.
+    let all = ((0.0, 0.0), (3999.0, 2599.0));
+    let (with, id) = many_walls(true);
+    let view = render::section_fit(&with.model, id, 4000, 2600);
+    let kept = dark(&pixels(&render::section_png(&with.model, id, view).unwrap()), all);
+    let (without, id) = many_walls(false);
+    let plain = dark(&pixels(&render::section_png(&without.model, id, view).unwrap()), all);
+    eprintln!("{kept} of {plain} dark pixels kept above the region");
+    assert!(plain > 600_000, "{plain} dark pixels in the picture");
+    assert!(kept * 10 >= plain * 9, "{kept} of {plain} dark pixels kept above the region");
+}
+
+#[test]
+fn a_picture_with_more_runs_of_ink_than_are_kept_says_so_in_the_drawings_notes() {
+    let mut s = Session::new();
+    let (id, start) = south_elevation(&mut s);
+    blue(&mut s, false);
+    run(
+        &mut s,
+        "filled_region",
+        json!({"view": id, "type": "Blue", "line_style": null, "sketch": square(-200.0 - start.0, -600.0, 6.6e3)}),
+    );
+    let view = render::section_fit(&s.model, id, 800, 600);
+    assert!(render::section(&s.model, id, view).notes.is_empty(), "the wall's runs are few");
+    // Kept to two, the wall's edges lose their ink under the region, and the drawing says so.
+    super::MOST.with(|m| m.set(2));
+    let notes = render::section(&s.model, id, view).notes;
+    super::MOST.with(|m| m.set(super::MAX_RUNS));
+    assert!(notes.len() == 1 && notes[0].contains("runs of ink"), "{notes:?}");
+}
+
+/// The time `f` takes (to look at: no test asserts a time, which varies with the load of the machine).
 fn timed<T>(f: impl FnOnce() -> T) -> (T, Duration) {
     let at = Instant::now();
     (f(), at.elapsed())
+}
+
+/// What `f` costs in steps: the points of rings it cut lines by ([`super::spend`]) and the polygons it cut ([`walls::SPLITS`]).
+fn counted<T>(f: impl FnOnce() -> T) -> (T, usize) {
+    let now = || super::SPENT.with(std::cell::Cell::get) + crate::walls::SPLITS.with(std::cell::Cell::get);
+    let before = now();
+    (f(), now() - before)
+}
+
+/// The pictures of sections `f` draws.
+fn pictured<T>(f: impl FnOnce() -> T) -> (T, usize) {
+    let before = super::PICTURES.with(std::cell::Cell::get);
+    (f(), super::PICTURES.with(std::cell::Cell::get) - before)
 }
 
 /// A tower of `storeys` storeys, 42 walls each, and an elevation of it (or a section across its middle) with a non-masking region
@@ -302,11 +375,10 @@ fn a_section_with_the_picture_in_hand_draws_its_region_ink_without_drawing_the_p
     let (s, id) = tower(5, true, true);
     let view = render::section_fit(&s.model, id, 800, 600);
     let picture = render::section_image(&s.model, &crate::view3d::Scene::new(&s.model), id, view, &[]).unwrap();
-    let (with, fast) = timed(|| render::section_over(&s.model, id, view, &picture));
-    let (alone, slow) = timed(|| render::section(&s.model, id, view));
+    let (with, drawn) = pictured(|| render::section_over(&s.model, id, view, &picture));
+    let (alone, drawn_alone) = pictured(|| render::section(&s.model, id, view));
     assert_eq!(with.prims.len(), alone.prims.len(), "the same ink either way");
-    eprintln!("section over a picture {fast:?}, drawing the picture itself {slow:?}");
-    assert!(fast < slow, "{fast:?} against {slow:?}");
+    assert_eq!((drawn, drawn_alone), (0, 1), "the picture in hand is not drawn again; without it, it is drawn once");
 }
 
 #[test]
@@ -341,9 +413,9 @@ fn masked(n: usize) -> Session {
 fn overlapping_concave_masks_cost_a_draw_milliseconds_not_seconds() {
     let s = masked(400);
     let view = View { scale: 0.1, cx: 0.0, cy: 0.0, width: 700, height: 700 };
-    let (d, took) = timed(|| render::draw(&s.model, 100000, view));
-    eprintln!("400 corners: {took:?}, {} prims", d.prims.len());
-    assert!(took < Duration::from_secs(1), "{took:?}");
+    let (d, steps) = counted(|| render::draw(&s.model, 100000, view));
+    eprintln!("400 corners: {steps} steps, {} prims", d.prims.len());
+    assert!(steps <= 8_000, "{steps} steps");
 }
 
 #[test]
@@ -370,19 +442,19 @@ fn holed(n: usize, of: &str) -> Session {
 fn a_hatched_region_with_a_big_hole_is_not_cut_into_convex_pieces() {
     let s = holed(400, "Diagonal Up");
     let view = View { scale: 0.1, cx: 0.0, cy: 0.0, width: 700, height: 700 };
-    let (d, took) = timed(|| render::draw(&s.model, 100000, view));
-    eprintln!("hatch, 400 corners: {took:?}, {} prims", d.prims.len());
+    let (d, steps) = counted(|| render::draw(&s.model, 100000, view));
+    eprintln!("hatch, 400 corners: {steps} steps, {} prims", d.prims.len());
     assert!(d.prims.len() > 100, "its hatch is drawn");
-    assert!(took < Duration::from_secs(1), "{took:?}");
+    assert_eq!(steps, 0, "a hatch runs through the rings as they are, and cuts no polygon: {steps} steps");
 }
 
 #[test]
 fn a_solid_region_with_a_big_hole_is_cut_into_pieces_quickly() {
     let s = holed(400, "Solid Black");
     let view = View { scale: 0.1, cx: 0.0, cy: 0.0, width: 700, height: 700 };
-    let (_, took) = timed(|| render::draw(&s.model, 100000, view));
-    eprintln!("solid, 400 corners: {took:?}");
-    assert!(took < Duration::from_secs(1), "{took:?}");
+    let (_, steps) = counted(|| render::draw(&s.model, 100000, view));
+    eprintln!("solid, 400 corners: {steps} steps");
+    assert!(steps <= 150_000, "{steps} steps");
 }
 
 #[test]

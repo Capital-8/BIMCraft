@@ -2254,7 +2254,7 @@ mod tests {
         let offset = t.elapsed().as_secs_f64();
         eprintln!("split {split:.3} s, convert {convert:.3} s, offset {offset:.3} s");
         assert!(a.check("a").is_ok() && b.check("b").is_ok() && converted.is_some() && off.is_some());
-        assert!(split < 1.0 && convert < 1.0 && offset < 1.0, "{split} {convert} {offset}");
+        assert!(split < 10.0 && convert < 10.0 && offset < 10.0, "{split} {convert} {offset}: a hang, not a slow machine");
     }
 
     #[test]

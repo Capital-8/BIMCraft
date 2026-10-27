@@ -510,6 +510,13 @@ pub struct Sketch<'a> {
     pub editing: Option<Id>,
 }
 
+#[cfg(test)]
+thread_local! {
+    /// The outlines [`in_sketch`] has built on this thread: the tests assert on it, not on time, which varies with the load of
+    /// the machine.
+    static BUILT: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 /// Snap a boundary to visible model edges, view-specific detail, and the sketch's own lines, with the same snap switches
 /// and guides as placement. All front ends use the same candidates for preview and the point they commit.
 pub fn in_sketch(m: &Model, sk: Sketch<'_>, p: P2, reach: Reach, from: &[P2], square: bool, o: &Snaps) -> Found {
@@ -520,6 +527,7 @@ pub fn in_sketch(m: &Model, sk: Sketch<'_>, p: P2, reach: Reach, from: &[P2], sq
     if m.plan_level(sk.view).is_some() {
         let level = m.guid(m.plan_level(sk.view).unwrap_or(sk.view));
         let edge = |ring: &[P2]| geom::ring_edges(ring).map(|(a, b)| geom::dist_to_segment(p, a, b)).fold(f64::INFINITY, f64::min);
+        let edges = |outline: &[P2], holes: &[Vec<P2>]| holes.iter().map(|h| edge(h)).fold(edge(outline), f64::min);
         let mut near: Vec<(f64, Id)> = m
             .elements
             .iter()
@@ -529,8 +537,9 @@ pub fn in_sketch(m: &Model, sk: Sketch<'_>, p: P2, reach: Reach, from: &[P2], sq
                     let d = crate::walls::Axis::of(w).distance(p, 0.0);
                     (d <= window && m.cut_by(w, sk.view)).then_some((d, *id))
                 }
-                Element::Floor(f) if f.level == level => Some((edge(&f.boundary), *id)),
-                Element::Ceiling(c) if c.level == level => Some((edge(&c.boundary), *id)),
+                // Near an edge of its outline or of any opening: a big slab's hole in its middle is far from its outer edge.
+                Element::Floor(f) if f.level == level => Some((edges(&f.boundary, &f.openings), *id)),
+                Element::Ceiling(c) if c.level == level => Some((edges(&c.boundary, &c.openings), *id)),
                 _ => None,
             })
             .filter(|(d, _)| *d <= window)
@@ -540,6 +549,8 @@ pub fn in_sketch(m: &Model, sk: Sketch<'_>, p: P2, reach: Reach, from: &[P2], sq
         // One index for all of them, so each wall's joins are found among the walls its height meets.
         let index = near.iter().any(|(_, id)| matches!(m.elements.get(*id), Some(Element::Wall(_)))).then(|| crate::walls::Index::new(m));
         for (_, id) in near {
+            #[cfg(test)]
+            BUILT.with(|n| n.set(n.get() + 1));
             match m.elements.get(id) {
                 Some(Element::Wall(_)) => scene.polyline(&crate::walls::outline_in(m, id, index.as_ref()), true),
                 Some(Element::Floor(Floor { boundary, openings, .. }) | Element::Ceiling(Ceiling { boundary, openings, .. })) => {
@@ -1097,6 +1108,25 @@ mod tests {
     }
 
     #[test]
+    fn a_sketch_snaps_to_the_edges_of_an_opening_far_from_its_floors_outer_edge_too() {
+        // A 20 m floor with a metre-wide opening at its middle, the cursor 9.5 m from the nearest outer edge.
+        let mut s = Session::new();
+        s.script(
+            r#"floor {"boundary": [[0,0],[20000,0],[20000,20000],[0,20000]], "openings": [[[9500,9500],[10500,9500],[10500,10500],[9500,10500]]]}
+               ceiling {"boundary": [[0,0],[20000,0],[20000,20000],[0,20000]], "openings": [[[9500,9500],[10500,9500],[10500,10500],[9500,10500]]]}"#,
+        )
+        .unwrap();
+        let sketch = |p, o: &Snaps| in_sketch(&s.model, Sketch { view: 100000, lines: &[], editing: None }, p, REACH, &[], false, o);
+        let f = sketch(P2(9800.0, 10530.0), &Snaps::only(Kind::Nearest));
+        assert_eq!((f.kind, f.at), (Kind::Nearest, P2(9800.0, 10500.0)), "{f:?}");
+        let f = sketch(P2(10030.0, 10520.0), &Snaps::only(Kind::Midpoint));
+        assert_eq!((f.kind, f.at), (Kind::Midpoint, P2(10000.0, 10500.0)), "{f:?}");
+        // The opening's corner, as before, and the outer edge, near it.
+        assert_eq!(sketch(P2(10520.0, 10530.0), &Snaps::default()).kind, Kind::Endpoint);
+        assert_eq!(sketch(P2(5000.0, 30.0), &Snaps::only(Kind::Nearest)).kind, Kind::Nearest);
+    }
+
+    #[test]
     fn two_walls_that_meet_snap_where_they_cross() {
         let m = model(r#"wall {"points": [[0,0],[4000,0],[4000,3000]]}"#);
         let f = at(&m, P2(4030.0, 20.0), &[], &Snaps::only(Kind::Intersection));
@@ -1165,23 +1195,13 @@ mod tests {
         // By the service core's corner, where walls of every storey meet.
         let p = P2(18030.0, 12020.0);
         let sk = |_: ()| Sketch { view: level, lines: &[], editing: None };
-        let best = |f: &dyn Fn() -> Found| {
-            (0..5)
-                .map(|_| {
-                    let at = std::time::Instant::now();
-                    let found = f();
-                    (at.elapsed(), found)
-                })
-                .min_by_key(|(took, _)| *took)
-                .unwrap()
-        };
-        let (took, f) = best(&|| in_sketch(&m, sk(()), p, REACH, &[], false, &Snaps::default()));
-        let (plain, _) = best(&|| snap(&m, level, p, REACH, &[], false, &Snaps::default()));
-        eprintln!(
-            "{} walls: in_sketch {took:?}, snap {plain:?} -> {f:?}",
-            m.elements.values().filter(|e| matches!(e, Element::Wall(_))).count()
-        );
+        let before = BUILT.with(std::cell::Cell::get);
+        let f = in_sketch(&m, sk(()), p, REACH, &[], false, &Snaps::default());
+        let built = BUILT.with(std::cell::Cell::get) - before;
+        let walls = m.elements.values().filter(|e| matches!(e, Element::Wall(_))).count();
+        eprintln!("{walls} walls: in_sketch built {built} outlines -> {f:?}");
         assert!(f.kind == Kind::Endpoint && f.at.dist(P2(18000.0, 12000.0)) < 400.0, "a corner of the core's walls: {f:?}");
-        assert!(took < plain * 8 + std::time::Duration::from_millis(2), "{took:?} against {plain:?} for a plain snap");
+        // The outlines of the walls near the cursor, not of the hundreds there are.
+        assert!(built <= MAX_OUTLINES && built * 10 < walls, "{built} outlines built of {walls} walls");
     }
 }

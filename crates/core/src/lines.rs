@@ -133,10 +133,6 @@ pub fn default_patterns() -> BTreeMap<String, LinePattern> {
     patterns(Language::English)
 }
 
-pub fn is_default_patterns(p: &BTreeMap<String, LinePattern>) -> bool {
-    *p == default_patterns()
-}
-
 /// The style a detail line is drawn in unless told another, the first of a project's styles: in English.
 pub const THIN: &str = "Thin Lines";
 
@@ -173,10 +169,6 @@ pub fn default_style(styles: &BTreeMap<String, LineStyle>, language: Language) -
         .find_map(|n| styles.get_key_value(n).map(|(k, _)| k))
         .or_else(|| styles.iter().find(|(_, s)| **s == thin).map(|(k, _)| k))
         .or_else(|| styles.keys().next())
-}
-
-pub fn is_default_styles(s: &BTreeMap<String, LineStyle>) -> bool {
-    *s == default_styles()
 }
 
 /// A detail line: a line drawn in one view (a level's plan, a section, an elevation or a sheet), in the view's own terms
@@ -319,8 +311,12 @@ pub fn cloud(c: &Curve, arc: f64) -> Vec<crate::geom::P2> {
     stops.push(walk.total);
     let mut cuts = Vec::new();
     for span in stops.windows(2).filter(|s| s[1] - s[0] > 1e-9) {
-        let n = ((span[1] - span[0]) / arc).round().max(1.0) as usize;
+        let n = scallops(span[1] - span[0], arc, most);
         cuts.extend((0..n).map(|k| span[0] + (span[1] - span[0]) * k as f64 / n as f64));
+        // Past the most there is no use listing more: the even scalloping below takes over.
+        if cuts.len() > most {
+            break;
+        }
     }
     cuts.push(walk.total);
     if cuts.len() - 1 < min || cuts.len() - 1 > most {
@@ -340,6 +336,12 @@ pub fn cloud(c: &Curve, arc: f64) -> Vec<crate::geom::P2> {
         out.extend(pts.into_iter().skip(usize::from(k > 0)));
     }
     out
+}
+
+/// How many scallops of about `arc` fit a span of `len`: at least one, and at most `most + 1`, so a hostile length or arc never
+/// sizes the list of cuts (a circle 5e8 mm across asked 16.8 GB of them).
+pub(crate) fn scallops(len: f64, arc: f64, most: usize) -> usize {
+    ((len / arc).round().max(1.0) as usize).min(most + 1)
 }
 
 /// The points a scallop gets at least, so a cloud of more scallops than the points allow is made of fewer, larger ones.
@@ -593,6 +595,20 @@ mod tests {
         assert_eq!(default_style(&renamed, Language::Portuguese).map(String::as_str), Some("Zeta"));
         renamed.remove("Zeta");
         assert_eq!(default_style(&renamed, Language::English).map(String::as_str), renamed.keys().next().map(String::as_str));
+    }
+
+    #[test]
+    fn a_models_own_serialization_holds_its_line_and_fill_styles_even_when_they_are_the_starting_ones() {
+        // A file is written by `Model::to_json`, which has named them by GUID by then, so they were never equal to the starting
+        // ones there and a rule skipping them when they are was dead; none is left.
+        let v = serde_json::to_value(Model::new("x")).unwrap();
+        for key in ["line_patterns", "line_styles", "fill_patterns", "region_types"] {
+            assert!(v.get(key).is_some_and(|k| k.as_object().is_some_and(|o| !o.is_empty())), "{key}");
+        }
+        let file: serde_json::Value = serde_json::from_str(&Model::new("x").to_json().unwrap()).unwrap();
+        for key in ["line_patterns", "line_styles", "fill_patterns", "region_types"] {
+            assert!(file.get(key).is_some(), "{key}");
+        }
     }
 
     #[test]

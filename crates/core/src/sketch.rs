@@ -294,6 +294,18 @@ impl Profile {
     }
 }
 
+#[cfg(test)]
+thread_local! {
+    /// What the sketches solved on this thread have taken, in steps: the pieces they were cut into, the pairs of pieces looked at,
+    /// the points of loops looked into. The hostile tests assert on it, as time varies with the load of the machine.
+    static SPENT: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+#[cfg(test)]
+fn spent(n: usize) {
+    SPENT.with(|s| s.set(s.get().saturating_add(n)));
+}
+
 /// The lines solved into loops, nested into regions; or every problem found (up to [`MAX_PROBLEMS`]), what to fix first
 /// first ([`Problem::rank`]).
 pub fn solve(lines: &[SketchLine]) -> Result<Profile, Vec<Problem>> {
@@ -379,6 +391,8 @@ pub fn solve(lines: &[SketchLine]) -> Result<Profile, Vec<Problem>> {
         }
         found.len() <= MAX_PROBLEMS
     });
+    #[cfg(test)]
+    spent(pieces.len() + work);
     let Ok(walked) = walked else { return Err(vec![Problem::TooMany { count: work, what: "steps" }]) };
     problems.extend(found.into_values().map(|(_, _, problem)| problem));
     if !walked {
@@ -475,9 +489,13 @@ pub fn solve(lines: &[SketchLine]) -> Result<Profile, Vec<Problem>> {
             steps <= MAX_NEST
         });
         if steps > MAX_NEST {
+            #[cfg(test)]
+            spent(steps);
             return Err(vec![Problem::TooMany { count: steps, what: "loops" }]);
         }
     }
+    #[cfg(test)]
+    spent(steps);
     let mut regions: Vec<Region> = Vec::new();
     let mut region_of = vec![usize::MAX; loops.len()];
     for (i, (ring, _)) in loops.iter().enumerate() {
@@ -550,24 +568,27 @@ pub fn check(who: &str, lines: &[SketchLine]) -> Result<(), String> {
 }
 
 /// The rings an element draws its outline with: a floor's, a ceiling's or a roof's boundary and its openings or courtyards
-/// (what to call them), a shaft's boundary.
+/// (what to call each kind), a shaft's boundary. Every list of rings an element holds is here: one left out is a list a
+/// command can put a bow tie in.
 fn rings_of(e: &Element) -> Option<Rings<'_>> {
-    let (boundary, holes, what): (&[P2], &[Vec<P2>], &str) = match e {
-        Element::Floor(f) => (&f.boundary, &f.openings, "opening"),
-        Element::Ceiling(c) => (&c.boundary, &c.openings, "opening"),
-        Element::Roof(r) if r.extrusion.is_none() => (&r.boundary, &r.courtyards, "courtyard"),
-        Element::Shaft(s) => (&s.boundary, &[], ""),
+    let (boundary, holes): (&[P2], Holes) = match e {
+        Element::Floor(f) => (&f.boundary, vec![("opening", &f.openings)]),
+        Element::Ceiling(c) => (&c.boundary, vec![("opening", &c.openings)]),
+        Element::Roof(r) if r.extrusion.is_none() => (&r.boundary, vec![("courtyard", &r.courtyards), ("opening", &r.openings)]),
+        Element::Shaft(s) => (&s.boundary, Vec::new()),
         _ => return None,
     };
-    Some(Rings { boundary, holes, what })
+    Some(Rings { boundary, holes })
 }
 
-/// An element's outline and its holes, and what its holes are called.
+/// Lists of holes, each with what its holes are called.
+type Holes<'a> = Vec<(&'static str, &'a [Vec<P2>])>;
+
+/// An element's outline and its lists of holes.
 #[derive(PartialEq)]
 struct Rings<'a> {
     boundary: &'a [P2],
-    holes: &'a [Vec<P2>],
-    what: &'static str,
+    holes: Holes<'a>,
 }
 
 impl Model {
@@ -577,15 +598,21 @@ impl Model {
     /// changed is simple, as the sketch of its edges solves: no edge across another or along it, none ending part way along
     /// one, no spike or keyhole. `before` is the project the command began with. The engine asks it after every command
     /// that is an undo step, but Insert from File.
+    ///
+    /// An outline that was as bad before passes: a move, copy, rotation or mirror of a floor a file holds with a bow tie or an
+    /// edge half a millimetre long makes it no worse, so it is let by; what changes its shape, or makes a clean one bad, is
+    /// refused ([`congruent`]).
     pub fn check_edits(&self, before: &Model) -> Result<(), String> {
+        let mut work = 0;
         for (&id, e) in &self.elements {
             let Some(now) = rings_of(e) else { continue };
             if before.elements.get(id).and_then(rings_of).is_some_and(|was| was == now) {
                 continue;
             }
-            let Rings { boundary, holes, what } = now;
-            let rings = std::iter::once(("boundary".to_string(), boundary))
-                .chain(holes.iter().enumerate().map(|(i, h)| (format!("{what} {i}"), h.as_slice())));
+            let Rings { boundary, holes } = now;
+            let rings = std::iter::once(("boundary".to_string(), boundary)).chain(
+                holes.iter().flat_map(|(what, list)| list.iter().enumerate().map(move |(i, h)| (format!("{what} {i}"), h.as_slice()))),
+            );
             for (name, ring) in rings {
                 // A ring of fewer than three points, or too many, or one of points that aren't numbers in range, is
                 // `Model::check`'s to refuse.
@@ -596,16 +623,85 @@ impl Model {
                 if let Err(problems) = solve(&lines_of(ring, &[]))
                     && !problems.iter().all(|p| matches!(p, Problem::NoArea { .. }))
                 {
-                    return Err(format!(
-                        "{} {id}: its {name} isn't a simple outline: {}; redraw it with `edit_boundary`",
-                        e.category(),
-                        say(&problems, &|i| format!("edge {i}"))
-                    ));
+                    if was_as_bad(before, id, e, ring, &mut work) {
+                        continue;
+                    }
+                    let said = say(&problems, &|i| format!("edge {i}"));
+                    // A command that made it has nothing to redraw (the engine takes it back): it is told to give a simple one.
+                    return Err(match before.elements.get(id) {
+                        Some(_) => {
+                            format!("{} {id}: its {name} isn't a simple outline: {said}; redraw it with `edit_boundary`", e.category())
+                        }
+                        None => format!(
+                            "{}: its {name} isn't a simple outline: {said}; give a simple `boundary` or `sketch` \
+                             (walls, or boxes of walls, that touch at a corner enclose no simple outline of their own)",
+                            e.category()
+                        ),
+                    });
                 }
             }
         }
         Ok(())
     }
+}
+
+/// The most corners [`was_as_bad`] compares in one [`Model::check_edits`], so a file of thousands of bad outlines can't make a
+/// command take long: past it an outline is judged as the new one it is.
+const MAX_COMPARED: usize = 4_000_000;
+
+/// Whether `ring`, of `e` (element `id`), is a ring the project held before the command that is as bad as it is: the same
+/// element's, or (a copy is a new element) any of its kind's, moved, turned or mirrored.
+fn was_as_bad(before: &Model, id: crate::model::Id, e: &Element, ring: &[P2], work: &mut usize) -> bool {
+    let pool: Vec<&Element> = match before.elements.get(id) {
+        Some(was) if was.category() == e.category() => vec![was],
+        Some(_) => return false,
+        None => before.elements.values().filter(|was| was.category() == e.category()).collect(),
+    };
+    pool.into_iter()
+        .filter_map(rings_of)
+        .flat_map(|r| std::iter::once(r.boundary).chain(r.holes.into_iter().flat_map(|(_, list)| list.iter().map(Vec::as_slice))))
+        .any(|was| congruent(was, ring, work))
+}
+
+/// Whether ring `b` is ring `a` moved, turned or mirrored: the same edge lengths and turns between them, from some corner of
+/// it and either way round. `work` counts the corners compared and stops it at [`MAX_COMPARED`].
+fn congruent(a: &[P2], b: &[P2], work: &mut usize) -> bool {
+    let n = a.len();
+    if n != b.len() || n < 3 {
+        return false;
+    }
+    // Each corner's edge out of it: its length, and its dot and cross with the next edge.
+    let turns = |r: &[P2]| -> Vec<[f64; 3]> {
+        let edges: Vec<P2> = geom::ring_edges(r).map(|(p, q)| q - p).collect();
+        (0..n).map(|i| [edges[i].length(), edges[i].dot(edges[(i + 1) % n]), edges[i].cross(edges[(i + 1) % n])]).collect()
+    };
+    let backwards: Vec<P2> = b.iter().rev().copied().collect();
+    let (flat, ways) = (turns(a), [turns(b), turns(&backwards)]);
+    let mirror: Vec<[f64; 3]> = flat.iter().map(|&[l, d, c]| [l, d, -c]).collect();
+    // A hundredth of a millimetre, as the rounding of a copy to the micron and of a turn leave it, scaled for a product.
+    let near = |x: f64, y: f64, scale: f64| (x - y).abs() <= 0.01 * scale;
+    for ta in [&flat, &mirror] {
+        for tb in &ways {
+            for k in 0..n {
+                // The first corner is enough to rule most starts out.
+                if !near(ta[0][0], tb[k][0], 1.0) {
+                    continue;
+                }
+                *work += n;
+                if *work > MAX_COMPARED {
+                    return false;
+                }
+                let scale = |i: usize| ta[i][0] + ta[(i + 1) % n][0] + 1.0;
+                if (0..n).all(|i| {
+                    let j = (i + k) % n;
+                    near(ta[i][0], tb[j][0], 1.0) && near(ta[i][1], tb[j][1], scale(i)) && near(ta[i][2], tb[j][2], scale(i))
+                }) {
+                    return true;
+                }
+            }
+        }
+    }
+    false
 }
 
 /// Points made one where they lie within [`TOL`] of each other: a grid of cells [`TOL`] across holds them, so a point is
@@ -1278,6 +1374,121 @@ mod command_tests {
         run(&mut s, "modify", json!({"id": f, "boundary": [[0, 0], [5000, 0], [5000, 3000], [0, 3000]]}));
     }
 
+    /// A floor whose outline is `pts` as an old file would hold it: the check of the whole project lets it by.
+    fn old_floor(s: &mut Session, pts: &[[f64; 2]]) -> u64 {
+        let f = run(s, "floor", json!({"boundary": [[0, 0], [4000, 0], [4000, 4000], [0, 4000]]}))["id"].as_u64().unwrap();
+        if let Some(Element::Floor(fl)) = s.model_mut().elements.get_mut(f) {
+            fl.boundary = pts.iter().map(|p| crate::geom::P2(p[0], p[1])).collect();
+        }
+        assert_eq!(s.model.check(), Ok(()));
+        f
+    }
+
+    #[test]
+    fn an_outline_as_bad_as_it_was_moves_copies_turns_and_mirrors_and_one_made_worse_is_refused() {
+        let bad: [(&str, &[[f64; 2]]); 3] = [
+            ("a bow tie", &[[0.0, 0.0], [4000.0, 4000.0], [4000.0, 0.0], [0.0, 2000.0]]),
+            ("a half-millimetre edge", &[[0.0, 0.0], [4000.0, 0.0], [4000.0, 0.5], [4000.0, 4000.0], [0.0, 4000.0]]),
+            ("a closing point repeated", &[[0.0, 0.0], [4000.0, 0.0], [4000.0, 4000.0], [0.0, 4000.0], [0.0, 0.0]]),
+        ];
+        for (what, pts) in bad {
+            let mut s = Session::new();
+            let f = old_floor(&mut s, pts);
+            // A rigid motion leaves its defects what they were: moved, copied, turned (also as a copy), mirrored (also as a copy).
+            for (cmd, p) in [
+                ("move", json!({"ids": [f], "by": [1000, 500]})),
+                ("copy", json!({"ids": [f], "by": [1000, 500]})),
+                ("rotate", json!({"ids": [f], "about": [100, 200], "angle": 33})),
+                ("rotate", json!({"ids": [f], "about": [100, 200], "angle": 90, "copy": true})),
+                ("mirror", json!({"ids": [f], "axis": [[1000, 0], [1000, 1000]]})),
+                ("mirror", json!({"ids": [f], "axis": [[0, 0], [1000, 1000]], "copy": true})),
+            ] {
+                if let Err(e) = s.execute(cmd, &p) {
+                    panic!("{what}: {cmd} {p}: {e}");
+                }
+            }
+            // Its shape changed it is not: one corner moved, another outline, or a clean one made bad.
+            let mut other = pts.to_vec();
+            other[1][1] += 700.0;
+            for boundary in [json!(other), json!([[0, 0], [100, 4000], [4000, 0], [0, 2000]])] {
+                let e = s.execute("modify", &json!({"id": f, "boundary": boundary})).unwrap_err();
+                assert!(e.contains("isn't a simple outline"), "{what}: {e}");
+            }
+            let g = run(&mut s, "floor", json!({"boundary": [[0, 0], [4000, 0], [4000, 4000], [0, 4000]]}))["id"].clone();
+            let e = s.execute("modify", &json!({"id": g, "boundary": BOW})).unwrap_err();
+            assert!(e.contains("isn't a simple outline"), "{what}: {e}");
+            // Nor does a copy that stretches it pass as a copy: scaled by two it is a different outline.
+            let big: Vec<[f64; 2]> = pts.iter().map(|p| [p[0] * 2.0, p[1] * 2.0]).collect();
+            let e = s.execute("modify", &json!({"id": f, "boundary": big})).unwrap_err();
+            assert!(e.contains("isn't a simple outline"), "{what}: {e}");
+        }
+    }
+
+    #[test]
+    fn a_floor_over_boxes_of_walls_that_touch_at_a_corner_says_what_to_give_instead_of_naming_nothing() {
+        let mut s = Session::new();
+        for x in [0, 4000] {
+            run(&mut s, "wall", json!({"points": [[x, x], [x + 4000, x], [x + 4000, x + 4000], [x, x + 4000]], "closed": true}));
+        }
+        let before = s.model.clone();
+        let e = s.execute("floor", &json!({})).unwrap_err();
+        // Nothing was made, so nothing is named, and `edit_boundary` has nothing to edit.
+        assert!(!e.contains("floor 1") && !e.contains("edit_boundary"), "{e}");
+        assert!(e.contains("boundary"), "{e}");
+        assert_eq!(s.model, before);
+        // The same words for a boundary that is given and not simple.
+        let e = s.execute("floor", &json!({"boundary": [[0, 0], [4000, 4000], [4000, 0], [0, 2000]]})).unwrap_err();
+        assert!(!e.contains("floor 1") && !e.contains("edit_boundary"), "{e}");
+        // And a floor that is there is still sent to `edit_boundary` when a change breaks it.
+        let f = run(&mut s, "floor", json!({"boundary": [[0, 0], [4000, 0], [4000, 4000], [0, 4000]]}))["id"].clone();
+        let e = s.execute("modify", &json!({"id": f, "boundary": BOW})).unwrap_err();
+        assert!(e.contains(&format!("floor {f}")) && e.contains("edit_boundary"), "{e}");
+    }
+
+    /// A bow tie inside a 4 m square, for a hole.
+    const BOW_HOLE: [[i32; 2]; 4] = [[1000, 1000], [3000, 3000], [3000, 1000], [1000, 2000]];
+
+    #[test]
+    fn every_ring_a_floor_a_ceiling_a_roof_or_a_shaft_takes_is_asked_to_be_simple_made_or_modified() {
+        let square = json!([[0, 0], [4000, 0], [4000, 4000], [0, 4000]]);
+        // Each ring a command takes: floor and ceiling `boundary` and `openings`, roof `boundary`, `courtyards` and `openings`,
+        // shaft `boundary`; a bow tie in each, as the command makes the element and as `modify` changes it.
+        let rings: [(&str, &str, Option<&str>); 8] = [
+            ("floor", "boundary", None),
+            ("floor", "openings", Some("opening 0")),
+            ("ceiling", "boundary", None),
+            ("ceiling", "openings", Some("opening 0")),
+            ("roof", "boundary", None),
+            ("roof", "courtyards", Some("courtyard 0")),
+            ("roof", "openings", Some("opening 0")),
+            ("shaft", "boundary", None),
+        ];
+        for (cmd, key, name) in rings {
+            let (outline, bow) = (json!(square), if name.is_some() { json!([BOW_HOLE]) } else { json!(BOW) });
+            let mut made = json!({ key: bow });
+            if name.is_some() {
+                made["boundary"] = outline.clone();
+            }
+            if cmd == "roof" {
+                made["slope"] = json!(0);
+            }
+            let mut s = Session::new();
+            let blank = s.model.clone();
+            let e = s.execute(cmd, &made).unwrap_err();
+            assert!(e.contains("intersect") || e.contains("simple"), "{cmd} {key}: {e}");
+            assert_eq!(s.model, blank, "{cmd} {key}: nothing was made");
+            let mut ok = json!({"boundary": outline});
+            if cmd == "roof" {
+                ok["slope"] = json!(0);
+            }
+            let id = run(&mut s, cmd, ok)["id"].clone();
+            let before = s.model.clone();
+            let e = s.execute("modify", &json!({"id": id, key: made[key]})).unwrap_err();
+            assert!(e.contains("isn't a simple outline") && e.contains(name.unwrap_or("boundary")), "modify {cmd} {key}: {e}");
+            assert_eq!(s.model, before, "modify {cmd} {key}: nothing changed");
+        }
+    }
+
     #[test]
     fn a_file_with_an_outline_that_is_not_simple_still_opens_and_what_changes_it_is_asked_to_redraw_it() {
         let mut s = Session::new();
@@ -1295,9 +1506,11 @@ mod command_tests {
         std::fs::remove_file(&path).ok();
         opened.unwrap();
         inserted.unwrap();
-        // What leaves its outline alone goes through; what moves it is asked to redraw it, and a redrawn one is fine.
+        // What leaves its outline alone goes through, and so does a move, which makes it no worse; what changes its shape is
+        // asked to redraw it, and a redrawn one is fine.
         run(&mut t, "modify", json!({"id": f, "offset": 100}));
-        let e = t.execute("move", &json!({"ids": [f], "by": [1000, 0]})).unwrap_err();
+        run(&mut t, "move", json!({"ids": [f], "by": [1000, 0]}));
+        let e = t.execute("modify", &json!({"id": f, "boundary": [[0, 0], [100, 4000], [4000, 0], [0, 2000]]})).unwrap_err();
         assert!(e.contains("isn't a simple outline") && e.contains("edit_boundary"), "{e}");
         run(&mut t, "edit_boundary", json!({"id": f, "sketch": square(0.0, 0.0, 4000.0)}));
         run(&mut t, "move", json!({"ids": [f], "by": [1000, 0]}));
@@ -1508,7 +1721,8 @@ mod command_tests {
     }
 }
 
-/// Hostile and dense sketches: each finishes well under a second.
+/// Hostile and dense sketches: each takes a few steps, or is refused after the most a sketch is given. (Steps, not seconds: a
+/// test that asserts a time fails on a busy machine. The bounds are about twice what each took when they were written.)
 #[cfg(test)]
 mod hostile_tests {
     use std::time::Instant;
@@ -1517,13 +1731,14 @@ mod hostile_tests {
 
     use crate::engine::Session;
 
-    /// Runs `id` and says how long it took, seconds.
-    fn timed(s: &mut Session, id: &str, p: &Value) -> (Result<Value, String>, f64) {
-        let t = Instant::now();
+    /// Runs `id` and says how many steps the sketches it solved took ([`super::SPENT`]). Not how long: that varies with the
+    /// load of the machine, steps do not (the seconds go to stderr, for whoever reads them).
+    fn timed(s: &mut Session, id: &str, p: &Value) -> (Result<Value, String>, usize) {
+        let (t, before) = (Instant::now(), super::SPENT.with(std::cell::Cell::get));
         let r = s.execute(id, p);
-        let took = t.elapsed().as_secs_f64();
-        eprintln!("{id}: {took:.3} s");
-        (r, took)
+        let steps = super::SPENT.with(std::cell::Cell::get) - before;
+        eprintln!("{id}: {steps} steps, {:.3} s", t.elapsed().as_secs_f64());
+        (r, steps)
     }
 
     /// `n` concentric circles from radius `r0`, `step` mm apart, as sketch lines.
@@ -1534,9 +1749,9 @@ mod hostile_tests {
     #[test]
     fn ten_thousand_parallel_lines_are_named_open_at_once() {
         let lines: Vec<Value> = (0..10_000).map(|i| json!([[0, i * 5], [1000, i * 5]])).collect();
-        let (r, took) = timed(&mut Session::new(), "sketch", &json!({"lines": lines}));
+        let (r, steps) = timed(&mut Session::new(), "sketch", &json!({"lines": lines}));
         assert!(r.unwrap_err().contains("open"));
-        assert!(took < 1.0, "{took} s");
+        assert!(steps <= 700_000, "{steps} steps");
     }
 
     #[test]
@@ -1551,23 +1766,23 @@ mod hostile_tests {
             json!({"points": pts, "closed": true})
         };
         let lines: Vec<Value> = (0..5).map(|k| ring(1.0e6 + 2.0e4 * k as f64)).collect();
-        let (r, took) = timed(&mut Session::new(), "sketch", &json!({"lines": lines}));
+        let (r, steps) = timed(&mut Session::new(), "sketch", &json!({"lines": lines}));
         assert!(r.is_ok(), "{r:?}");
-        assert!(took < 1.0, "{took} s");
+        assert!(steps <= 1_500_000, "{steps} steps");
     }
 
     #[test]
     fn concentric_circles_at_the_cap_solve_at_once_and_past_it_are_refused_at_once() {
         let mut s = Session::new();
-        let (r, took) = timed(&mut s, "sketch", &json!({"lines": circles(10, 1.0e6, 1000.0)}));
+        let (r, steps) = timed(&mut s, "sketch", &json!({"lines": circles(10, 1.0e6, 1000.0)}));
         assert_eq!(r.map(|v| v["regions"].as_array().map(Vec::len)), Ok(Some(5)));
-        assert!(took < 1.0, "{took} s");
-        let (r, took) = timed(&mut s, "sketch", &json!({"lines": circles(40, 1.0e6, 1000.0)}));
+        assert!(steps <= 2_000_000, "{steps} steps");
+        let (r, steps) = timed(&mut s, "sketch", &json!({"lines": circles(40, 1.0e6, 1000.0)}));
         assert!(r.is_ok() || r.as_ref().is_err_and(|e| e.contains("pieces")), "{r:?}");
-        assert!(took < 1.0, "{took} s");
-        let (r, took) = timed(&mut s, "sketch", &json!({"lines": circles(100, 1.0e6, 1000.0)}));
+        assert!(steps <= 14_000_000, "{steps} steps");
+        let (r, steps) = timed(&mut s, "sketch", &json!({"lines": circles(100, 1.0e6, 1000.0)}));
         assert!(r.unwrap_err().contains("pieces"));
-        assert!(took < 1.0, "{took} s");
+        assert!(steps <= 1_000, "{steps} steps");
     }
 
     /// `n` rectangles inside one another, 20 mm apart, each a closed polyline of 640 points, as sketch lines.
@@ -1593,22 +1808,22 @@ mod hostile_tests {
     #[test]
     fn rectangles_of_six_hundred_points_inside_one_another_are_refused_not_waited_for() {
         // 180,000 pieces, each loop inside every one outside it: 25 million points to ask about.
-        let (r, took) = timed(&mut Session::new(), "sketch", &json!({"lines": nested_rectangles(280)}));
+        let (r, steps) = timed(&mut Session::new(), "sketch", &json!({"lines": nested_rectangles(280)}));
         let e = r.unwrap_err();
         assert!(e.contains("nested too deeply"), "{e}");
-        assert!(took < 1.0, "{took} s");
+        assert!(steps <= 36_000_000, "{steps} steps");
         // Half as many are a quarter of that: solved, every other one a hole.
-        let (r, took) = timed(&mut Session::new(), "sketch", &json!({"lines": nested_rectangles(140)}));
+        let (r, steps) = timed(&mut Session::new(), "sketch", &json!({"lines": nested_rectangles(140)}));
         assert_eq!(r.map(|v| v["regions"].as_array().map(Vec::len)), Ok(Some(70)));
-        assert!(took < 1.0, "{took} s");
+        assert!(steps <= 16_000_000, "{steps} steps");
     }
 
     #[test]
     fn a_hundred_wide_arcs_are_solved_or_refused_at_once() {
         let arcs: Vec<Value> = (0..100).map(|k| json!([[0, k], [2.0e6, k], [1.0e6, 1.0e6 + k as f64]])).collect();
-        let (r, took) = timed(&mut Session::new(), "sketch", &json!({"lines": arcs}));
+        let (r, steps) = timed(&mut Session::new(), "sketch", &json!({"lines": arcs}));
         assert!(r.is_err());
-        assert!(took < 1.0, "{took} s");
+        assert!(steps <= 1_000, "{steps} steps");
     }
 
     #[test]
@@ -1619,34 +1834,34 @@ mod hostile_tests {
                 json!([(1.0e6 * a.cos()).round(), (1.0e6 * a.sin()).round()])
             })
             .collect();
-        let (r, took) = timed(&mut Session::new(), "floor", &json!({"boundary": pts}));
+        let (r, steps) = timed(&mut Session::new(), "floor", &json!({"boundary": pts}));
         assert!(r.is_ok(), "{r:?}");
-        assert!(took < 1.0, "{took} s");
+        assert!(steps <= 200_000, "{steps} steps");
     }
 
     #[test]
     fn ten_thousand_parallel_diagonals_are_refused_not_waited_for() {
         // Every box holds every other: fifty million pairs to look at, none of them crossing.
         let lines: Vec<Value> = (0..10_000).map(|i| json!([[0, i * 100], [1.0e6, 1.0e6 + i as f64 * 100.0]])).collect();
-        let (r, took) = timed(&mut Session::new(), "sketch", &json!({"lines": lines}));
+        let (r, steps) = timed(&mut Session::new(), "sketch", &json!({"lines": lines}));
         let e = r.unwrap_err();
         assert!(e.contains("too close together"), "{e}");
-        assert!(took < 1.0, "{took} s");
+        assert!(steps <= 12_000_000, "{steps} steps");
     }
 
     #[test]
     fn a_sketch_kept_with_too_many_pieces_is_refused_by_the_model_as_the_command_refuses_it() {
         let mut s = Session::new();
         let f = s.execute("floor", &json!({"boundary": [[0, 0], [4000, 0], [4000, 4000], [0, 4000]]})).unwrap()["id"].clone();
-        let (r, took) = timed(&mut s, "modify", &json!({"id": f, "sketch": circles(100, 1.0e6, 1000.0)}));
+        let (r, steps) = timed(&mut s, "modify", &json!({"id": f, "sketch": circles(100, 1.0e6, 1000.0)}));
         assert!(r.unwrap_err().contains("straight pieces"));
-        assert!(took < 1.0, "{took} s");
+        assert!(steps <= 1_000, "{steps} steps");
     }
 
     #[test]
     fn twenty_circles_in_a_filled_region_solve_at_once() {
-        let (r, took) = timed(&mut Session::new(), "filled_region", &json!({"sketch": circles(20, 1.0e6, 1000.0)}));
+        let (r, steps) = timed(&mut Session::new(), "filled_region", &json!({"sketch": circles(20, 1.0e6, 1000.0)}));
         assert!(r.is_ok(), "{r:?}");
-        assert!(took < 1.0, "{took} s");
+        assert!(steps <= 10_000_000, "{steps} steps");
     }
 }

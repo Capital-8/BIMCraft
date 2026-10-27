@@ -144,6 +144,25 @@ fn linework_remove_takes_off_the_nearest_edge_and_not_every_edge_within_reach() 
 }
 
 #[test]
+fn linework_remove_takes_nothing_off_when_the_edge_nearest_the_pick_has_none() {
+    let mut s = Session::new();
+    run(&mut s, "type", json!({"category": "wall", "name": "Partition", "thickness": 100}));
+    let w = run(&mut s, "wall", json!({"points": [[0, 0], [4000, 0]], "type": "Partition"}))["ids"][0].as_u64().unwrap_or_default();
+    let held = |s: &Session| crate::graphics::graphics_of(&s.model, 100000).map_or(0, |g| g.linework.len());
+    // Only the north face restyled; picked at 45 mm from the south face, which has none, 95 mm from the north face's.
+    run(&mut s, "linework", json!({"view": 100000, "id": w, "at": [1000, 45], "style": "Wide Lines"}));
+    let r = run(&mut s, "linework", json!({"view": 100000, "id": w, "at": [1000, -45], "remove": true}));
+    assert_eq!((r["removed"].clone(), held(&s)), (json!(0), 1), "the south face had none: {r}");
+    let r = run(&mut s, "linework", json!({"view": 100000, "id": w, "at": [1000, 45], "remove": true}));
+    assert_eq!((r["removed"].clone(), held(&s)), (json!(1), 0), "{r}");
+    // Linework on an edge the wall no longer draws is picked off by the nearest of it.
+    run(&mut s, "linework", json!({"view": 100000, "id": w, "at": [1000, 45], "style": "Wide Lines"}));
+    run(&mut s, "modify", json!({"id": w, "end": [4000, 3000]}));
+    let r = run(&mut s, "linework", json!({"view": 100000, "id": w, "at": [2000, 45], "remove": true}));
+    assert_eq!((r["removed"].clone(), held(&s)), (json!(1), 0), "{r}");
+}
+
+#[test]
 fn an_unknown_field_in_a_group_members_element_is_left_out_as_it_is_in_any_elements() {
     let mut s = Session::new();
     run(&mut s, "wall", json!({"points": [[0, 0], [4000, 0]]}));
@@ -231,6 +250,61 @@ fn a_revision_cloud_stays_within_the_points_a_curve_draws_and_never_cuts_a_corne
     // A cloud and an insulation are two drawings of one line: one is asked for.
     let e = err(&mut s, "detail_line", json!({"start": [0, 0], "end": [1000, 0], "cloud": 100, "insulation": 100}));
     assert!(e.contains("cloud") && e.contains("insulation"), "{e}");
+}
+
+/// What `MAX_PLACED` (10,000) hatched regions cost a plan to draw: `cargo test -p bimcraft-core --lib probe_ -- --ignored
+/// --nocapture` (and with `--release`), whose numbers `MAX_PLACED` and the docs quote.
+#[test]
+#[ignore = "a probe: cargo test -p bimcraft-core --lib probe_ -- --ignored --nocapture"]
+fn probe_the_cost_of_the_most_hatched_regions_a_view_may_place() {
+    for (side, of) in [(300.0, "Diagonal Up"), (3000.0, "Diagonal Up"), (30000.0, "Diagonal Up"), (3000.0, "Crosshatch"), (3000.0, "Brick")]
+    {
+        let mut s = Session::new();
+        run(&mut s, "wall", json!({"points": [[0, 0], [8000, 0], [8000, 6000], [0, 6000]], "closed": true}));
+        // Five regions to a group, repeated 2,000 times (the most a repeat takes): 10,000 placed.
+        let regions: Vec<Id> = (0..5)
+            .map(|k| {
+                let at = f64::from(k) * 50.0;
+                let sketch = json!([
+                    [[at, 0], [at + side, 0]],
+                    [[at + side, 0], [at + side, side]],
+                    [[at + side, side], [at, side]],
+                    [[at, side], [at, 0]]
+                ]);
+                id_of(&run(&mut s, "filled_region", json!({"sketch": sketch, "type": of, "line_style": null})))
+            })
+            .collect();
+        run(&mut s, "create_group", json!({"ids": regions, "name": "Hatched"}));
+        let r = run(&mut s, "repeating_detail", json!({"type": "Hatched", "start": [0, 0], "end": [199_800, 0], "spacing": 100}));
+        let at = std::time::Instant::now();
+        let d = crate::render::plan(&s.model, 100000, 1600, 1000);
+        eprintln!("{} placed, {of} regions {side} mm across: {:?}, {} prims", r["count"], at.elapsed(), d.prims.len());
+    }
+}
+
+#[test]
+fn a_cloud_round_a_huge_circle_is_drawn_without_listing_its_scallops_first() {
+    // A span asks for the scallops that fit it, and never more than the most a curve may be cut into (plus the one that
+    // says it is too many), whatever its length: the count sizes an allocation.
+    let most = crate::curves::MAX_DRAWN / 8;
+    assert_eq!(crate::lines::scallops(1000.0, 300.0, most), 3);
+    assert_eq!(crate::lines::scallops(1.0, 300.0, most), 1);
+    assert_eq!(crate::lines::scallops(1e9, 1.5, most), most + 1);
+    assert_eq!(crate::lines::scallops(f64::MAX, 1.5, most), most + 1);
+    let mut s = Session::new();
+    run(&mut s, "wall", json!({"points": [[0, 0], [8000, 0], [8000, 6000], [0, 6000]], "closed": true}));
+    // Arcs 1.5 mm long round these circles are 84 million, 419 million and 2 billion scallops: listing their cuts took 670 MB,
+    // 3.4 GB and 16.8 GB, and the plan that drew them aborted.
+    for radius in [2e7, 1e8, 5e8] {
+        let id = id_of(&run(&mut s, "detail_line", json!({"centre": [0, 0], "radius": radius, "cloud": 1.5})));
+        let Some(Element::DetailLine(l)) = s.model.elements.get(id) else { panic!("no line") };
+        let n = l.drawn().len();
+        assert!(n > 8 && n <= crate::curves::MAX_DRAWN, "{radius}: {n} points");
+    }
+    // An open line from -5e8 to 5e8 is one span, as long as the circles' way round.
+    run(&mut s, "detail_line", json!({"start": [-5e8, 0], "end": [5e8, 0], "cloud": 1.5}));
+    let png = run(&mut s, "render", json!({"view": 100000, "width": 64, "height": 64}));
+    assert!(png["pngBase64"].as_str().is_some_and(|p| !p.is_empty()), "{png}");
 }
 
 #[test]

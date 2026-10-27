@@ -20,7 +20,9 @@ The README lists what the engine, the desktop, the CLI and the MCP server do. Wh
   Editor), textures by material or from a picture, Paint, favorites kept for every project, and packages for Windows,
   Linux (AppImage, Flatpak, deb, rpm, Arch, tarball, riscv64) and macOS. Auto-update from GitHub releases is done for the Windows installer's copy, an AppImage and the macOS app, though none of it has run on a real system yet.
 - **The file** is `.bimcraft` JSON with a `format` version (6 now): an older file is migrated on open, and a newer one is
-  refused, saying so. A field this version doesn't know (a newer one's, in the same format) is left out and named, and the
+  refused, saying so. Every save is format 6, with or without the detailing features, so 0.8's build (which reads up to 5)
+  refuses even a plain project saved by this one ("saved by a newer BIMCraft (file format 6; this one reads up to 5)"): the
+  release notes say so. A field this version doesn't know (a newer one's, in the same format) is left out and named, and the
   rest opens; commands still refuse a key they don't know.
 - **Ids and GUIDs**, as Revit's ElementId and UniqueId: every element, every library entry (types, materials, families,
   parameters, filters, templates, phases, design options) and every part (layers, a family's forms and symbols) has a
@@ -171,7 +173,6 @@ The goal is that someone could run a real small project on it.
 |---|---|
 | GPU renderer (wgpu) for 3D: shaded views draw on the card since 0.7 (opt-in), and surfaces seen through; still to come there are hidden line and wireframe, and then plans, perspective cameras, a section box, walkthroughs, shadows and sun, silhouettes | L |
 | A navigation gizmo, steering and orbit around the selection; tiled windows (views already float in windows of their own, and palettes dock and float). Not Revit's ViewCube, which is Autodesk's trademark and design: an original one in the manner of Blender's open-source navigation gizmo (axis balls to click to look along an axis, drag to orbit), drawn in code | M |
-| A dark theme with a white canvas: dark ribbon, palettes and browser around views drawn on white paper, as a choice beside the light and the dark theme (today the dark theme darkens the canvas too) | S |
 | Editable keyboard shortcuts; project templates of BIMCraft's own on the start page | S |
 | Accessibility: keyboard reach for every dialog and screen-reader labels (egui's AccessKit) | M |
 | A file-format stability promise, with 1.x files opening in every later 1.x | S |

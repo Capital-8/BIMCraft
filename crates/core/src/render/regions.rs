@@ -17,8 +17,9 @@ pub(super) struct Layers {
     on: bool,
     end: usize,
     section: Option<Id>,
-    /// What a section's picture shows, as runs of its pixels, when whoever draws the section has the picture to hand in.
-    runs: Option<Vec<Prim>>,
+    /// What a section's picture shows, as runs of its pixels, when whoever draws the section has the picture to hand in, and
+    /// whether it showed more than [`MAX_RUNS`] of them.
+    runs: Option<(Vec<Prim>, bool)>,
     ink: Option<Vec<Ink>>,
     masks: Vec<Mask>,
 }
@@ -42,6 +43,22 @@ pub(super) fn wanted(m: &Model, view: Id) -> bool {
         Element::RepeatingDetail(r) => m.same(r.view, view),
         _ => false,
     })
+}
+
+#[cfg(test)]
+thread_local! {
+    /// What drawing regions has cost on this thread, in steps: the points of rings a line was cut by, of polygons a fill was.
+    /// The tests assert on it, not on time, which varies with the load of the machine.
+    static SPENT: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    /// The pictures of sections drawn on this thread.
+    static PICTURES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    /// The most runs of ink [`runs`] keeps on this thread, which a test sets low to reach the cap with a small picture.
+    static MOST: std::cell::Cell<usize> = const { std::cell::Cell::new(MAX_RUNS) };
+}
+
+#[cfg(test)]
+fn spend(n: usize) {
+    SPENT.with(|s| s.set(s.get().saturating_add(n)));
 }
 
 struct Ink {
@@ -74,7 +91,12 @@ pub(super) fn foreground(d: &mut Drawing, m: &Model, rings: &[Vec<P2>]) {
     }
     if d.regions.ink.is_none() {
         let runs = d.regions.runs.take();
-        let ink = visible(d, m, runs);
+        let (ink, cut) = visible(d, m, runs);
+        if cut {
+            d.notes.push(format!(
+                "this view's picture has more than {MAX_RUNS} runs of ink, more than a region keeps above it: the ink of its last rows is under the region"
+            ));
+        }
         d.regions.ink = Some(ink);
     }
     let Some(area) = Area::new(rings, &d.regions.masks) else { return };
@@ -106,16 +128,31 @@ pub(super) fn foreground(d: &mut Drawing, m: &Model, rings: &[Vec<P2>]) {
     }
 }
 
-/// The picture's pixels that aren't paper, as horizontal runs one pixel high, in `view`'s pixels: the picture may be drawn at a
-/// multiple of `view` (a screen with more pixels to the point).
-fn runs(image: &Image, view: View) -> Vec<Prim> {
-    // ponytail: a picture of noise gives no more than this many runs, and its rest has no ink above a region.
-    const MAX_RUNS: usize = 250_000;
+/// The most runs of ink [`runs`] keeps of one picture.
+const MAX_RUNS: usize = 250_000;
+
+/// The widest run of ink that [`runs`] joins to the one above it: a line the width of a pen, which a round cap leaves a pixel
+/// past the end of at most (a blob of ink is kept a row at a time).
+const THIN: u32 = 2;
+
+/// The picture's pixels that aren't paper, as runs in `view`'s pixels (the picture may be drawn at a multiple of `view`, a
+/// screen with more pixels to the point): horizontal ones a row high, except that a run of at most [`THIN`] columns that sits on
+/// one of the row above, end to end and of its colour, is that run a row taller, a vertical line (a wall's edge 2,000 rows tall
+/// is one line, not 2,000). And whether the picture had more runs than [`MAX_RUNS`], the rest of which are not kept.
+fn runs(image: &Image, view: View) -> (Vec<Prim>, bool) {
+    // Columns from and to, rows from and to, colour.
+    type Run = (u32, u32, u32, u32, Rgb);
     let (rx, ry) = (image.width as f32 / view.width.max(1) as f32, image.height as f32 / view.height.max(1) as f32);
-    let mut out = Vec::new();
+    #[cfg(test)]
+    let most = MOST.with(std::cell::Cell::get);
+    #[cfg(not(test))]
+    let most = MAX_RUNS;
+    let mut found: Vec<Run> = Vec::new();
+    let (mut above, mut cut): (Vec<usize>, bool) = (Vec::new(), false);
     for y in 0..image.height {
+        let mut now = Vec::new();
         let mut x = 0;
-        while x < image.width && out.len() < MAX_RUNS {
+        while x < image.width {
             let c = image.color(f64::from(x), f64::from(y));
             if c == PAPER {
                 x += 1;
@@ -126,20 +163,48 @@ fn runs(image: &Image, view: View) -> Vec<Prim> {
             while x < image.width && image.color(f64::from(x), f64::from(y)) == c {
                 x += 1;
             }
-            let at = (y as f32 + 0.5) / ry;
-            out.push(Prim::Line {
-                pts: vec![(start as f32 / rx, at), (x as f32 / rx, at)],
-                width: 1.0 / ry,
-                color: c,
-                dash: None,
-                closed: false,
-            });
+            // The run above it with the same columns, if there is one (those above are in order of their columns).
+            let on = above
+                .binary_search_by_key(&start, |&i| found[i].0)
+                .ok()
+                .map(|k| above[k])
+                .filter(|&i| x - start <= THIN && found[i].1 == x && found[i].4 == c);
+            let i = match on {
+                Some(i) => {
+                    found[i].3 = y + 1;
+                    i
+                }
+                None if found.len() < most => {
+                    found.push((start, x, y, y + 1, c));
+                    found.len() - 1
+                }
+                None => {
+                    cut = true;
+                    continue;
+                }
+            };
+            now.push(i);
         }
+        above = now;
     }
-    out
+    let prims = found
+        .into_iter()
+        .map(|(x0, x1, y0, y1, color)| {
+            let (pts, width) = if y1 - y0 > 1 {
+                let at = (x0 + x1) as f32 / 2.0 / rx;
+                (vec![(at, y0 as f32 / ry), (at, y1 as f32 / ry)], (x1 - x0) as f32 / rx)
+            } else {
+                let at = (y0 + y1) as f32 / 2.0 / ry;
+                (vec![(x0 as f32 / rx, at), (x1 as f32 / rx, at)], 1.0 / ry)
+            };
+            Prim::Line { pts, width, color, dash: None, closed: false }
+        })
+        .collect();
+    (prims, cut)
 }
 
-fn visible(d: &Drawing, m: &Model, picture: Option<Vec<Prim>>) -> Vec<Ink> {
+/// The model's visible ink, and whether the picture of a section had more runs of ink than were kept.
+fn visible(d: &Drawing, m: &Model, picture: Option<(Vec<Prim>, bool)>) -> (Vec<Ink>, bool) {
     let end = d.regions.end.min(d.prims.len());
     struct Cover {
         index: usize,
@@ -164,13 +229,15 @@ fn visible(d: &Drawing, m: &Model, picture: Option<Vec<Prim>>) -> Vec<Ink> {
     let near = |extent: Option<(P2, P2)>, cover: &Cover| extent.is_some_and(|e| overlap(e, (cover.lo, cover.hi)));
     let mut out = Vec::new();
     // A section's projection is a hidden-line image. Its only non-paper pixels are already-visible edges; keep these as
-    // horizontal pixel runs, without lifting the paper-coloured faces.
-    let picture = match (picture, d.regions.section) {
+    // pixel runs, without lifting the paper-coloured faces.
+    let (picture, cut) = match (picture, d.regions.section) {
         (Some(runs), _) => runs,
         (None, Some(section)) => {
+            #[cfg(test)]
+            PICTURES.with(|n| n.set(n.get() + 1));
             section_image(m, &Scene::new(m), section, d.view, &[]).map(|image| runs(&image, d.view)).unwrap_or_default()
         }
-        (None, None) => Vec::new(),
+        (None, None) => (Vec::new(), false),
     };
     for prim in picture {
         let span = extent(&prim);
@@ -198,7 +265,7 @@ fn visible(d: &Drawing, m: &Model, picture: Option<Vec<Prim>>) -> Vec<Ink> {
         }
         out.extend(parts.into_iter().map(|prim| Ink { prim, owner: *owner, part: *part, pen: *pen }));
     }
-    out
+    (out, cut)
 }
 
 /// A box: its lowest corner and its highest.
@@ -272,6 +339,8 @@ fn outside(prim: &Prim, view: View, rings: &[Vec<P2>]) -> Vec<Prim> {
     struct Outside<'a>(&'a [Vec<P2>]);
     impl Keep for Outside<'_> {
         fn spans(&self, a: P2, u: P2, len: f64) -> Vec<(f64, f64)> {
+            #[cfg(test)]
+            spend(self.0.iter().map(Vec::len).sum());
             let over = self.0.iter().flat_map(|r| view3d::crossings(r, a, u)).map(|(lo, hi)| (lo.max(0.0), hi.min(len)));
             gaps(joined(over.filter(|(lo, hi)| hi - lo > EPS).collect()), len)
         }
@@ -289,7 +358,15 @@ fn outside(prim: &Prim, view: View, rings: &[Vec<P2>]) -> Vec<Prim> {
         Prim::Line { .. } => cut(prim, view, &Outside(rings)),
         Prim::Fill { rings: source, color } => {
             let source: Vec<Vec<P2>> = source.iter().map(|r| r.iter().map(|p| view.mm(*p)).collect()).collect();
-            fill(rings.iter().fold(source, |pieces, r| walls::minus(&pieces, r)), view, *color)
+            fill(
+                rings.iter().fold(source, |pieces, r| {
+                    #[cfg(test)]
+                    spend(pieces.iter().map(Vec::len).sum::<usize>() + r.len());
+                    walls::minus(&pieces, r)
+                }),
+                view,
+                *color,
+            )
         }
         Prim::Image { .. } => Vec::new(),
     }
@@ -461,13 +538,21 @@ impl<'a> Area<'a> {
                 let mut parts: Vec<Vec<P2>> = Vec::new();
                 for r in source.iter().flat_map(|r| walls::convex_pieces(r)) {
                     let Some(rb) = bounds(&r) else { continue };
-                    parts.extend(clips.iter().filter(|(_, cb)| overlap(rb, *cb)).filter_map(|(c, _)| walls::split(r.clone(), c).0));
+                    parts.extend(clips.iter().filter(|(_, cb)| overlap(rb, *cb)).filter_map(|(c, _)| {
+                        #[cfg(test)]
+                        spend(r.len() + c.len());
+                        walls::split(r.clone(), c).0
+                    }));
                 }
                 for mask in self.masks {
                     parts = parts
                         .into_iter()
                         .flat_map(|p| match bounds(&p) {
-                            Some(b) if overlap(b, (mask.lo, mask.hi)) => walls::split(p, &mask.ring).1,
+                            Some(b) if overlap(b, (mask.lo, mask.hi)) => {
+                                #[cfg(test)]
+                                spend(p.len() + mask.ring.len());
+                                walls::split(p, &mask.ring).1
+                            }
                             _ => vec![p],
                         })
                         .collect();
@@ -482,6 +567,8 @@ impl<'a> Area<'a> {
     fn pieces(&self) -> &[(Vec<P2>, Extent)] {
         self.pieces.get_or_init(|| {
             let (outline, holes) = self.rings.split_first().map_or((&[][..], &[][..]), |(o, h)| (o.as_slice(), h));
+            #[cfg(test)]
+            spend(self.rings.iter().map(Vec::len).sum());
             let cut = holes.iter().fold(walls::convex_pieces(outline), |ps, hole| walls::minus(&ps, hole));
             cut.into_iter().filter_map(|p| Some((bounds(&p)?, p))).map(|(b, p)| (p, b)).collect()
         })
@@ -504,6 +591,8 @@ impl Keep for Within<'_> {
             return Vec::new();
         }
         let near: Vec<&Vec<P2>> = area.rings.iter().zip(&area.boxes).filter(|(_, bx)| overlap(reach, **bx)).map(|(r, _)| r).collect();
+        #[cfg(test)]
+        spend(near.iter().map(|r| r.len()).sum());
         // Inside an odd number of rings: between the crossings of their edges, paired off; a vertex on the line counts as
         // just under it.
         let n = u.perp();
@@ -529,7 +618,11 @@ impl Keep for Within<'_> {
             .masks
             .iter()
             .filter(|mk| overlap(seg, (mk.lo, mk.hi)))
-            .flat_map(|mk| view3d::crossings(&mk.ring, a, u))
+            .flat_map(|mk| {
+                #[cfg(test)]
+                spend(mk.ring.len());
+                view3d::crossings(&mk.ring, a, u)
+            })
             .map(|(x, y)| (x.max(0.0), y.min(len)))
             .filter(|(x, y)| y - x > EPS)
             .collect();

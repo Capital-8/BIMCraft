@@ -786,7 +786,9 @@ pub static ALL: &[Command] = &[
         "Join into Polyline",
         &["PJ"],
         "{ids: [id, …]} joins detail lines of one view, lines, arcs and polylines that meet end to end, into one polyline in \
-         the first's line style (closed when they come round); the first keeps its id, the rest are deleted",
+         the first's line style (closed when they come round); the first keeps its id, the rest are deleted, and a dimension \
+         that measured one of the rest loses that reference (and is deleted, left with fewer than two): the reply's `notes` \
+         say which",
         join_polyline,
     ),
     edit(
@@ -803,7 +805,8 @@ pub static ALL: &[Command] = &[
         &[],
         "{id, at: [x, y], delete?} a detail line (a polyline, or a spline of either kind) with a vertex more where it passes \
          nearest `at` (a spline by its control points gains a control point and keeps its shape exactly), or with `delete` \
-         one fewer: the corner, control point or point passed through nearest `at`",
+         one fewer: the corner, control point or point passed through nearest `at`; `at` is within 100 mm of the line (of a \
+         vertex, to delete one), or it is refused",
         vertex,
     ),
     edit(
@@ -1056,7 +1059,9 @@ pub static ALL: &[Command] = &[
         "{view?: a level's, section's or elevation's name or id, a sheet's number, or {3D}, ceiling?, width?, height?, path?, \
          azimuth?, elevation?} a level's floor plan (with `ceiling`, its reflected ceiling plan, looking up from 2300 mm), a section, an elevation, a sheet (at 5 px a paper mm), or the 3D view seen from \
          `azimuth` degrees round from east (counter-clockwise) and `elevation` degrees up (by default from the south-east, \
-         30° up), as a PNG (pngBase64), or written to a path: .png, .svg for a plan, .pdf for a sheet",
+         30° up), as a PNG (pngBase64), or written to a path: .png, .svg for a plan, .pdf for a sheet. A plan, section, \
+         elevation or sheet that could not draw something as asked (a fill pattern too dense for the view, more ink behind \
+         a region than is kept above it) says so in the reply's `notes`",
         render_view,
     ),
     edit(
@@ -2156,8 +2161,8 @@ fn render_view(s: &mut Session, p: &Value) -> R {
         _ => None,
     });
     if let Some((id, name, kind)) = cut {
-        let png = render::section_png(m, id, render::section_fit(m, id, w3, h3)).map_err(|e| bad(c, e))?;
-        return png_reply(c, p, png, json!({"width": w3, "height": h3, "view": name, "kind": kind}));
+        let (png, notes) = render::section_png_noted(m, id, render::section_fit(m, id, w3, h3)).map_err(|e| bad(c, e))?;
+        return png_reply(c, p, png, with_notes(json!({"width": w3, "height": h3, "view": name, "kind": kind}), &notes));
     }
     // A sheet, by number, name or id, unless a level is called that.
     let level = match view {
@@ -2174,10 +2179,10 @@ fn render_view(s: &mut Session, p: &Value) -> R {
     });
     if let Some((id, number, size)) = paper_of {
         let d = sheet::draw(m, id).ok_or_else(|| bad(c, format!("sheet {number} can't be drawn")))?;
-        let info = with_notes(json!({"width": d.view.width, "height": d.view.height, "view": number, "kind": "sheet"}), &d);
+        let info = with_notes(json!({"width": d.view.width, "height": d.view.height, "view": number, "kind": "sheet"}), &d.notes);
         if let Some(path) = string(c, p, "path")?.filter(|path| ext(Path::new(path)) == "pdf") {
             std::fs::write(&path, pdf::pdf(&[(&d, size)])).map_err(|e| bad(c, format!("{path}: {e}")))?;
-            return Ok(json!({"path": path, "view": info["view"], "kind": "sheet"}));
+            return Ok(with_notes(json!({"path": path, "view": info["view"], "kind": "sheet"}), &d.notes));
         }
         return png_reply(c, p, render::png(&d)?, info);
     }
@@ -2190,19 +2195,19 @@ fn render_view(s: &mut Session, p: &Value) -> R {
         Some(path) => {
             let path = PathBuf::from(path);
             write_plan(&d, &path)?;
-            Ok(with_notes(json!({"path": path, "width": w, "height": h, "view": level_name(m, level), "kind": kind}), &d))
+            Ok(with_notes(json!({"path": path, "width": w, "height": h, "view": level_name(m, level), "kind": kind}), &d.notes))
         }
         None => Ok(with_notes(
             json!({"pngBase64": base64(&render::png(&d)?), "width": w, "height": h, "view": level_name(m, level), "kind": kind}),
-            &d,
+            &d.notes,
         )),
     }
 }
 
 /// `reply` with what the drawing could not draw as asked (`notes`), when it could not.
-fn with_notes(mut reply: Value, d: &render::Drawing) -> Value {
-    if !d.notes.is_empty() {
-        reply["notes"] = json!(d.notes);
+fn with_notes(mut reply: Value, notes: &[String]) -> Value {
+    if !notes.is_empty() {
+        reply["notes"] = json!(notes);
     }
     reply
 }
@@ -6633,9 +6638,23 @@ fn join_polyline(s: &mut Session, p: &Value) -> R {
     let curve =
         crate::curves::join(&curves).ok_or_else(|| bad(c, "the lines don't make one chain, each end meeting the next within 1 mm"))?;
     // The lines joined in go as Delete takes them: a dimension that measured one loses it (and goes, left with fewer than two).
+    let joined_in: Vec<Guid> = ids[1..].iter().map(|id| m.guid(*id)).collect();
+    let measuring: Vec<Id> = m
+        .elements
+        .iter()
+        .filter(|(_, e)| matches!(e, Element::Dimension(d) if d.refs.iter().any(|r| joined_in.contains(&r.id))))
+        .map(|(id, _)| *id)
+        .collect();
     delete(s, &json!({"ids": &ids[1..]}))?;
     s.model_mut().elements.insert(ids[0], Element::DetailLine(DetailLine { curve, ..first }));
-    Ok(json!({"id": ids[0]}))
+    let notes: Vec<String> = measuring
+        .into_iter()
+        .map(|d| match s.model.elements.get(d) {
+            Some(_) => format!("dimension {d} measured a line that is joined in: it lost that reference"),
+            None => format!("dimension {d} measured a line that is joined in, was left with fewer than two references, and is deleted"),
+        })
+        .collect();
+    Ok(if notes.is_empty() { json!({"id": ids[0]}) } else { json!({"id": ids[0], "notes": notes}) })
 }
 
 fn offset(s: &mut Session, p: &Value) -> R {
@@ -7233,7 +7252,11 @@ fn curve_param(c: &str, p: &Value) -> Result<crate::curves::Curve, String> {
         .unwrap_or_default();
     let f: crate::curves::Fields =
         serde_json::from_value(Value::Object(fields)).map_err(|e| bad(c, format!("{e}: a line is {}", crate::curves::FORMS)))?;
-    let curve = rounded(f.curve().map_err(|e| bad(c, e))?);
+    // Checked as given first, so that a rule names the number that was given: 359.9999999999° is rounded to 360 below, and
+    // would be refused for turning a whole circle, where the rule that refuses it is how far its huge circle reaches.
+    let given = f.curve().map_err(|e| bad(c, e))?;
+    given.check("the line").map_err(|e| bad(c, e))?;
+    let curve = rounded(given);
     curve.check("the line").map_err(|e| bad(c, e))?;
     Ok(curve)
 }
@@ -7301,14 +7324,19 @@ fn linework(s: &mut Session, p: &Value) -> R {
     let guid = m.guid(id);
     let source = m.plan_source(key);
     if remove {
+        // The edge the element draws nearest `at`, and the Linework on that edge, no other: both faces of a thin wall lie
+        // within reach of one pick, and the nearer may have none. An edge the element no longer draws there is gone: its
+        // Linework is taken by the nearest of it, so it can still be picked off.
+        let edge = render::edge_at(m, key, id, at, LINEWORK_REACH);
         let g =
             s.model_mut().elements.get_mut(source).and_then(graphics::graphics_mut).ok_or_else(|| bad(c, "that view has no graphics"))?;
-        // The edge nearest `at`, and no other: both faces of a thin wall lie within reach of one pick.
         let dist = |l: &graphics::Linework| geom::dist_to_segment(at, l.from, l.to);
         let nearest = g.linework.iter().filter(|l| l.element == guid).map(dist).fold(f64::INFINITY, f64::min);
         let before = g.linework.len();
-        if nearest <= LINEWORK_REACH {
-            g.linework.retain(|l| l.element != guid || dist(l) > nearest + 1e-3);
+        match edge {
+            Some((from, to)) => g.linework.retain(|l| !(l.element == guid && l.from.dist(from) < 1e-3 && l.to.dist(to) < 1e-3)),
+            None if nearest <= LINEWORK_REACH => g.linework.retain(|l| l.element != guid || dist(l) > nearest + 1e-3),
+            None => {}
         }
         return Ok(json!({"removed": before - g.linework.len()}));
     }
@@ -7655,18 +7683,12 @@ fn filled_region(s: &mut Session, p: &Value) -> R {
     let profile = sketch::solve(&lines)
         .map_err(|e| bad(c, format!("the sketch doesn't close into loops: {}", sketch::say(&e, &sketch::namer(&lines)))))?;
     let view = view_param(c, m, p, true)?;
-    // Solid Black, in the project's language, or its first type.
+    // Solid Black, in the project's language or in English, or its first type.
     let type_name = match name_param(c, p, "type")? {
         Some(n) => n,
-        None => {
-            let solid = m.language.word(crate::fills::SOLID_BLACK);
-            m.region_types
-                .get_key_value(solid)
-                .map(|(k, _)| k)
-                .or(m.region_types.keys().next())
-                .cloned()
-                .ok_or_else(|| bad(c, "the project has no filled region type; make one first"))?
-        }
+        None => crate::fills::default_region_type(&m.region_types, m.language)
+            .cloned()
+            .ok_or_else(|| bad(c, "the project has no filled region type; make one first"))?,
     };
     // Thin Lines unless told; null (or "Invisible") draws none.
     let line_style = match p.get("line_style") {

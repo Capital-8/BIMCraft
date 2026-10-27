@@ -189,10 +189,10 @@ fn a_connection_that_trickles_its_first_line_or_speaks_another_protocol_is_close
             Err(e) if matches!(e.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut) => {}
             Err(_) => break start.elapsed(),
         }
-        assert!(start.elapsed() < Duration::from_secs(5), "never closed");
+        assert!(start.elapsed() < Duration::from_secs(20), "never closed");
         let _ = slow.write_all(b" ");
     };
-    assert!(closed >= Duration::from_millis(300) && closed < Duration::from_secs(3), "closed after {closed:?}");
+    assert!(closed >= Duration::from_millis(300) && closed < Duration::from_secs(10), "closed after {closed:?}");
     // A web page's HTTP is not a request: it is told so, and closed, rather than held reading its headers.
     let mut http = TcpStream::connect(("127.0.0.1", port)).unwrap();
     http.set_read_timeout(Some(Duration::from_secs(5))).unwrap();

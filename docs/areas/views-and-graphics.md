@@ -130,8 +130,9 @@ all owned by the group, so it picks, moves, rotates and mirrors as one. `ungroup
 along a line every `spacing` from its start, each turned along it (at most `MAX_REPEATS`), as Revit's Repeating Detail
 Component does with a detail component. A view draws every member of every group and repeat in it each time, so
 `Model::check` caps what one view places: a group counts its type's members, a repeating detail its members once for each
-repeat, and `MAX_PLACED` (10,000) is the most in a view (of big hatched regions it takes about half a second to draw in a debug
-build; the 200,000 it once allowed took 6 s and 30 million primitives). A member note keeps its own angle under a pure mirror
+repeat, and `MAX_PLACED` (10,000) is the most in a view (measured with the probe `probe_the_cost_of_the_most_hatched_regions_a_view_may_place`,
+10,000 hatched regions take 0.11 s to draw at 3 m across and 0.5 s at 30 m across, 2.8 million primitives, the same in a dev
+build, where the core is built at opt-level 2, and in release; the 200,000 it once allowed took 6 s and 30 million primitives). A member note keeps its own angle under a pure mirror
 (it still reads the right way round) and turns with the group's angle. The file holds a group's members as elements, and
 `Model::read` leaves out of them what this build doesn't know, as it does for any element
 (`/detail_groups/<name>/members/<i>/element/...`). Deleting a line style that a filled region or a group's member is drawn in
@@ -139,8 +140,9 @@ is refused with the region's or the group's name. On the desktop, Annotate > Det
 Create Group, and the right-click menu has Create Group and Ungroup.
 
 A project with any of this (line styles and patterns, fill patterns, region types, detail lines, regions, groups, repeating
-details, sketches) is file format 6. A build that reads up to 5 would fail on it with a serde error, so 6 makes it say that the
-file is from a newer BIMCraft. Nothing in a file of 5 changes, so `Model::migrate` has no step for 5 to 6.
+details, sketches) needs file format 6, and every file is saved as 6 now, with or without any of it: a build that reads up to 5
+would fail on one with a serde error, so 6 makes it say that the file is from a newer BIMCraft (even for a plain project). Nothing
+in a file of 5 changes, so `Model::migrate` has no step for 5 to 6.
 
 The Options Bar's Offset puts a line, an arc or a polyline beside the points clicked; a rectangle, a polygon or a circle grows
 by it as a whole (`grown`, its corners joined), and a spline or an ellipse takes none (`Shape::offsets`). Modify's Offset takes
@@ -259,8 +261,11 @@ polyline that meet stay one line, so its corners keep their joins, and a dashed 
 the cycle a piece begins in are solid lines of their own). A section's ink belongs to the region that keeps it (`Part::Pattern`),
 so a sheet's viewport, which keeps what an element owns, has it. A caller that has the section's picture (the desktop's, a sheet's,
 `section_png`'s) hands it in (`render::section_over`, `section_at_over`), at the view's size or a multiple of it (a screen with more
-pixels to the point), and the ink is the picture's own pixels; `render::section` draws a picture of its own when a non-masking
-region wants one, which costs what the picture does, every call. Masking still hides the model; detail annotation remains above the
+pixels to the point), and the ink is the picture's own pixels, as runs: a row of a pixel's height, and a run of up to two pixels
+that sits on one of the row above (the edge of a tall wall) joined to it as one vertical line, so 200 walls 20 m tall at 4000 x 2600
+px are some hundreds of lines and not a million runs. A picture of more than 250,000 runs (noise, not drawings) keeps the first
+250,000 and the drawing's `notes` say the ink of the last rows is under the region. `render::section` draws a picture of its own
+when a non-masking region wants one, which costs what the picture does, every call. Masking still hides the model; detail annotation remains above the
 region. The same display list feeds the desktop, PNG, SVG and sheet viewports.
 
 Limits, kept as Revit has them or not yet built: a non-masking region with a solid background hides a room's tag text while its outlines
