@@ -568,24 +568,24 @@ pub fn check(who: &str, lines: &[SketchLine]) -> Result<(), String> {
 }
 
 /// The rings an element draws its outline with: a floor's, a ceiling's or a roof's boundary and its openings or courtyards
-/// (what to call them), a shaft's boundary.
+/// (what to call each kind), a shaft's boundary. Every list of rings an element holds is here: one left out is a list a
+/// command can put a bow tie in.
 fn rings_of(e: &Element) -> Option<Rings<'_>> {
-    let (boundary, holes, what): (&[P2], &[Vec<P2>], &str) = match e {
-        Element::Floor(f) => (&f.boundary, &f.openings, "opening"),
-        Element::Ceiling(c) => (&c.boundary, &c.openings, "opening"),
-        Element::Roof(r) if r.extrusion.is_none() => (&r.boundary, &r.courtyards, "courtyard"),
-        Element::Shaft(s) => (&s.boundary, &[], ""),
+    let (boundary, holes): (&[P2], Vec<(&'static str, &[Vec<P2>])>) = match e {
+        Element::Floor(f) => (&f.boundary, vec![("opening", &f.openings)]),
+        Element::Ceiling(c) => (&c.boundary, vec![("opening", &c.openings)]),
+        Element::Roof(r) if r.extrusion.is_none() => (&r.boundary, vec![("courtyard", &r.courtyards), ("opening", &r.openings)]),
+        Element::Shaft(s) => (&s.boundary, Vec::new()),
         _ => return None,
     };
-    Some(Rings { boundary, holes, what })
+    Some(Rings { boundary, holes })
 }
 
-/// An element's outline and its holes, and what its holes are called.
+/// An element's outline and its lists of holes, each with what its holes are called.
 #[derive(PartialEq)]
 struct Rings<'a> {
     boundary: &'a [P2],
-    holes: &'a [Vec<P2>],
-    what: &'static str,
+    holes: Vec<(&'static str, &'a [Vec<P2>])>,
 }
 
 impl Model {
@@ -601,9 +601,10 @@ impl Model {
             if before.elements.get(id).and_then(rings_of).is_some_and(|was| was == now) {
                 continue;
             }
-            let Rings { boundary, holes, what } = now;
-            let rings = std::iter::once(("boundary".to_string(), boundary))
-                .chain(holes.iter().enumerate().map(|(i, h)| (format!("{what} {i}"), h.as_slice())));
+            let Rings { boundary, holes } = now;
+            let rings = std::iter::once(("boundary".to_string(), boundary)).chain(
+                holes.iter().flat_map(|(what, list)| list.iter().enumerate().map(move |(i, h)| (format!("{what} {i}"), h.as_slice()))),
+            );
             for (name, ring) in rings {
                 // A ring of fewer than three points, or too many, or one of points that aren't numbers in range, is
                 // `Model::check`'s to refuse.
@@ -1294,6 +1295,50 @@ mod command_tests {
         assert!(s.execute("modify", &json!({"id": h, "boundary": slit})).unwrap_err().contains("simple"));
         // A simple one is as before.
         run(&mut s, "modify", json!({"id": f, "boundary": [[0, 0], [5000, 0], [5000, 3000], [0, 3000]]}));
+    }
+
+    /// A bow tie inside a 4 m square, for a hole.
+    const BOW_HOLE: [[i32; 2]; 4] = [[1000, 1000], [3000, 3000], [3000, 1000], [1000, 2000]];
+
+    #[test]
+    fn every_ring_a_floor_a_ceiling_a_roof_or_a_shaft_takes_is_asked_to_be_simple_made_or_modified() {
+        let square = json!([[0, 0], [4000, 0], [4000, 4000], [0, 4000]]);
+        // Each ring a command takes: floor and ceiling `boundary` and `openings`, roof `boundary`, `courtyards` and `openings`,
+        // shaft `boundary`; a bow tie in each, as the command makes the element and as `modify` changes it.
+        let rings: [(&str, &str, Option<&str>); 8] = [
+            ("floor", "boundary", None),
+            ("floor", "openings", Some("opening 0")),
+            ("ceiling", "boundary", None),
+            ("ceiling", "openings", Some("opening 0")),
+            ("roof", "boundary", None),
+            ("roof", "courtyards", Some("courtyard 0")),
+            ("roof", "openings", Some("opening 0")),
+            ("shaft", "boundary", None),
+        ];
+        for (cmd, key, name) in rings {
+            let (outline, bow) = (json!(square), if name.is_some() { json!([BOW_HOLE]) } else { json!(BOW) });
+            let mut made = json!({ key: bow });
+            if name.is_some() {
+                made["boundary"] = outline.clone();
+            }
+            if cmd == "roof" {
+                made["slope"] = json!(0);
+            }
+            let mut s = Session::new();
+            let blank = s.model.clone();
+            let e = s.execute(cmd, &made).unwrap_err();
+            assert!(e.contains("intersect") || e.contains("simple"), "{cmd} {key}: {e}");
+            assert_eq!(s.model, blank, "{cmd} {key}: nothing was made");
+            let mut ok = json!({"boundary": outline});
+            if cmd == "roof" {
+                ok["slope"] = json!(0);
+            }
+            let id = run(&mut s, cmd, ok)["id"].clone();
+            let before = s.model.clone();
+            let e = s.execute("modify", &json!({"id": id, key: made[key]})).unwrap_err();
+            assert!(e.contains("isn't a simple outline") && e.contains(name.unwrap_or("boundary")), "modify {cmd} {key}: {e}");
+            assert_eq!(s.model, before, "modify {cmd} {key}: nothing changed");
+        }
     }
 
     #[test]
