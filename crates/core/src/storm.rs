@@ -10,11 +10,15 @@
 //! - A horizontal drain ("condutor horizontal") takes Manning-Strickler with the water at two thirds of the inner diameter,
 //!   `Q = 60000 A R^(2/3) i^(1/2) / n` (L/min), `n` 0.011 for PVC, which is the standard's Table 4; at least 0.5 % slope.
 //!
-//! Source: NBR 10844 is a paid ABNT standard. Table 4 (Manning, n 0.011) is a formula and is computed, not stored; only its 32
-//! values are in the tests, as a check. Figure 3 is a drawing, not a table, and the fits below are this project's own: the curves
-//! were digitised from a drawing of the figure (text, page and figure number: to be filled in by whoever holds the copy), its own
-//! grid calibrating the
-//! reading: each `H` curve is a straight line `D = m Q + b` (mm, L/min) and each `L` curve `ln Q = c0 + c1 ln D + c2 (ln D)^2`, to
+//! Source: NBR 10844:1989 itself (a paid ABNT standard), read from a licensed copy: item 5.6.4 (the method: raise a vertical at Q to
+//! the H and L curves, interpolate between existing curves when there is none, take the highest intersection, carry it to the D
+//! axis), 5.6.3 (70 mm), 5.7.1 (0.5 %), 5.7.2 (two thirds full) and Figure 3, "Ábacos para a determinação de diâmetros de condutores
+//! verticais", (a) gutter with a sharp-edged outlet, (b) with a funnel outlet, on page 8 of the copy (the page of 5.6.4 is 7). The
+//! abacuses were built for rough pipes (f = 0.04) with two bends at the base (5.6.4.2). Table 4 (Manning, n 0.011) is a formula and
+//! is computed, not stored; only its 32 values are in the tests, as a check. Figure 3 is a drawing, not a table, so the fits are this
+//! project's own: each curve was digitised from the figure, its own grid calibrating the reading. The standard adopts the nominal
+//! diameter whose inside diameter is at least the value read; the command replies the inside diameter read, the nominal is the
+//! caller's choice. Each `H` curve is a straight line `D = m Q + b` (mm, L/min) and each `L` curve `ln Q = c0 + c1 ln D + c2 (ln D)^2`, to
 //! within 0.2 to 0.6 mm (rms) of the drawn lines. Off the chart (H under 50 or over 100 mm, L under 0.3 m, D over 150 mm)
 //! nothing is read, and the caller says so.
 
