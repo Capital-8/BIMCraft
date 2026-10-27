@@ -23,6 +23,12 @@ exterior, z up from the sill) and its formulas read `Wall Thickness`; its `symbo
 `Opening` holds a `family`, or none (one of the project's own types): `Model::opening_dims` gives its size either way
 (`opening_type` returns it by value), its flips are mirrors (`opening_local`), and `Element::family()` is the one way to ask what
 family a component or an opening is of. Sections show a family opening's forms beyond their line and never cut them.
+How a door or a window opens is its family's `operation` (`model::Operation`: swing, double-swing, sliding, double-sliding,
+folding, fixed), or for one of the project's own types the type's (`OpeningType::operation`); none, a door swings. IFC writes
+it as the door's `OperationType` (`Operation::ifc_door`, its side from `flip_hand`: `SLIDING_TO_RIGHT`) and a window's
+`PartitioningType` (two leaves, `DOUBLE_PANEL_VERTICAL`); the import reads a door's back, or its `IfcDoorType`'s (IFC4) or
+`IfcDoorStyle`'s (IFC2x3), onto the type it makes. Schedules have it as the `Operation` field, in the project's language. A
+window's panel operation (`IfcWindowPanelProperties`, a sliding sash) needs an `IfcWindowType`, which the export doesn't write yet.
 A material's `texture` (`texture.rs`) is a pattern drawn in code or a picture of `Model::images` (a PNG or JPEG comes in, is kept
 as a PNG of at most 1024 px, its header checked before the decoder makes room for it), laid on a face at its `size` in mm by the
 face's own axes (`view3d::basis`: across is level, up goes up it, east and north where it lies flat), sampled per pixel from the

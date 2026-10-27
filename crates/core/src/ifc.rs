@@ -15,7 +15,7 @@ use std::fmt::Write;
 use crate::geom::{self, P2};
 use serde_json::Value;
 
-use crate::model::{DEFAULT_HEIGHT, Element, Function, Guid, Id, Layer, Model, ParameterKind, Railing, RoomArea, heading, mix};
+use crate::model::{DEFAULT_HEIGHT, Element, Function, Guid, Id, Layer, Model, Operation, ParameterKind, Railing, RoomArea, heading, mix};
 use crate::phasing;
 use crate::stairs;
 use crate::view3d::P3;
@@ -974,16 +974,18 @@ pub fn export(m: &Model) -> String {
         let (h, wd) = (real(t.height), real(t.width));
         // Named `Family:Type` as Revit names them; a project's own type, by its name.
         let name = s(&o.family.as_ref().map_or_else(|| o.type_name.clone(), |f| format!("{f}:{}", o.type_name)));
+        // How it opens, as its family or its type says; a door that says nothing swings.
         let ent = if matches!(e, Element::Door(_)) {
-            let swing = if o.flip_hand { ".SINGLE_SWING_RIGHT." } else { ".SINGLE_SWING_LEFT." };
+            let operation = Operation::ifc_door(t.operation, o.flip_hand);
             w.add(format!(
-                "IFCDOOR({},$,{name},$,{name},#{fill_at},#{shape},{},{h},{wd},.DOOR.,{swing},$)",
+                "IFCDOOR({},$,{name},$,{name},#{fill_at},#{shape},{},{h},{wd},.DOOR.,{operation},$)",
                 w.guid(ELEMENT, id),
                 s(&o.mark)
             ))
         } else {
+            let partitioning = Operation::ifc_window_partitioning(t.operation);
             w.add(format!(
-                "IFCWINDOW({},$,{name},$,{name},#{fill_at},#{shape},{},{h},{wd},.WINDOW.,.SINGLE_PANEL.,$)",
+                "IFCWINDOW({},$,{name},$,{name},#{fill_at},#{shape},{},{h},{wd},.WINDOW.,{partitioning},$)",
                 w.guid(ELEMENT, id),
                 s(&o.mark)
             ))

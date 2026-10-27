@@ -1636,7 +1636,7 @@ pub struct RoofType {
     pub layers: Vec<Layer>,
 }
 
-/// A door or window type. `sill` is a window's default sill height.
+/// A door or window type. `sill` is a window's default sill height; `operation`, how it opens, where it's said.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct OpeningType {
@@ -1644,6 +1644,102 @@ pub struct OpeningType {
     pub height: f64,
     #[serde(default)]
     pub sill: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub operation: Option<Operation>,
+}
+
+/// How a door's or a window's leaves open, as IFC's door operation types name them; which jamb a
+/// leaf is hinged on, or slides or folds toward, is the opening's `flip_hand`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Operation {
+    /// One leaf, hinged on a jamb.
+    Swing,
+    /// Two leaves, each hinged on its jamb, meeting in the middle.
+    DoubleSwing,
+    /// A leaf sliding along the wall, past a fixed one or the wall itself: a porta de correr.
+    Sliding,
+    /// Two leaves sliding apart from the middle.
+    DoubleSliding,
+    /// Leaves folding toward a jamb.
+    Folding,
+    /// Nothing opens.
+    Fixed,
+}
+
+impl Operation {
+    pub const ALL: [Operation; 6] =
+        [Operation::Swing, Operation::DoubleSwing, Operation::Sliding, Operation::DoubleSliding, Operation::Folding, Operation::Fixed];
+
+    /// Its name, as files and commands spell it.
+    pub fn name(self) -> &'static str {
+        match self {
+            Operation::Swing => "swing",
+            Operation::DoubleSwing => "double-swing",
+            Operation::Sliding => "sliding",
+            Operation::DoubleSliding => "double-sliding",
+            Operation::Folding => "folding",
+            Operation::Fixed => "fixed",
+        }
+    }
+
+    /// Its name in English, as schedules head it; `Language::word` says it in another language.
+    pub fn label(self) -> &'static str {
+        match self {
+            Operation::Swing => "Swing",
+            Operation::DoubleSwing => "Double Swing",
+            Operation::Sliding => "Sliding",
+            Operation::DoubleSliding => "Double Sliding",
+            Operation::Folding => "Folding",
+            Operation::Fixed => "Fixed",
+        }
+    }
+
+    pub fn parse(name: &str) -> Option<Operation> {
+        Operation::ALL.into_iter().find(|o| o.name().eq_ignore_ascii_case(name.trim()))
+    }
+
+    /// A door's `IfcDoorTypeOperationEnum`, its leaf to the right with `right`; a door that says
+    /// nothing swings, as BIMCraft's always have.
+    pub fn ifc_door(op: Option<Operation>, right: bool) -> &'static str {
+        let side = |left: &'static str, to_right: &'static str| if right { to_right } else { left };
+        match op.unwrap_or(Operation::Swing) {
+            Operation::Swing => side(".SINGLE_SWING_LEFT.", ".SINGLE_SWING_RIGHT."),
+            Operation::DoubleSwing => ".DOUBLE_DOOR_SINGLE_SWING.",
+            Operation::Sliding => side(".SLIDING_TO_LEFT.", ".SLIDING_TO_RIGHT."),
+            Operation::DoubleSliding => ".DOUBLE_DOOR_SLIDING.",
+            Operation::Folding => side(".FOLDING_TO_LEFT.", ".FOLDING_TO_RIGHT."),
+            Operation::Fixed => ".NOTDEFINED.",
+        }
+    }
+
+    /// A door's operation and whether its leaf is to the right, from `IfcDoorTypeOperationEnum` (IFC4) or
+    /// `IfcDoorStyleOperationEnum` (IFC2x3), as the file spells it, with or without its dots.
+    pub fn from_ifc_door(e: &str) -> Option<(Operation, bool)> {
+        let e = e.trim_matches('.');
+        let right = e.ends_with("RIGHT");
+        let op = match e {
+            "SINGLE_SWING_LEFT" | "SINGLE_SWING_RIGHT" | "SWING_FIXED_LEFT" | "SWING_FIXED_RIGHT" => Operation::Swing,
+            "DOUBLE_SWING_LEFT" | "DOUBLE_SWING_RIGHT" => Operation::Swing,
+            "DOUBLE_DOOR_SINGLE_SWING"
+            | "DOUBLE_DOOR_DOUBLE_SWING"
+            | "DOUBLE_DOOR_SINGLE_SWING_OPPOSITE_LEFT"
+            | "DOUBLE_DOOR_SINGLE_SWING_OPPOSITE_RIGHT" => Operation::DoubleSwing,
+            "SLIDING_TO_LEFT" | "SLIDING_TO_RIGHT" => Operation::Sliding,
+            "DOUBLE_DOOR_SLIDING" => Operation::DoubleSliding,
+            "FOLDING_TO_LEFT" | "FOLDING_TO_RIGHT" | "DOUBLE_DOOR_FOLDING" => Operation::Folding,
+            _ => return None,
+        };
+        Some((op, right))
+    }
+
+    /// A window's `IfcWindowTypePartitioningEnum`: two panels side by side where two leaves meet, else one.
+    pub fn ifc_window_partitioning(op: Option<Operation>) -> &'static str {
+        match op {
+            Some(Operation::DoubleSwing | Operation::Sliding | Operation::DoubleSliding) => ".DOUBLE_PANEL_VERTICAL.",
+            _ => ".SINGLE_PANEL.",
+        }
+    }
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -1941,10 +2037,10 @@ impl Model {
         m.types.wall.insert("Exterior - 300mm".into(), WallType { thickness: 300.0, layers });
         m.types.floor.insert("Generic - 200mm".into(), FloorType { thickness: 200.0, layers: Vec::new() });
         for (n, w) in [("Single 900 x 2100", 900.0), ("Single 800 x 2100", 800.0)] {
-            m.types.door.insert(n.into(), OpeningType { width: w, height: 2100.0, sill: 0.0 });
+            m.types.door.insert(n.into(), OpeningType { width: w, height: 2100.0, sill: 0.0, operation: None });
         }
         for (n, w, h, s) in [("Fixed 1200 x 1500", 1200.0, 1500.0, 900.0), ("Fixed 600 x 900", 600.0, 900.0, 1100.0)] {
-            m.types.window.insert(n.into(), OpeningType { width: w, height: h, sill: s });
+            m.types.window.insert(n.into(), OpeningType { width: w, height: h, sill: s, operation: None });
         }
         m.types.column.insert("Rectangular 400 x 400".into(), ColumnType { width: 400.0, depth: 400.0, round: false });
         m.types.column.insert("Round 300".into(), ColumnType { width: 300.0, depth: 300.0, round: true });
@@ -2826,6 +2922,7 @@ impl Model {
             width: need(crate::family::WIDTH)?,
             height: need(crate::family::HEIGHT)?,
             sill: number(crate::family::SILL).unwrap_or(if is_door { 0.0 } else { 900.0 }),
+            operation: f.operation,
         })
     }
 
