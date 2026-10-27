@@ -14,8 +14,11 @@ pub const MAX_MEMBERS: usize = 10_000;
 
 /// The most members a view's detail groups and repeating details place in all: each group places its type's members, each
 /// repeat of a repeating detail places them again, and a view draws every one whenever it is drawn. At 10,000, hatched
-/// regions 3 m across take 0.11 s to draw and 30 m across 0.5 s (2.8 million primitives; measured in a dev build and in
-/// release, the same, as the core is optimized in the dev build too); 200,000 took 6 s and 30 million primitives.
+/// regions 3 m across take about 0.1 s to draw and 30 m across about 0.5 s (2.8 million primitives) on a machine that is not busy,
+/// in the dev build (the core is optimized there too) and in release alike: 0.09 to 0.10 s and 0.43 to 0.51 s in release; a busy
+/// machine took 0.13 to 0.29 s and 0.64 to 1.10 s in the dev build. 200,000 took 6 s and 30 million primitives. A member that is
+/// a huge circle costs more: it is drawn through 8,192 points, about 0.2 ms to draw and 3 to 5 ms to rasterize in a dev build
+/// (8 ms on a busy machine), so a view at the cap of them can take a minute or more to render; the cap stays.
 pub const MAX_PLACED: usize = 10_000;
 
 /// A detail group type: what each one placed draws.

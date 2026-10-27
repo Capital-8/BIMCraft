@@ -65,11 +65,16 @@ given as points is cleaned (a repeated point dropped, and one within a millimetr
 makes or changes, whichever command (`floor`, `modify`, `edit_boundary`, `move`…), is judged as the sketch of its edges
 (`Model::check_edits`, asked by the engine after each command but Insert from File): a floor's, ceiling's or roof's boundary,
 an opening or a courtyard, a shaft's boundary, that crosses itself or lies along itself, has an edge ending part way along
-another, or a spike or keyhole slit, is refused, saying which edges and where. That is a change from the base, which let
+another, or a spike or keyhole slit, is refused, saying which edges and where, and what to do: redraw it with `edit_boundary`; give
+`boundary` or `sketch` (with the walls that touch at a corner named only when it was taken from walls) for one a command was making;
+redraw the mass whose outline it is, for one made by face or by `mass_floors` (a mass itself may still have a bow tie outline);
+and, for a roof's opening, which `edit_boundary` does not edit, give `modify` a simple `openings` or change the dormer's width,
+height or position. That is a change from the base, which let
 `modify` and the commands that weren't given points set such an outline. `Model::check` doesn't judge the whole project by
 it: a file, an IFC import or a Revit import with a keyhole outline still opens, and what leaves its outline alone (`modify`
-of its offset, `delete`, `edit_boundary` with a sketch that is simple) still works; what moves or copies it is asked to redraw
-it first. One line that crosses itself (a closed polyline round a bow tie, a spline with a loop) is found as two lines
+of its offset, `delete`, `edit_boundary` with a sketch that is simple) still works, and so does what moves, copies, turns or mirrors
+it, which makes it no worse (a copy is judged against the elements the command was given, so a new floor drawn with a bow tie
+the file also holds is refused); what changes its shape is asked to redraw it first. One line that crosses itself (a closed polyline round a bow tie, a spline with a loop) is found as two lines
 crossing are, and a sketch is refused at once past 200,000 straight pieces (a circle is up to 8,193 of them), or when its
 pieces lie so close together that telling which cross would take six million steps.
 

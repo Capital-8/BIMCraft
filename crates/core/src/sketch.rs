@@ -601,9 +601,10 @@ impl Model {
     ///
     /// An outline that was as bad before passes: a move, copy, rotation or mirror of a floor a file holds with a bow tie or an
     /// edge half a millimetre long makes it no worse, so it is let by; what changes its shape, or makes a clean one bad, is
-    /// refused ([`congruent`]).
-    pub fn check_edits(&self, before: &Model) -> Result<(), String> {
-        let mut work = 0;
+    /// refused ([`congruent`]). A copy is a new element, whose outline is judged against those of the elements the command was
+    /// given (`ids` or `id` in `params`): a new floor drawn like a bad one the file holds is no copy of it.
+    pub fn check_edits(&self, before: &Model, params: &serde_json::Value) -> Result<(), String> {
+        let (mut work, given) = (0, given(before, params));
         for (&id, e) in &self.elements {
             let Some(now) = rings_of(e) else { continue };
             if before.elements.get(id).and_then(rings_of).is_some_and(|was| was == now) {
@@ -623,20 +624,21 @@ impl Model {
                 if let Err(problems) = solve(&lines_of(ring, &[]))
                     && !problems.iter().all(|p| matches!(p, Problem::NoArea { .. }))
                 {
-                    if was_as_bad(before, id, e, ring, &mut work) {
+                    if was_as_bad(before, &given, id, e, ring, &mut work) {
                         continue;
                     }
                     let said = say(&problems, &|i| format!("edge {i}"));
-                    // A command that made it has nothing to redraw (the engine takes it back): it is told to give a simple one.
+                    // What to do about it depends on where it came from. One that is there is redrawn with `edit_boundary`, which edits
+                    // everything but a roof's openings (a dormer's or given). A command that made it has nothing to redraw (the
+                    // engine takes it back): it is told to give a simple one, or the mass it comes from to be redrawn.
+                    let category = e.category();
                     return Err(match before.elements.get(id) {
-                        Some(_) => {
-                            format!("{} {id}: its {name} isn't a simple outline: {said}; redraw it with `edit_boundary`", e.category())
-                        }
-                        None => format!(
-                            "{}: its {name} isn't a simple outline: {said}; give a simple `boundary` or `sketch` \
-                             (walls, or boxes of walls, that touch at a corner enclose no simple outline of their own)",
-                            e.category()
+                        Some(_) if matches!(e, Element::Roof(_)) && name.starts_with("opening") => format!(
+                            "{category} {id}: its {name} isn't a simple outline: {said}; give `modify` a simple `openings`, or change the \
+                             dormer's width, height or position"
                         ),
+                        Some(_) => format!("{category} {id}: its {name} isn't a simple outline: {said}; redraw it with `edit_boundary`"),
+                        None => format!("{category}: its {name} isn't a simple outline: {said}; {}", instead(self, e, params)),
                     });
                 }
             }
@@ -645,17 +647,42 @@ impl Model {
     }
 }
 
+/// What to say to whoever made `e`, in `m`, with a ring that is not simple, by where its outline came from: the mass it was
+/// made from, the `boundary` or `sketch` the command was given in `params`, or (if it was given none) the walls it was found in.
+fn instead(m: &Model, e: &Element, params: &serde_json::Value) -> String {
+    let mass = e.params().and_then(|p| crate::massing::refs(p).first().copied()).and_then(|g| m.elements.id(g));
+    if let Some(mass) = mass {
+        return format!("it is the outline of mass {mass}, which crosses itself: redraw the mass");
+    }
+    let given = ["boundary", "sketch", "openings", "courtyards"].iter().any(|k| params.get(k).is_some_and(|v| !v.is_null()));
+    let say = "give a simple `boundary` or `sketch`";
+    if given {
+        say.into()
+    } else {
+        format!("{say} (walls, or boxes of walls, that touch at a corner enclose no simple outline of their own)")
+    }
+}
+
 /// The most corners [`was_as_bad`] compares in one [`Model::check_edits`], so a file of thousands of bad outlines can't make a
 /// command take long: past it an outline is judged as the new one it is.
 const MAX_COMPARED: usize = 4_000_000;
 
+/// The elements of `before` that `params` names in `ids` or `id`, by id or GUID: what a copy is made of.
+fn given(before: &Model, params: &serde_json::Value) -> Vec<Id> {
+    let ids = params.get("ids").and_then(serde_json::Value::as_array).into_iter().flatten().take(MAX_POINTS);
+    ids.chain(params.get("id"))
+        .filter_map(|v| serde_json::from_value::<Guid>(v.clone()).ok())
+        .filter_map(|g| before.elements.id(g))
+        .collect()
+}
+
 /// Whether `ring`, of `e` (element `id`), is a ring the project held before the command that is as bad as it is: the same
-/// element's, or (a copy is a new element) any of its kind's, moved, turned or mirrored.
-fn was_as_bad(before: &Model, id: crate::model::Id, e: &Element, ring: &[P2], work: &mut usize) -> bool {
+/// element's, or (a copy is a new element) that of an element of its kind the command was `given`, moved, turned or mirrored.
+fn was_as_bad(before: &Model, given: &[Id], id: Id, e: &Element, ring: &[P2], work: &mut usize) -> bool {
     let pool: Vec<&Element> = match before.elements.get(id) {
         Some(was) if was.category() == e.category() => vec![was],
         Some(_) => return false,
-        None => before.elements.values().filter(|was| was.category() == e.category()).collect(),
+        None => given.iter().filter_map(|g| before.elements.get(*g)).filter(|was| was.category() == e.category()).collect(),
     };
     pool.into_iter()
         .filter_map(rings_of)
@@ -667,7 +694,7 @@ fn was_as_bad(before: &Model, id: crate::model::Id, e: &Element, ring: &[P2], wo
 /// it and either way round. `work` counts the corners compared and stops it at [`MAX_COMPARED`].
 fn congruent(a: &[P2], b: &[P2], work: &mut usize) -> bool {
     let n = a.len();
-    if n != b.len() || n < 3 {
+    if n != b.len() || n < 3 || *work > MAX_COMPARED {
         return false;
     }
     // Each corner's edge out of it: its length, and its dot and cross with the next edge.
@@ -687,16 +714,18 @@ fn congruent(a: &[P2], b: &[P2], work: &mut usize) -> bool {
                 if !near(ta[0][0], tb[k][0], 1.0) {
                     continue;
                 }
-                *work += n;
-                if *work > MAX_COMPARED {
-                    return false;
-                }
                 let scale = |i: usize| ta[i][0] + ta[(i + 1) % n][0] + 1.0;
+                // Charged for the corners looked at, not the ones that might have been: a start that fails at once costs one,
+                // so a ring of equal edges, which every start passes, is not spent before it is compared.
                 if (0..n).all(|i| {
+                    *work += 1;
                     let j = (i + k) % n;
                     near(ta[i][0], tb[j][0], 1.0) && near(ta[i][1], tb[j][1], scale(i)) && near(ta[i][2], tb[j][2], scale(i))
                 }) {
                     return true;
+                }
+                if *work > MAX_COMPARED {
+                    return false;
                 }
             }
         }
@@ -721,6 +750,8 @@ impl Welder {
         for x in cx - 1..=cx + 1 {
             for y in cy - 1..=cy + 1 {
                 for &n in self.cells.get(&(x, y)).into_iter().flatten() {
+                    #[cfg(test)]
+                    spent(1);
                     if found.is_none_or(|f| n < f) && self.points[n].dist(p) <= TOL {
                         found = Some(n);
                     }
@@ -1083,7 +1114,7 @@ mod tests {
         };
         // Clustered so that many are within a millimetre of several, across cells.
         let given: Vec<P2> = (0..3000).map(|_| P2(next(40.0) - 20.0, next(40.0) - 20.0)).collect();
-        let (mut welder, mut scanned) = (Welder::default(), Vec::<P2>::new());
+        let (mut welder, mut scanned, before) = (Welder::default(), Vec::<P2>::new(), SPENT.with(std::cell::Cell::get));
         for p in given {
             let by_scan = scanned.iter().position(|q| q.dist(p) <= TOL).unwrap_or_else(|| {
                 scanned.push(p);
@@ -1092,6 +1123,9 @@ mod tests {
             assert_eq!(welder.weld(p), by_scan, "{p:?}");
         }
         assert_eq!(welder.points, scanned);
+        // And by looking at the points in the cells round it, not at all of them: a scan of the points kept so far is about a million.
+        let steps = SPENT.with(std::cell::Cell::get) - before;
+        assert!(steps <= 40_000, "{steps} comparisons to weld 3,000 points into {}", scanned.len());
     }
 
     #[test]
@@ -1425,6 +1459,96 @@ mod command_tests {
     }
 
     #[test]
+    fn a_new_floor_with_the_outline_of_a_bad_one_in_the_file_is_refused_and_a_copy_of_that_one_is_not() {
+        let bow: Vec<[f64; 2]> = BOW.iter().map(|p| [f64::from(p[0]), f64::from(p[1])]).collect();
+        let mut s = Session::new();
+        let f = old_floor(&mut s, &bow);
+        let clean = run(&mut s, "floor", json!({"boundary": [[0, 0], [4000, 0], [4000, 4000], [0, 4000]]}))["id"].clone();
+        // A brand new element is no copy of it, however alike: the same bow tie drawn by hand, or on a floor of another place.
+        for boundary in [json!(BOW), json!([[1000, 0], [5000, 4000], [5000, 0], [1000, 2000]])] {
+            let before = s.model.clone();
+            let e = s.execute("floor", &json!({ "boundary": boundary })).unwrap_err();
+            assert!(e.contains("isn't a simple outline"), "{e}");
+            assert_eq!(s.model, before);
+        }
+        // A copy of it passes, named by id, by GUID or among others; so do a mirrored and a turned one.
+        let guid = json!(s.model.guid(f));
+        for (cmd, p) in [
+            ("copy", json!({"ids": [f], "by": [9000, 0]})),
+            ("copy", json!({"id": f, "by": [9000, 0]})),
+            ("copy", json!({"ids": [guid], "by": [9000, 0]})),
+            ("copy", json!({"ids": [clean, f], "by": [9000, 0]})),
+            ("mirror", json!({"ids": [f], "axis": [[0, 0], [1000, 1000]], "copy": true})),
+            ("rotate", json!({"ids": [f], "about": [100, 200], "angle": 33, "copy": true})),
+        ] {
+            if let Err(e) = s.execute(cmd, &p) {
+                panic!("{cmd} {p}: {e}");
+            }
+        }
+    }
+
+    /// A regular `n`-gon 10 m across to the micron, with the corners `swap` and the next swapped: a small bow tie in a ring of
+    /// `n - 3` edges of one length.
+    fn regular_bow(n: usize, at: [f64; 2], swap: usize) -> Vec<[f64; 2]> {
+        let micron = |v: f64| (v * 1000.0).round() / 1000.0;
+        let mut ring: Vec<[f64; 2]> = (0..n)
+            .map(|i| {
+                let a = std::f64::consts::TAU * i as f64 / n as f64;
+                [at[0] + micron(5000.0 * a.cos()), at[1] + micron(5000.0 * a.sin())]
+            })
+            .collect();
+        ring.swap(swap, swap + 1);
+        ring
+    }
+
+    #[test]
+    fn an_outline_of_thousands_of_equal_edges_as_bad_as_it_was_is_let_by_when_mirrored_turned_or_copied() {
+        // Its edges are all the one length: every corner is a place to start comparing it with its image.
+        let n = 5000;
+        let mut s = Session::new();
+        let f = old_floor(&mut s, &regular_bow(n, [0.0, 0.0], 10));
+        for (cmd, p) in [
+            ("mirror", json!({"ids": [f], "axis": [[1000, 0], [1000, 1000]]})),
+            ("mirror", json!({"ids": [f], "axis": [[0, 0], [1000, 1000]], "copy": true})),
+            ("rotate", json!({"ids": [f], "about": [100, 200], "angle": 33.3, "copy": true})),
+            ("copy", json!({"ids": [f], "by": [20000, 0]})),
+        ] {
+            if let Err(e) = s.execute(cmd, &p) {
+                panic!("{cmd} {p}: {e}");
+            }
+        }
+        // Twenty of them, the bow tie of each at another corner, copied at once: each is compared with those before it.
+        let mut s = Session::new();
+        let ids: Vec<u64> =
+            (0..20).map(|i| old_floor(&mut s, &regular_bow(n, [f64::from(i) * 20000.0, 0.0], 10 + 250 * i as usize))).collect();
+        let made = run(&mut s, "copy", json!({"ids": ids, "by": [0, 20000]}));
+        assert_eq!(made["ids"].as_array().map(Vec::len), Some(20));
+        // And one made worse is still refused.
+        let e = s.execute("modify", &json!({"id": ids[0], "boundary": [[0, 0], [4000, 4000], [4000, 0], [0, 2000]]})).unwrap_err();
+        assert!(e.contains("isn't a simple outline"), "{e}");
+    }
+
+    #[test]
+    fn comparing_two_outlines_of_thousands_of_equal_edges_stops_at_its_budget() {
+        // Rings of 5,000 edges of one length, a bow tie at the corner 4,000: every start passes the first corner and runs on for
+        // thousands before it fails, which is tens of millions of corners over the starts.
+        let points = |ring: Vec<[f64; 2]>| ring.into_iter().map(|p| crate::geom::P2(p[0], p[1])).collect::<Vec<_>>();
+        let a = points(regular_bow(5000, [0.0, 0.0], 4000));
+        // The same ring with its bow tie at another corner is found within the budget.
+        let (mut work, mut same) = (0, points(regular_bow(5000, [0.0, 0.0], 4500)));
+        assert!(super::congruent(&a, &same, &mut work), "{work} corners compared");
+        // With a second bow tie it is another ring, and the budget is spent before every start is tried.
+        same.swap(1000, 1001);
+        let (mut work, most) = (0, super::MAX_COMPARED);
+        assert!(!super::congruent(&a, &same, &mut work));
+        assert!((most..=most + a.len()).contains(&work), "{work} corners compared, of a budget of {most}");
+        // Once it is spent, a comparison looks at nothing.
+        let spent = work;
+        assert!(!super::congruent(&a, &a, &mut work));
+        assert_eq!(work, spent);
+    }
+
+    #[test]
     fn a_floor_over_boxes_of_walls_that_touch_at_a_corner_says_what_to_give_instead_of_naming_nothing() {
         let mut s = Session::new();
         for x in [0, 4000] {
@@ -1443,6 +1567,57 @@ mod command_tests {
         let f = run(&mut s, "floor", json!({"boundary": [[0, 0], [4000, 0], [4000, 4000], [0, 4000]]}))["id"].clone();
         let e = s.execute("modify", &json!({"id": f, "boundary": BOW})).unwrap_err();
         assert!(e.contains(&format!("floor {f}")) && e.contains("edit_boundary"), "{e}");
+    }
+
+    #[test]
+    fn a_dormer_that_makes_a_hole_cross_itself_is_told_what_to_change_not_to_edit_the_boundary() {
+        let mut s = Session::new();
+        let roof = run(&mut s, "roof", json!({"boundary": [[0, 0], [12000, 0], [12000, 8000], [0, 8000]], "slope": 60, "offset": 1000}));
+        // A low dormer on a steep roof: the hole its cheeks cut crosses itself.
+        let before = s.model.clone();
+        let e =
+            s.execute("dormer", &json!({"host": roof["id"], "at": [6000, 1500], "width": 1600, "height": 100, "slope": 30})).unwrap_err();
+        assert!(e.contains("opening 0 isn't a simple outline") && e.contains("dormer's width, height or position"), "{e}");
+        // `edit_boundary` redraws a roof's footprint and courtyards, not its openings.
+        assert!(!e.contains("edit_boundary"), "{e}");
+        assert_eq!(s.model, before);
+        // An opening given to `modify` is told to give a simple one; a courtyard still goes to `edit_boundary`.
+        let e = s.execute("modify", &json!({"id": roof["id"], "openings": [BOW_HOLE]})).unwrap_err();
+        assert!(e.contains("opening 0") && e.contains("`modify`") && !e.contains("edit_boundary"), "{e}");
+        let e = s.execute("modify", &json!({"id": roof["id"], "courtyards": [BOW_HOLE]})).unwrap_err();
+        assert!(e.contains("courtyard 0") && e.contains("edit_boundary"), "{e}");
+    }
+
+    #[test]
+    fn what_a_mass_with_a_bow_tie_outline_makes_is_refused_saying_the_mass_crosses_itself() {
+        let mut s = Session::new();
+        // A mass is let have the outline (as it always was), and what it makes is refused.
+        let mass = run(&mut s, "mass", json!({"boundary": BOW, "height": 3000}))["id"].clone();
+        for (cmd, p) in
+            [("mass_floors", json!({"mass": mass})), ("floor_by_face", json!({"mass": mass})), ("roof_by_face", json!({"mass": mass}))]
+        {
+            let before = s.model.clone();
+            let e = s.execute(cmd, &p).unwrap_err();
+            assert!(e.contains(&format!("mass {mass}")) && e.contains("crosses itself") && e.contains("redraw the mass"), "{cmd}: {e}");
+            // No `boundary` or `sketch` was given to `mass_floors`, `floor_by_face` or `roof_by_face`, and no walls to touch.
+            assert!(!e.contains("`boundary`") && !e.contains("walls"), "{cmd}: {e}");
+            assert_eq!(s.model, before);
+        }
+    }
+
+    #[test]
+    fn the_walls_that_touch_at_a_corner_are_named_only_for_an_outline_taken_from_walls() {
+        let mut s = Session::new();
+        for x in [0, 4000] {
+            run(&mut s, "wall", json!({"points": [[x, x], [x + 4000, x], [x + 4000, x + 4000], [x, x + 4000]], "closed": true}));
+        }
+        let aside = "that touch at a corner";
+        let e = s.execute("floor", &json!({})).unwrap_err();
+        assert!(e.contains(aside), "an outline from walls: {e}");
+        for (cmd, p) in [("floor", json!({"boundary": BOW})), ("ceiling", json!({"boundary": BOW})), ("shaft", json!({"boundary": BOW}))] {
+            let e = s.execute(cmd, &p).unwrap_err();
+            assert!(e.contains("give a simple `boundary` or `sketch`") && !e.contains(aside), "{cmd} {p}: {e}");
+        }
     }
 
     /// A bow tie inside a 4 m square, for a hole.

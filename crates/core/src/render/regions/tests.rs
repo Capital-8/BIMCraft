@@ -429,6 +429,40 @@ fn probe_the_cost_of_overlapping_concave_masks() {
     }
 }
 
+/// A plan with a wall, and a 100 m strip of the non-masking Blue region over it with `holes` small square holes along it, and
+/// `masks` small masking regions drawn before it, all of them a long way from the wall.
+fn strip(holes: usize, masks: usize) -> Session {
+    let mut s = Session::new();
+    run(&mut s, "wall", json!({"points": [[0, 0], [2000, 0]]}));
+    blue(&mut s, false);
+    let at = |i: usize| 10000.0 + 900.0 * i as f64;
+    for i in 0..masks {
+        run(&mut s, "filled_region", json!({"type": "Masking", "line_style": null, "sketch": square(at(i), -100.0, 200.0)}));
+    }
+    let mut sketch = rect(-1000.0, -500.0, 100000.0, 500.0);
+    (0..holes).for_each(|i| sketch.extend(square(at(i), -100.0, 200.0)));
+    run(&mut s, "filled_region", json!({"type": "Blue", "line_style": null, "sketch": sketch}));
+    s
+}
+
+/// What drawing `s`'s first plan costs in steps ([`super::spend`] only), the whole strip in view.
+fn drawn(s: &Session) -> usize {
+    let view = View { scale: 0.007, cx: 50000.0, cy: 0.0, width: 700, height: 700 };
+    let before = super::SPENT.with(std::cell::Cell::get);
+    let d = render::draw(&s.model, 100000, view);
+    eprintln!("{} prims", d.prims.len());
+    super::SPENT.with(std::cell::Cell::get) - before
+}
+
+#[test]
+fn the_holes_and_masks_far_from_a_line_cost_it_nothing() {
+    let (none, holes, masks) = (drawn(&strip(0, 0)), drawn(&strip(100, 0)), drawn(&strip(0, 100)));
+    eprintln!("steps: no holes or masks {none}, 100 holes {holes}, 100 masks {masks}");
+    // Only the rings and masks a line comes near are looked into: the ink of the wall does not run through the other hundred.
+    assert!(holes <= none + 200, "{holes} steps with 100 holes far off, {none} without");
+    assert!(masks <= none + 200, "{masks} steps with 100 masks far off, {none} without");
+}
+
 /// A plan with one region of `n` corners with a hole of `n` corners in it, of the type `of`.
 fn holed(n: usize, of: &str) -> Session {
     let mut s = Session::new();

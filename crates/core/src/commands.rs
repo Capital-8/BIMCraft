@@ -7334,7 +7334,7 @@ fn linework(s: &mut Session, p: &Value) -> R {
         let nearest = g.linework.iter().filter(|l| l.element == guid).map(dist).fold(f64::INFINITY, f64::min);
         let before = g.linework.len();
         match edge {
-            Some((from, to)) => g.linework.retain(|l| !(l.element == guid && l.from.dist(from) < 1e-3 && l.to.dist(to) < 1e-3)),
+            Some((from, to)) => g.linework.retain(|l| !(l.element == guid && on_edge(l, from, to))),
             None if nearest <= LINEWORK_REACH => g.linework.retain(|l| l.element != guid || dist(l) > nearest + 1e-3),
             None => {}
         }
@@ -7345,13 +7345,21 @@ fn linework(s: &mut Session, p: &Value) -> R {
     })?;
     let g = s.model_mut().elements.get_mut(source).and_then(graphics::graphics_mut).ok_or_else(|| bad(c, "that view has no graphics"))?;
     // The same edge again takes the newer style.
-    g.linework.retain(|l| !(l.element == guid && l.from.dist(from) < 1e-3 && l.to.dist(to) < 1e-3));
+    g.linework.retain(|l| !(l.element == guid && on_edge(l, from, to)));
     g.linework.push(graphics::Linework { element: guid, from: micron(from), to: micron(to), style: if invisible { None } else { style } });
     Ok(json!({"from": [from.0, from.1], "to": [to.0, to.1]}))
 }
 
 /// How near an edge a Linework pick is taken, mm.
 const LINEWORK_REACH: f64 = 200.0;
+
+/// Whether `l` lies on the edge from `from` to `to` that [`render::edge_at`] found. Its ends come out of a pixel view round the
+/// pick, in f32, so another pick finds them a little off the micron-rounded ends `l` holds: a thousandth of a mm, and a part
+/// in a million of how long the edge is (8 times what two f32 roundings leave). So an edge is the same within 0.05 mm and that.
+fn on_edge(l: &graphics::Linework, from: P2, to: P2) -> bool {
+    let tol = 0.05 + 1e-6 * from.dist(to);
+    l.from.dist(from) < tol && l.to.dist(to) < tol
+}
 
 fn import_fill_patterns(s: &mut Session, p: &Value) -> R {
     let c = "import_fill_patterns";

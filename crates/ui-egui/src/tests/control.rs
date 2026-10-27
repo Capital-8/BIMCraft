@@ -176,10 +176,11 @@ fn a_connection_that_trickles_its_first_line_or_speaks_another_protocol_is_close
     // A short time for the first line, so that the test is short.
     let control = Control::start_within(0, None, Duration::from_millis(400)).unwrap();
     let port = control.entry.port;
-    // A byte now and then never makes a line: it is closed 400 ms from its start, not at its next byte.
+    // A byte now and then never makes a line: it is closed 400 ms from its start, not at its next byte. The server's 400 ms begin
+    // when it accepts, so the test's clock begins before it connects: a stall in between cannot make the close look early.
+    let start = Instant::now();
     let mut slow = TcpStream::connect(("127.0.0.1", port)).unwrap();
     slow.set_read_timeout(Some(Duration::from_millis(100))).unwrap();
-    let start = Instant::now();
     slow.write_all(b"{").unwrap();
     let closed = loop {
         let mut byte = [0u8; 1];
