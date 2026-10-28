@@ -1133,7 +1133,7 @@ pub static ALL: &[Command] = &[
         ui_msg!("Schedule"),
         &[],
         "{name?, category?, fields?, filters?, sort?, grouped?, path?} a schedule view, as Revit's View > Schedules makes one, \
-         and its table: columns, rows, the `elements` each row lists, and totals (and a .csv file with a path). A new one needs `name` and `category`: rooms, \
+         and its table: columns, rows, the `elements` each row lists, and totals (and a .csv file with a path, or an .xlsx workbook for a path ending .xlsx). A new one needs `name` and `category`: rooms, \
          doors, windows, walls, floors, ceilings, roofs, columns, structural columns, footings, beams, strip footings, components, \
          stairs, ramps, railings or levels; `category` \
          alone reads its own (Room Schedule, Door Schedule, Window Schedule, Wall Schedule, Floor Schedule, Level Schedule, \
@@ -2425,7 +2425,14 @@ fn schedule(s: &mut Session, p: &Value) -> R {
         if changed {
             m.check().map_err(|e| bad(c, e))?;
         }
-        std::fs::write(&path, crate::schedule::to_csv(&t)).map_err(|e| bad(c, format!("{path}: {e}")))?;
+        // A workbook for a path ending .xlsx, else CSV.
+        let bytes = if path.to_lowercase().ends_with(".xlsx") {
+            let sheet = if sc.name.is_empty() { category(&sc.of) } else { sc.name.clone() };
+            crate::schedule::to_xlsx(&t, &sheet)
+        } else {
+            crate::schedule::to_csv(&t).into_bytes()
+        };
+        std::fs::write(&path, bytes).map_err(|e| bad(c, format!("{path}: {e}")))?;
     }
     let columns: Vec<String> = t.columns.iter().map(|col| crate::schedule::heading(Units::Millimetres, col)).collect();
     let available: Vec<String> = crate::schedule::fields(m, &category(&sc.of)).into_iter().map(|(n, _)| n).collect();

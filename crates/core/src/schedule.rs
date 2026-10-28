@@ -1069,6 +1069,28 @@ pub fn to_csv(t: &Table) -> String {
     out
 }
 
+/// The table as a workbook of one sheet named `name`: its headings (in metric) in bold, its rows, then its totals. Numbers
+/// go in as numbers, so the spreadsheet sums them; text as text, never a formula.
+pub fn to_xlsx(t: &Table, name: &str) -> Vec<u8> {
+    use crate::xlsx::Cell;
+    let headings: Vec<String> = t.columns.iter().map(|c| heading(Units::Millimetres, c)).collect();
+    let rows: Vec<Vec<Cell>> = t
+        .rows
+        .iter()
+        .chain(&t.totals)
+        .map(|row| {
+            row.iter()
+                .map(|v| match v {
+                    Value::Number(x) => x.as_f64().map_or(Cell::Empty, Cell::Number),
+                    Value::Null => Cell::Empty,
+                    v => Cell::Text(cell(v)),
+                })
+                .collect()
+        })
+        .collect();
+    crate::xlsx::workbook(name, &headings, &rows)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1158,6 +1180,16 @@ mod tests {
             totals: None,
         };
         assert_eq!(to_csv(&t), "Name,Offset\n'=1+1,-5.0\n'@SUM(A1),5.0\n");
+    }
+
+    #[test]
+    fn a_schedule_goes_to_a_workbook_with_its_numbers_as_numbers() {
+        let t = table(&house().model, &of("rooms")).unwrap();
+        let parts = crate::xlsx::unzip(&to_xlsx(&t, "Room Schedule"));
+        assert!(parts["xl/workbook.xml"].contains(r#"name="Room Schedule""#));
+        let sheet = &parts["xl/worksheets/sheet1.xml"];
+        assert!(sheet.contains(r#"<t xml:space="preserve">Area (m²)</t>"#), "{sheet}");
+        assert!(sheet.contains(r#"<t xml:space="preserve">Kitchen</t></is></c><c r="C2" t="inlineStr"><is><t xml:space="preserve">Level 1</t></is></c><c r="D2"><v>18</v></c><c r="E2"><v>18000</v></c>"#), "{sheet}");
     }
 
     #[test]
