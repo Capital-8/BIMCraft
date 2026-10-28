@@ -178,6 +178,10 @@ impl Session {
                 // What a command was given by id points at the element's GUID; what it put in the library has an id and a GUID.
                 self.model_mut().resolve();
                 self.model_mut().sync_library();
+                // Locked and equal dimensions moved what they measure to as the command moved it.
+                if cmd.undoable {
+                    crate::constraints::keep(self, &before)?;
+                }
                 // What was made or changed must be as a sketch of it solves too (an outline that is simple), which a file
                 // from before may break; Insert from File brings in what it finds.
                 // (Before the check, which would name a bow tie of no area by that, not by what to redraw.)

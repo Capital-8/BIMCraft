@@ -428,3 +428,63 @@ fn a_segment_of_a_dimension_has_text_of_its_own_over_the_dimension_s() {
     let e = err(&mut s, "dimension_text", json!({"id": w[0], "prefix": "x"}));
     assert!(e.contains("dimension"), "{e}");
 }
+
+#[test]
+fn a_locked_segment_keeps_its_length_what_it_measures_moving_together() {
+    let mut s = Session::new();
+    let w = house(&mut s);
+    let g = id_of(&run(&mut s, "grid", json!({"start": [2000, -2000], "end": [2000, 8000]})));
+    // West wall to grid, 2000; grid to east wall, 6000. The first locked.
+    let d = id_of(&run(&mut s, "dimension", json!({"refs": [{"id": w[3]}, {"id": g}, {"id": w[1]}], "at": [0, -1000]})));
+    run(&mut s, "dimension_constraint", json!({"id": d, "locked": [0]}));
+    // The west wall moves west: the grid goes with it, 2000 off; the east wall stays.
+    run(&mut s, "move", json!({"ids": [w[3]], "by": [-500, 0]}));
+    assert_eq!(values(&mut s, d), json!([2000.0, 6500.0]));
+    // The grid moves: the west wall follows it.
+    run(&mut s, "move", json!({"ids": [g], "by": [300, 0]}));
+    assert_eq!(values(&mut s, d), json!([2000.0, 6200.0]));
+    // Unlocked, it doesn't.
+    run(&mut s, "dimension_constraint", json!({"id": d, "locked": []}));
+    run(&mut s, "move", json!({"ids": [g], "by": [300, 0]}));
+    assert_eq!(values(&mut s, d), json!([2300.0, 5900.0]));
+    // Undo takes a move and what followed it back as one step.
+    run(&mut s, "undo", json!({}));
+    assert_eq!(values(&mut s, d), json!([2000.0, 6200.0]));
+}
+
+#[test]
+fn an_equal_dimension_spreads_its_inner_references_evenly_and_keeps_them_so() {
+    let mut s = Session::new();
+    let w = house(&mut s);
+    let a = id_of(&run(&mut s, "grid", json!({"start": [1000, -2000], "end": [1000, 8000]})));
+    let b = id_of(&run(&mut s, "grid", json!({"start": [5000, -2000], "end": [5000, 8000]})));
+    let d = id_of(&run(&mut s, "dimension", json!({"refs": [{"id": w[3]}, {"id": a}, {"id": b}, {"id": w[1]}], "at": [0, -1000]})));
+    // EQ: the grids go to the thirds of the walls' 8000.
+    let r = run(&mut s, "dimension_constraint", json!({"id": d, "equal": true}));
+    assert!(r.is_object());
+    let v = values(&mut s, d);
+    let near = |v: &Value, x: f64| v.as_array().is_some_and(|a| a.iter().all(|y| (y.as_f64().unwrap_or_default() - x).abs() < 0.01));
+    assert!(near(&v, 8000.0 / 3.0), "{v}");
+    // The east wall moves: they stay a third apart.
+    run(&mut s, "move", json!({"ids": [w[1]], "by": [900, 0]}));
+    let v = values(&mut s, d);
+    assert!(near(&v, 8900.0 / 3.0), "{v}");
+    // A grid dragged is put back where equal says.
+    run(&mut s, "move", json!({"ids": [a], "by": [400, 0]}));
+    assert!(near(&values(&mut s, d), 8900.0 / 3.0));
+    // Locked, the whole string moves with a wall that moves.
+    run(&mut s, "dimension_constraint", json!({"id": d, "locked": [0, 1, 2]}));
+    run(&mut s, "move", json!({"ids": [w[1]], "by": [300, 0]}));
+    assert!(near(&values(&mut s, d), 8900.0 / 3.0));
+    // Locked segments of lengths that differ can't be made equal: refused, and nothing changes.
+    let two = id_of(&run(&mut s, "dimension", json!({"refs": [{"id": w[3]}, {"id": a}, {"id": w[1]}], "at": [0, 7000]})));
+    run(&mut s, "dimension_constraint", json!({"id": two, "locked": [0, 1]}));
+    let before = values(&mut s, two);
+    let e = err(&mut s, "dimension_constraint", json!({"id": two, "equal": true}));
+    assert!(e.contains("constraint"), "{e}");
+    assert_eq!(values(&mut s, two), before);
+    // Only aligned and linear dimensions of more than one segment are equal.
+    let one = id_of(&run(&mut s, "dimension", json!({"refs": [{"id": w[3]}, {"id": w[1]}], "at": [0, 7000]})));
+    let e = err(&mut s, "dimension_constraint", json!({"id": one, "equal": true}));
+    assert!(e.contains("segments"), "{e}");
+}

@@ -2600,6 +2600,81 @@ impl BimApp {
         done
     }
 
+    /// A selected aligned or linear dimension's constraints, as Revit shows them: a padlock under each segment, which a
+    /// click locks at its length or unlocks, and past its end, over a string of two segments or more, EQ, which a click
+    /// makes equal or not (crossed out while it isn't).
+    fn dimension_constraints(&mut self, ui: &mut Ui, m: &Model, v: &View, rect: Rect, id: Id, d: &Dimension) {
+        if !matches!(d.kind, DimKind::Aligned | DimKind::Linear) {
+            return;
+        }
+        let (n, cross) = m.crossings(d);
+        let (Some(&(first, _)), Some(&(last, _))) = (cross.first(), cross.last()) else { return };
+        if cross.len() < 2 {
+            return;
+        }
+        let screen = |q: P2| pos(rect.min, v.px(q));
+        let on = |s: f64| screen(d.at + n * s);
+        // On screen: along the line, and off it to the side its numbers aren't.
+        let along = (on(1.0) - on(0.0)).normalized();
+        let side = (screen(d.at - n.perp()) - screen(d.at)).normalized();
+        let p = ui.painter_at(rect);
+        for (i, pair) in cross.windows(2).enumerate() {
+            let [(s0, _), (s1, _)] = pair else { continue };
+            let at = on((s0 + s1) / 2.0) + side * 14.0;
+            let locked = d.locked.iter().any(|l| l.segment == i);
+            let r = ui.interact(Rect::from_center_size(at, vec2(16.0, 18.0)), ui.id().with(("dimension lock", id, i)), Sense::click());
+            let name = tf("Lock segment {}", &[&(i + 1).to_string()]);
+            r.widget_info(|| WidgetInfo::selected(WidgetType::Checkbox, true, locked, name.clone()));
+            let ink = if r.hovered() {
+                pal().hover
+            } else if locked {
+                pal().accent
+            } else {
+                pal().muted
+            };
+            // A padlock: its body, and its shackle, shut when locked, swung up and open when not.
+            let body = Rect::from_center_size(at + vec2(0.0, 3.0), vec2(10.0, 8.0));
+            p.rect_filled(body, 1.5, pal().surface);
+            p.rect_stroke(body, 1.5, Stroke::new(1.5, ink), StrokeKind::Middle);
+            let lift = if locked { 0.0 } else { -3.0 };
+            let top = body.top() + lift;
+            let shackle: Vec<Pos2> = (0..=8)
+                .map(|k| {
+                    let t = std::f32::consts::PI * k as f32 / 8.0;
+                    pos2(body.center().x - 3.0 * t.cos(), top - 4.0 * t.sin())
+                })
+                .collect();
+            p.add(Shape::line(shackle, Stroke::new(1.5, ink)));
+            if r.clicked() {
+                let mut segments: Vec<usize> = d.locked.iter().map(|l| l.segment).filter(|&s| s != i).collect();
+                if !locked {
+                    segments.push(i);
+                }
+                self.run("dimension_constraint", json!({"id": id, "locked": segments}));
+            }
+        }
+        if cross.len() > 2 {
+            let at = on(last.max(first)) + along * 22.0;
+            let r = ui.interact(Rect::from_center_size(at, vec2(26.0, 18.0)), ui.id().with(("dimension equal", id)), Sense::click());
+            r.widget_info(|| WidgetInfo::selected(WidgetType::Checkbox, true, d.equal, t("Equal")));
+            let ink = if r.hovered() {
+                pal().hover
+            } else if d.equal {
+                pal().accent
+            } else {
+                pal().muted
+            };
+            p.rect_filled(r.rect, 3.0, pal().surface);
+            p.text(at, Align2::CENTER_CENTER, "EQ", FontId::proportional(12.0), ink);
+            if !d.equal {
+                p.line_segment([r.rect.left_bottom() + vec2(4.0, -3.0), r.rect.right_top() + vec2(-4.0, 3.0)], Stroke::new(1.2, ink));
+            }
+            if r.clicked() {
+                self.run("dimension_constraint", json!({"id": id, "equal": !d.equal}));
+            }
+        }
+    }
+
     /// The selected wall's length as a temporary dimension beside it, as Revit shows one; a door's or a window's two,
     /// to the ends of its wall. A click on a number types a new length: a wall's end moves (the walls joined there
     /// follow), an opening slides along its wall.
@@ -2616,6 +2691,7 @@ impl BimApp {
             Some(e @ (Element::Column(_) | Element::StructuralColumn(_) | Element::Footing(_) | Element::Component(_))) => {
                 return self.standing_dimension(ui, m, v, rect, id, e);
             }
+            Some(Element::Dimension(d)) => return self.dimension_constraints(ui, m, v, rect, id, d),
             _ => {}
         }
         let Some(w) = m.wall(id) else { return };

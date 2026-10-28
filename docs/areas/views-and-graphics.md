@@ -422,5 +422,12 @@ instance values, is a prefix, a suffix, text above and below, Replace With Text 
 (`texts`, `SegmentText`, the `dimension_text` command; `Dimension::text` reads one through the other, `dimension_segment_at` finds a segment by a
 point); `Model::dimension_labels` is what its
 numbers read (and `elements` shows as `labels`): a baseline string's each from its first reference, an ordinate's each witness line's, the first 0.
+An aligned or linear dimension may be kept equal (`equal`, Revit's EQ, which also turns its Equality Display on) and have segments
+locked at a length (`locked`, `Lock`; the `dimension_constraint` command). `constraints::keep` runs in `Session::execute` after every undoable
+command, before the check: each constrained dimension is solved on its own line (its `stations`, each with its reference), a locked segment tying
+two stations rigidly and equality tying all its segments to one length (a locked one's, else its ends', which stay where they are, so an inner
+reference dragged goes back); a run of tied stations stays where what the command moved puts it, else where its first is. What has to move is
+moved by `commands::move_by`, as `move` moves it, and the dimensions are solved again (`PASSES`) until all hold; where they can't (locked
+lengths that differ made equal, one element pulled two ways), the command is refused, saying which dimension, and nothing changes.
 `render/dimensions.rs` draws them all as the type says (`Ink`: its lines, ticks and witness lines, and its numbers laid out by `crate::text`
 over the paper where the background is opaque).

@@ -566,6 +566,17 @@ pub static ALL: &[Command] = &[
         text_type,
     ),
     edit(
+        "dimension_constraint",
+        "Dimension Constraints",
+        &[],
+        "{id, equal?: bool, locked?: [segment, …]} an aligned or linear dimension's constraints, as Revit's EQ and padlocks: \
+         `equal` keeps its segments equal (what it measures to between its first and last moves to keep them so, its ends \
+         staying); `locked` lists the segments (counted from 0, west to east or south to north) kept at the lengths they \
+         have now. After any command, what a constrained dimension measures to moves with what the command moved, or the \
+         command is refused, saying which dimension can't be kept",
+        dimension_constraint,
+    ),
+    edit(
         "dimension_text",
         "Dimension Text",
         &[],
@@ -4799,6 +4810,8 @@ fn dimension(s: &mut Session, p: &Value) -> R {
         replace: text("replace")?,
         equality: flag(c, p, "equality")?,
         texts: Vec::new(),
+        equal: false,
+        locked: Vec::new(),
     };
     let values: Vec<f64> = m.dimension_values(&d).into_iter().map(hundredth).collect();
     let id = s.model_mut().insert(Element::Dimension(d));
@@ -4976,6 +4989,43 @@ fn text_type(s: &mut Session, p: &Value) -> R {
         m.text_types.insert(name.clone(), t.clone());
     }
     Ok(json!({"name": name, "type": t}))
+}
+
+fn dimension_constraint(s: &mut Session, p: &Value) -> R {
+    use crate::model::Lock;
+    let c = "dimension_constraint";
+    only(c, p, &["id", "equal", "locked"])?;
+    let id = element_id(c, &s.model, p.get("id").unwrap_or(&Value::Null))?;
+    let Some(Element::Dimension(d)) = s.model.elements.get(id) else {
+        return Err(bad(c, format!("{} {id} isn't a dimension", s.model.elements.get(id).map_or("nothing", |e| e.category()))));
+    };
+    let mut d = d.clone();
+    let values = s.model.dimension_values(&d);
+    if !absent(p.get("equal")) {
+        d.equal = flag(c, p, "equal")?;
+        // As Revit's EQ shows its segments as EQ.
+        d.equality = d.equal;
+    }
+    if let Some(v) = p.get("locked").filter(|v| !v.is_null()) {
+        let list = v.as_array().ok_or_else(|| bad(c, format!("`locked` is a list of segments, not {v}")))?;
+        let mut locked = Vec::new();
+        for x in list {
+            let i = x
+                .as_u64()
+                .map(|i| i as usize)
+                .filter(|&i| i < values.len())
+                .ok_or_else(|| bad(c, format!("dimension {id} has segments 0 to {}, not {x}", values.len().saturating_sub(1))))?;
+            // A segment locked already keeps its length; a new one, the length it has now.
+            let length = d.locked.iter().find(|l| l.segment == i).map_or(values.get(i).copied().unwrap_or_default(), |l| l.length);
+            if !locked.iter().any(|l: &Lock| l.segment == i) {
+                locked.push(Lock { segment: i, length });
+            }
+        }
+        locked.sort_by_key(|l| l.segment);
+        d.locked = locked;
+    }
+    s.model_mut().elements.insert(id, Element::Dimension(d.clone()));
+    Ok(json!({"id": id, "equal": d.equal, "locked": d.locked.iter().map(|l| l.segment).collect::<Vec<_>>()}))
 }
 
 fn dimension_text(s: &mut Session, p: &Value) -> R {
@@ -7533,6 +7583,11 @@ fn align_element(s: &mut Session, p: &Value) -> R {
     let mo = Motion { map: &|q| placement.map(q), slide: (placement.angle.abs() <= 1e-9).then_some(placement.by), mirror: false };
     relocate(c, s, &[id], &mo, None)?;
     Ok(json!({"aligned": id, "angle": placement.angle, "by": placement.by}))
+}
+
+/// Element `id` moved `by` in plan, as `move` moves it: what keeps a dimension's constraints.
+pub(crate) fn move_by(s: &mut Session, id: Id, by: P2) -> Result<(), String> {
+    move_elements(s, &json!({"ids": [id], "by": [by.0, by.1]})).map(|_| ())
 }
 
 fn move_elements(s: &mut Session, p: &Value) -> R {

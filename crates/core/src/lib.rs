@@ -17,6 +17,7 @@ pub mod cloud;
 mod cloud_tests;
 mod commands;
 mod component_geometry;
+mod constraints;
 mod csg;
 pub mod curves;
 pub mod dims;

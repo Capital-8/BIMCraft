@@ -697,6 +697,20 @@ pub struct Dimension {
     /// Text of single segments' own, over the dimension's (Revit's Dimension Text on one segment).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub texts: Vec<SegmentText>,
+    /// Its segments are kept equal: what it measures to between its first and last moves to keep them so (`crate::constraints`).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub equal: bool,
+    /// Its segments locked at a length: what it measures to moves together to keep them so.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub locked: Vec<Lock>,
+}
+
+/// A dimension's segment `segment` (counted as its values are) kept at `length` mm, Revit's padlock.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Lock {
+    pub segment: usize,
+    pub length: f64,
 }
 
 /// One segment's own text: what it shows in place of the dimension's where it says something. `segment` counts its numbers
@@ -4198,15 +4212,21 @@ impl Model {
     /// when it runs north and south. Then where its references cross it, in order that way: how
     /// far from `at`, and the reference's line.
     pub fn crossings(&self, d: &Dimension) -> (P2, Vec<(f64, Line)>) {
-        let lines: Vec<Line> = d.refs.iter().filter_map(|r| self.reference_geometry(r).ok()).collect();
+        let (n, stations) = self.stations(d);
+        (n, stations.into_iter().map(|(s, l, _)| (s, l)).collect())
+    }
+
+    /// [`Model::crossings`], each with the reference it is of.
+    pub fn stations(&self, d: &Dimension) -> (P2, Vec<(f64, Line, Reference)>) {
+        let lines: Vec<(Line, Reference)> = d.refs.iter().filter_map(|r| Some((self.reference_geometry(r).ok()?, *r))).collect();
         let Some(n) = self.measured_along(d) else { return (P2(0.0, 0.0), Vec::new()) };
         let n = if n.0 < -1e-9 || (n.0.abs() <= 1e-9 && n.1 < 0.0) { n * -1.0 } else { n };
-        let mut v: Vec<(f64, Line)> = lines
+        let mut v: Vec<(f64, Line, Reference)> = lines
             .into_iter()
-            .map(|(a, b)| {
+            .map(|((a, b), r)| {
                 // A point is where it stands along the line; a line, where the dimension line crosses it.
                 let c = if a.dist(b) <= 1e-9 { a } else { geom::line_intersection(d.at, d.at + n, a, b).unwrap_or(a) };
-                ((c - d.at).dot(n), (a, b))
+                ((c - d.at).dot(n), (a, b), r)
             })
             .collect();
         v.sort_by(|x, y| x.0.total_cmp(&y.0));
@@ -4896,6 +4916,18 @@ impl Model {
                         [("prefix", &d.prefix), ("suffix", &d.suffix), ("above", &d.above), ("below", &d.below), ("replace", &d.replace)]
                     {
                         crate::dims::dim_text(&who, what, t)?;
+                    }
+                    if d.equal && !(matches!(d.kind, DimKind::Aligned | DimKind::Linear) && d.refs.len() > 2) {
+                        return Err(format!("{who}: only an aligned or a linear dimension of two segments or more is kept equal"));
+                    }
+                    if !d.locked.is_empty() && !matches!(d.kind, DimKind::Aligned | DimKind::Linear) {
+                        return Err(format!("{who}: only an aligned or a linear dimension's segments are locked"));
+                    }
+                    let mut locks = BTreeSet::new();
+                    for l in &d.locked {
+                        if l.segment >= MAX_POINTS || !locks.insert(l.segment) || !(l.length.is_finite() && l.length.abs() <= MAX_COORD) {
+                            return Err(format!("{who}: segment {} is locked twice, at no length, or isn't a segment", l.segment));
+                        }
                     }
                     let mut segments = BTreeSet::new();
                     for st in &d.texts {

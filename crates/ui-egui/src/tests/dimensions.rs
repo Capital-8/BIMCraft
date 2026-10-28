@@ -155,3 +155,24 @@ fn a_double_click_on_a_dimension_s_number_opens_dimension_text_for_that_segment(
         e => panic!("{e:?}"),
     }
 }
+
+#[test]
+fn a_selected_dimension_shows_padlocks_and_eq_which_lock_its_segments_and_make_them_equal() {
+    let script = format!(
+        "{BOX}\ngrid {{\"start\": [1000, -2000], \"end\": [1000, 8000]}}\ndimension {{\"refs\": [[0, 3000], [1000, 3000], [8000, 3000]], \"at\": [4000, -1000]}}"
+    );
+    let mut h = app(&script);
+    let id = ids(&h, "dimension")[0];
+    h.state_mut().selection = vec![id];
+    h.run();
+    press(&mut h, "Lock segment 2");
+    let dim = |h: &Harness<BimApp>| dimension(h, id);
+    assert_eq!(dim(&h).locked.iter().map(|l| (l.segment, l.length)).collect::<Vec<_>>(), [(1, 7000.0)]);
+    // Pressed again, it unlocks.
+    press(&mut h, "Lock segment 2");
+    assert!(dim(&h).locked.is_empty());
+    // EQ: the grid goes to the middle of the walls.
+    press(&mut h, "Equal");
+    assert!(dim(&h).equal, "{}", h.state().status.text);
+    assert_eq!(field(&h, id, "values"), json!([4000.0, 4000.0]));
+}
