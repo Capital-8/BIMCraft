@@ -2,6 +2,8 @@
 //! patterns (graphic segments, mm on paper), on two tabs of one draft, applied as one undo step (OK and Apply), or
 //! dropped (Cancel).
 
+use crate::popup::Modal;
+
 use bimcraft_i18n::msg;
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -11,8 +13,7 @@ use bimcraft_core::lines::{LinePattern, LineStyle, SOLID, Segment};
 use bimcraft_core::model::Model;
 use bimcraft_core::pen::{MAX_PEN, Pen};
 use egui::{
-    Align, Button, ComboBox, Context, Grid, Id as UiId, Layout, Modal, RichText, ScrollArea, Sense, TextEdit, Ui, WidgetInfo, WidgetType,
-    vec2,
+    Align, Button, ComboBox, Context, Grid, Id as UiId, Layout, RichText, ScrollArea, Sense, TextEdit, Ui, WidgetInfo, WidgetType, vec2,
 };
 use serde_json::{Value, json};
 
@@ -269,37 +270,38 @@ impl BimApp {
         let Some(mut d) = self.line_styles_dialog.take() else { return };
         let (mut ok, mut apply, mut cancel) = (false, false, false);
         let editing = d.creator.is_some();
-        let r = Modal::new(UiId::new("line-styles")).show(ctx, |ui| {
-            if editing {
-                ui.disable();
-            }
-            ui.set_width(640.0);
-            ui.label(RichText::new(t("Line Styles")).heading());
-            ui.add_space(6.0);
-            ui.horizontal(|ui| {
-                for (i, tab) in TABS.iter().enumerate() {
-                    if ui.selectable_label(d.tab == i, t(tab)).clicked() {
-                        d.tab = i;
+        let r = Modal::new(UiId::new("line-styles"), t("Line Styles")).width(640.0).show(ctx, |ui| {
+            crate::popup::body(ui, |ui| {
+                if editing {
+                    ui.disable();
+                }
+                ui.add_space(6.0);
+                ui.horizontal(|ui| {
+                    for (i, tab) in TABS.iter().enumerate() {
+                        if ui.selectable_label(d.tab == i, t(tab)).clicked() {
+                            d.tab = i;
+                        }
                     }
+                });
+                ui.separator();
+                // Under the tab: the error, then OK, Cancel and Apply. What the window has left over them is the tab's, so that on a
+                // small one the buttons stay in reach and the rows scroll.
+                let below = d.error.as_ref().map_or(0.0, |_| ERROR_HEIGHT + 6.0) + 8.0 + dialog_row(ui);
+                if d.tab == 0 {
+                    styles_tab(ui, &mut d, below);
+                } else {
+                    patterns_tab(ui, &mut d, below);
+                }
+                if let Some(error) = &d.error {
+                    boxed_text(ui, "line-styles-error", pal().error, error, ERROR_HEIGHT);
                 }
             });
-            ui.separator();
-            // Under the tab: the error, then OK, Cancel and Apply. What the window has left over them is the tab's, so that on a
-            // small one the buttons stay in reach and the rows scroll.
-            let below = d.error.as_ref().map_or(0.0, |_| ERROR_HEIGHT + 6.0) + 8.0 + dialog_row(ui);
-            if d.tab == 0 {
-                styles_tab(ui, &mut d, below);
-            } else {
-                patterns_tab(ui, &mut d, below);
-            }
-            if let Some(error) = &d.error {
-                boxed_text(ui, "line-styles-error", pal().error, error, ERROR_HEIGHT);
-            }
-            ui.add_space(8.0);
-            ui.with_layout(Layout::right_to_left(Align::Min), |ui| {
-                apply = ui.button(t("Apply")).clicked();
-                cancel = ui.button(t("Cancel")).clicked();
-                ok = ui.button(t("OK")).clicked();
+            crate::popup::footer(ui, |ui| {
+                ui.with_layout(Layout::right_to_left(Align::Min), |ui| {
+                    apply = ui.button(t("Apply")).clicked();
+                    cancel = ui.button(t("Cancel")).clicked();
+                    ok = ui.button(t("OK")).clicked();
+                });
             });
         });
         // Settle the child modal's measured size before the next pointer event uses its widget positions.

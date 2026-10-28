@@ -4,6 +4,8 @@
 //! edited as Revit's simple pattern: its angle, its spacing, crosshatched or not; any pattern's families, one by one, with
 //! Edit Lines (Revit's custom patterns, which it only imports). Patterns come in from a PAT file and go out to one.
 
+use crate::popup::Modal;
+
 use bimcraft_i18n::msg;
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -15,8 +17,8 @@ use bimcraft_core::geom::P2;
 use bimcraft_core::model::{Id, Model};
 use bimcraft_core::render::{PAPER, Rgb};
 use egui::{
-    Align, Button, Checkbox, Color32, ComboBox, Context, DragValue, Grid, Id as UiId, Layout, Modal, RichText, ScrollArea, Sense, Stroke,
-    TextEdit, Ui, WidgetInfo, WidgetType, pos2, vec2,
+    Button, Checkbox, Color32, ComboBox, Context, DragValue, Grid, Id as UiId, RichText, ScrollArea, Sense, Stroke, TextEdit, Ui,
+    WidgetInfo, WidgetType, pos2, vec2,
 };
 use serde_json::{Value, json};
 
@@ -687,49 +689,47 @@ impl BimApp {
         let Some(mut d) = self.fill_patterns_dialog.take() else { return };
         let editing = d.subject.is_some();
         let (mut ok, mut apply, mut cancel, mut ask) = (false, false, false, None);
-        let r = Modal::new(UiId::new("fill-patterns")).show(ctx, |ui| {
-            // Edit Type: Type Properties as every type's, its patterns a step away.
-            if editing && d.tab == 0 {
-                typeprops::title(ui);
-                let below = typeprops::foot_height(ui, d.error.is_some());
-                edit_type(ui, &mut d, below);
-                (ok, cancel, apply) = typeprops::foot(ui, d.error.as_deref());
-                return;
-            }
-            // One width for both tabs, so the dialog doesn't jump as they change.
-            ui.set_width(860.0);
-            ui.label(RichText::new(t(if editing { "Type Properties" } else { msg!("Fill Patterns") })).heading());
-            ui.add_space(6.0);
-            ui.horizontal(|ui| {
-                if editing {
-                    if ui.button(t("‹ Back")).on_hover_text(t("Back to the type")).clicked() {
-                        d.tab = 0;
+        let width = if editing && d.tab == 0 { typeprops::WIDTH } else { 860.0 };
+        let r = Modal::new(UiId::new("fill-patterns"), t(if editing { "Type Properties" } else { msg!("Fill Patterns") }))
+            .width(width)
+            .show(ctx, |ui| {
+                crate::popup::body(ui, |ui| {
+                    if editing && d.tab == 0 {
+                        let below = typeprops::foot_height(ui, d.error.is_some());
+                        edit_type(ui, &mut d, below);
+                        typeprops::error(ui, d.error.as_deref());
+                        return;
                     }
-                    return;
-                }
-                for (i, tab) in TABS.iter().enumerate() {
-                    if ui.selectable_label(d.tab == i, t(tab)).clicked() {
-                        d.tab = i;
+                    // One width for both tabs, so the dialog doesn't jump as they change.
+                    ui.add_space(6.0);
+                    ui.horizontal(|ui| {
+                        if editing {
+                            if ui.button(t("‹ Back")).on_hover_text(t("Back to the type")).clicked() {
+                                d.tab = 0;
+                            }
+                            return;
+                        }
+                        for (i, tab) in TABS.iter().enumerate() {
+                            if ui.selectable_label(d.tab == i, t(tab)).clicked() {
+                                d.tab = i;
+                            }
+                        }
+                    });
+                    ui.separator();
+                    // Under the tab: its notes, then OK, Cancel and Apply. What the window has left over them is the tab's, so that on a
+                    // small one the buttons stay in reach and the rows scroll.
+                    let below = messages_height(&d) + 8.0 + dialog_row(ui);
+                    if d.tab == 1 {
+                        ask = patterns_tab(ui, &mut d, below);
+                    } else {
+                        types_tab(ui, &mut d, below);
                     }
-                }
+                    messages(ui, &d);
+                });
+                crate::popup::footer(ui, |ui| {
+                    (ok, cancel, apply) = typeprops::foot(ui);
+                });
             });
-            ui.separator();
-            // Under the tab: its notes, then OK, Cancel and Apply. What the window has left over them is the tab's, so that on a
-            // small one the buttons stay in reach and the rows scroll.
-            let below = messages_height(&d) + 8.0 + dialog_row(ui);
-            if d.tab == 1 {
-                ask = patterns_tab(ui, &mut d, below);
-            } else {
-                types_tab(ui, &mut d, below);
-            }
-            messages(ui, &d);
-            ui.add_space(8.0);
-            ui.with_layout(Layout::right_to_left(Align::Min), |ui| {
-                apply = ui.button(t("Apply")).clicked();
-                cancel = ui.button(t("Cancel")).clicked();
-                ok = ui.button(t("OK")).clicked();
-            });
-        });
         let failed = (ok || apply) && !self.apply_fill_patterns(&mut d, apply);
         // The draft is read only for the file it is exported to.
         let drafted = matches!(ask, Some(FileAsk::Export)).then(|| d.drafted());

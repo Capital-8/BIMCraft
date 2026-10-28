@@ -5,6 +5,8 @@
 //! the difference as one `graphics` command; the other two run their commands as they go, as
 //! Project Parameters does.
 
+use crate::popup::Modal;
+
 use bimcraft_i18n::msg;
 
 use std::collections::BTreeSet;
@@ -19,9 +21,9 @@ use bimcraft_core::schedule;
 use bimcraft_core::styles::ObjectStyle;
 use bimcraft_core::units::Units;
 use egui::{
-    Align, Align2, Button, Checkbox, Color32, ComboBox, Context, DragValue, FontId, Grid, Id as UiId, Layout, Modal, Painter, Rect,
-    RichText, ScrollArea, Sense, Shape, Slider, Stroke, StrokeKind, TextEdit, TextStyle, TextWrapMode, Ui, UiBuilder, WidgetInfo,
-    WidgetType, pos2, vec2,
+    Align, Align2, Button, Checkbox, Color32, ComboBox, Context, DragValue, FontId, Grid, Id as UiId, Layout, Painter, Rect, RichText,
+    ScrollArea, Sense, Shape, Slider, Stroke, StrokeKind, TextEdit, TextStyle, TextWrapMode, Ui, UiBuilder, WidgetInfo, WidgetType, pos2,
+    vec2,
 };
 use serde_json::{Value, json};
 
@@ -292,58 +294,66 @@ impl BimApp {
         let (mut ok, mut cancel, mut apply, mut styles) = (false, false, false, false);
         // A cell's dialog over it has its own OK and Cancel.
         let over = d.cell.is_some();
-        let r = Modal::new(UiId::new("visibility-graphics")).show(ctx, |ui| {
-            // As large on every tab, so the dialog doesn't move about as the tabs change.
-            ui.set_width(800.0);
-            ui.set_min_height(500.0);
-            ui.label(RichText::new(tf("Visibility/Graphics Overrides for {}", &[&d.title])).heading());
-            if let Some(name) = &d.draft.template {
-                let what: Vec<&str> = followed
-                    .iter()
-                    .filter(|g| !matches!(g, Group::Range | Group::Phase | Group::Scale | Group::Detail | Group::Style))
-                    .map(|g| t(group_name(*g)))
-                    .collect();
-                if !what.is_empty() {
-                    ui.label(
-                        RichText::new(tf("{} follow view template {}: change them there.", &[&what.join(", "), name])).color(pal().muted),
-                    );
-                }
-            }
-            ui.add_space(6.0);
-            ui.horizontal(|ui| {
-                for (i, label) in TABS.iter().enumerate() {
-                    if ui.selectable_label(d.tab == i, t(label)).clicked() {
-                        d.tab = i;
-                        d.pick = None;
+        let r = Modal::new(UiId::new("visibility-graphics"), tf("Visibility/Graphics Overrides for {}", &[&d.title]))
+            .width(800.0)
+            .min_height(500.0)
+            .closable(!over)
+            .show(ctx, |ui| {
+                crate::popup::body(ui, |ui| {
+                    // As large on every tab, so the dialog doesn't move about as the tabs change.
+                    if let Some(name) = &d.draft.template {
+                        let what: Vec<&str> = followed
+                            .iter()
+                            .filter(|g| !matches!(g, Group::Range | Group::Phase | Group::Scale | Group::Detail | Group::Style))
+                            .map(|g| t(group_name(*g)))
+                            .collect();
+                        if !what.is_empty() {
+                            ui.label(
+                                RichText::new(tf("{} follow view template {}: change them there.", &[&what.join(", "), name]))
+                                    .color(pal().muted),
+                            );
+                        }
                     }
-                }
-            });
-            ui.separator();
-            let shown = d.draft.resolved(&model).into_owned();
-            match d.tab {
-                0 | 1 => {
-                    // A view's point clouds with its model's categories: Revit gives them a tab of their own.
-                    let names: Vec<&str> = if d.tab == 0 { MODEL.iter().chain(&SCANS).copied().collect() } else { ANNOTATION.to_vec() };
-                    styles = categories(ui, &mut d, &model, &shown, &names, !followed.contains(&Group::Categories));
-                }
-                2 => {
-                    styles = categories(ui, &mut d, &model, &shown, &IMPORTED, !followed.contains(&Group::Categories));
                     ui.add_space(6.0);
-                    imported_layers(ui, &mut d, &model);
-                }
-                3 => filters(ui, &mut d, &model, &shown, !followed.contains(&Group::Filters)),
-                ELEMENTS_TAB => elements(ui, &mut d, &model, &self.selection),
-                _ => design_options(ui, &mut d, &model, &shown, !followed.contains(&Group::Options)),
-            }
-            ui.add_space(6.0);
-            if !over {
-                ui.with_layout(Layout::right_to_left(Align::Min), |ui| {
-                    apply = ui.button(t("Apply")).clicked();
-                    cancel = ui.button(t("Cancel")).clicked();
-                    ok = ui.button(t("OK")).clicked();
+                    ui.horizontal(|ui| {
+                        for (i, label) in TABS.iter().enumerate() {
+                            if ui.selectable_label(d.tab == i, t(label)).clicked() {
+                                d.tab = i;
+                                d.pick = None;
+                            }
+                        }
+                    });
+                    ui.separator();
+                    let shown = d.draft.resolved(&model).into_owned();
+                    match d.tab {
+                        0 | 1 => {
+                            // A view's point clouds with its model's categories: Revit gives them a tab of their own.
+                            let names: Vec<&str> =
+                                if d.tab == 0 { MODEL.iter().chain(&SCANS).copied().collect() } else { ANNOTATION.to_vec() };
+                            styles = categories(ui, &mut d, &model, &shown, &names, !followed.contains(&Group::Categories));
+                        }
+                        2 => {
+                            styles = categories(ui, &mut d, &model, &shown, &IMPORTED, !followed.contains(&Group::Categories));
+                            ui.add_space(6.0);
+                            imported_layers(ui, &mut d, &model);
+                        }
+                        3 => filters(ui, &mut d, &model, &shown, !followed.contains(&Group::Filters)),
+                        ELEMENTS_TAB => elements(ui, &mut d, &model, &self.selection),
+                        _ => design_options(ui, &mut d, &model, &shown, !followed.contains(&Group::Options)),
+                    }
                 });
-            }
-        });
+                crate::popup::footer(ui, |ui| {
+                    if !over {
+                        ui.with_layout(Layout::right_to_left(Align::Min), |ui| {
+                            apply = ui.button(t("Apply")).clicked();
+                            cancel = ui.button(t("Cancel")).clicked();
+                            ok = ui.button(t("OK")).clicked();
+                        });
+                    } else {
+                        ui.allocate_space(vec2(ui.available_width(), ui.spacing().interact_size.y));
+                    }
+                });
+            });
         cell_window(ctx, &mut d, &model);
         if styles {
             self.object_styles_dialog = Some(crate::objectstyles::ObjectStylesDialog::new(&model));
@@ -375,75 +385,80 @@ impl BimApp {
         let model = Arc::clone(&self.session.model);
         let units = model.units;
         let (mut close, mut run, mut picked) = (false, None::<Value>, None::<String>);
-        let r = Modal::new(UiId::new("view-filters")).show(ctx, |ui| {
-            ui.set_width(660.0);
-            ui.label(RichText::new(t("Filters")).heading());
-            ui.add_space(6.0);
-            ui.horizontal(|ui| {
-                let l = ui.label(t("Filter:"));
-                let c = ComboBox::from_id_salt("view-filter-name").selected_text(&d.picked).width(220.0).show_ui(ui, |ui| {
-                    for name in model.view_filters.keys() {
-                        if ui.selectable_label(*name == d.picked, name).clicked() {
-                            picked = Some(name.clone());
-                        }
-                    }
-                });
-                c.response.labelled_by(l.id);
-                if ui.button(t("New")).clicked() {
-                    let fresh =
-                        (1..).map(|n| format!("{} {n}", t("Filter"))).find(|n| !model.view_filters.contains_key(n)).unwrap_or_default();
-                    run = Some(json!({"name": fresh, "categories": ["wall"]}));
-                    picked = Some(fresh);
-                }
-                if ui.add_enabled(model.view_filters.contains_key(&d.picked), Button::new(t("Delete"))).clicked() {
-                    run = Some(json!({"name": d.picked, "delete": true}));
-                    picked = model.view_filters.keys().find(|n| **n != d.picked).cloned().or_else(|| Some(String::new()));
-                }
-            });
-            match model.view_filters.get(&d.picked) {
-                Some(f) => {
-                    ui.add_space(6.0);
-                    ui.label(RichText::new(t("Categories")).strong());
-                    Grid::new("view-filter-categories").num_columns(4).spacing(vec2(16.0, 4.0)).show(ui, |ui| {
-                        for (i, cat) in schedule::categories().into_iter().enumerate() {
-                            let mut on = f.categories.iter().any(|c| c == cat);
-                            if ui.checkbox(&mut on, lang::category(cat, true)).changed() {
-                                let mut list: Vec<&str> = f.categories.iter().map(String::as_str).filter(|c| *c != cat).collect();
-                                if on {
-                                    list.push(cat);
-                                }
-                                run = Some(json!({"name": d.picked, "categories": list}));
-                            }
-                            if i % 4 == 3 {
-                                ui.end_row();
+        let r = Modal::new(UiId::new("view-filters"), t("Filters")).width(660.0).show(ctx, |ui| {
+            crate::popup::body(ui, |ui| {
+                ui.add_space(6.0);
+                ui.horizontal(|ui| {
+                    let l = ui.label(t("Filter:"));
+                    let c = ComboBox::from_id_salt("view-filter-name").selected_text(&d.picked).width(220.0).show_ui(ui, |ui| {
+                        for name in model.view_filters.keys() {
+                            if ui.selectable_label(*name == d.picked, name).clicked() {
+                                picked = Some(name.clone());
                             }
                         }
                     });
-                    ui.add_space(6.0);
-                    ui.label(RichText::new(t("Filter Rules")).strong());
-                    // The fields every one of its categories has.
-                    let kinds: Vec<Vec<(String, schedule::Kind)>> = f.categories.iter().map(|c| schedule::fields(&model, c)).collect();
-                    let names: Vec<String> = kinds
-                        .first()
-                        .map(|first| {
-                            first.iter().map(|(n, _)| n.clone()).filter(|n| kinds.iter().all(|k| k.iter().any(|(m, _)| m == n))).collect()
-                        })
-                        .unwrap_or_default();
-                    let kind_of =
-                        |n: &str| kinds.first().and_then(|k| k.iter().find(|(m, _)| m == n)).map_or(schedule::Kind::Text, |(_, k)| *k);
-                    let mut rules = f.rules.clone();
-                    // ponytail: typed values commit as the schedule's filter rows do, by the filter's picked name.
-                    if self.filter_rows(ui, 0, &mut rules, &names, &kind_of, units) {
-                        run = Some(json!({"name": d.picked, "rules": rules}));
+                    c.response.labelled_by(l.id);
+                    if ui.button(t("New")).clicked() {
+                        let fresh =
+                            (1..).map(|n| format!("{} {n}", t("Filter"))).find(|n| !model.view_filters.contains_key(n)).unwrap_or_default();
+                        run = Some(json!({"name": fresh, "categories": ["wall"]}));
+                        picked = Some(fresh);
+                    }
+                    if ui.add_enabled(model.view_filters.contains_key(&d.picked), Button::new(t("Delete"))).clicked() {
+                        run = Some(json!({"name": d.picked, "delete": true}));
+                        picked = model.view_filters.keys().find(|n| **n != d.picked).cloned().or_else(|| Some(String::new()));
+                    }
+                });
+                match model.view_filters.get(&d.picked) {
+                    Some(f) => {
+                        ui.add_space(6.0);
+                        ui.label(RichText::new(t("Categories")).strong());
+                        Grid::new("view-filter-categories").num_columns(4).spacing(vec2(16.0, 4.0)).show(ui, |ui| {
+                            for (i, cat) in schedule::categories().into_iter().enumerate() {
+                                let mut on = f.categories.iter().any(|c| c == cat);
+                                if ui.checkbox(&mut on, lang::category(cat, true)).changed() {
+                                    let mut list: Vec<&str> = f.categories.iter().map(String::as_str).filter(|c| *c != cat).collect();
+                                    if on {
+                                        list.push(cat);
+                                    }
+                                    run = Some(json!({"name": d.picked, "categories": list}));
+                                }
+                                if i % 4 == 3 {
+                                    ui.end_row();
+                                }
+                            }
+                        });
+                        ui.add_space(6.0);
+                        ui.label(RichText::new(t("Filter Rules")).strong());
+                        // The fields every one of its categories has.
+                        let kinds: Vec<Vec<(String, schedule::Kind)>> = f.categories.iter().map(|c| schedule::fields(&model, c)).collect();
+                        let names: Vec<String> = kinds
+                            .first()
+                            .map(|first| {
+                                first
+                                    .iter()
+                                    .map(|(n, _)| n.clone())
+                                    .filter(|n| kinds.iter().all(|k| k.iter().any(|(m, _)| m == n)))
+                                    .collect()
+                            })
+                            .unwrap_or_default();
+                        let kind_of =
+                            |n: &str| kinds.first().and_then(|k| k.iter().find(|(m, _)| m == n)).map_or(schedule::Kind::Text, |(_, k)| *k);
+                        let mut rules = f.rules.clone();
+                        // ponytail: typed values commit as the schedule's filter rows do, by the filter's picked name.
+                        if self.filter_rows(ui, 0, &mut rules, &names, &kind_of, units) {
+                            run = Some(json!({"name": d.picked, "rules": rules}));
+                        }
+                    }
+                    None => {
+                        ui.add_space(6.0);
+                        ui.label(RichText::new(t("No filters yet: New makes one.")).color(pal().muted));
                     }
                 }
-                None => {
-                    ui.add_space(6.0);
-                    ui.label(RichText::new(t("No filters yet: New makes one.")).color(pal().muted));
-                }
-            }
-            ui.add_space(8.0);
-            ui.with_layout(Layout::right_to_left(Align::Min), |ui| close = ui.button(t("Close")).clicked());
+            });
+            crate::popup::footer(ui, |ui| {
+                ui.with_layout(Layout::right_to_left(Align::Min), |ui| close = ui.button(t("Close")).clicked());
+            });
         });
         if let Some(p) = run
             && self.run("filter", p).is_none()
@@ -468,85 +483,86 @@ impl BimApp {
         let view = self.graphic_view();
         let own = self.graphics_now();
         let (mut close, mut run, mut assign, mut picked) = (false, None::<Value>, None::<Value>, None::<String>);
-        let r = Modal::new(UiId::new("view-templates")).show(ctx, |ui| {
-            ui.set_width(520.0);
-            ui.label(RichText::new(t("View Templates")).heading());
-            ui.add_space(6.0);
-            ui.horizontal(|ui| {
-                let l = ui.label(t("Template:"));
-                let c = ComboBox::from_id_salt("view-template-name").selected_text(&d.picked).width(220.0).show_ui(ui, |ui| {
-                    for name in model.view_templates.keys() {
-                        if ui.selectable_label(*name == d.picked, name).clicked() {
-                            picked = Some(name.clone());
+        let r = Modal::new(UiId::new("view-templates"), t("View Templates")).width(520.0).show(ctx, |ui| {
+            crate::popup::body(ui, |ui| {
+                ui.add_space(6.0);
+                ui.horizontal(|ui| {
+                    let l = ui.label(t("Template:"));
+                    let c = ComboBox::from_id_salt("view-template-name").selected_text(&d.picked).width(220.0).show_ui(ui, |ui| {
+                        for name in model.view_templates.keys() {
+                            if ui.selectable_label(*name == d.picked, name).clicked() {
+                                picked = Some(name.clone());
+                            }
+                        }
+                    });
+                    c.response.labelled_by(l.id);
+                    if ui.add_enabled(model.view_templates.contains_key(&d.picked), Button::new(t("Delete"))).clicked() {
+                        run = Some(json!({"name": d.picked, "delete": true}));
+                        picked = model.view_templates.keys().find(|n| **n != d.picked).cloned().or_else(|| Some(String::new()));
+                    }
+                });
+                if let Some(tpl) = model.view_templates.get(&d.picked) {
+                    ui.add_space(6.0);
+                    ui.label(RichText::new(t("The views following it get from it:")).strong());
+                    for g in Group::ALL {
+                        let mut on = tpl.controls.contains(&g);
+                        if ui.checkbox(&mut on, t(group_name(g))).changed() {
+                            // This one as ticked, the others as they were.
+                            let list: Vec<Group> =
+                                Group::ALL.into_iter().filter(|h| if *h == g { on } else { tpl.controls.contains(h) }).collect();
+                            run = Some(json!({"name": d.picked, "controls": list}));
                         }
                     }
-                });
-                c.response.labelled_by(l.id);
-                if ui.add_enabled(model.view_templates.contains_key(&d.picked), Button::new(t("Delete"))).clicked() {
-                    run = Some(json!({"name": d.picked, "delete": true}));
-                    picked = model.view_templates.keys().find(|n| **n != d.picked).cloned().or_else(|| Some(String::new()));
-                }
-            });
-            if let Some(tpl) = model.view_templates.get(&d.picked) {
-                ui.add_space(6.0);
-                ui.label(RichText::new(t("The views following it get from it:")).strong());
-                for g in Group::ALL {
-                    let mut on = tpl.controls.contains(&g);
-                    if ui.checkbox(&mut on, t(group_name(g))).changed() {
-                        // This one as ticked, the others as they were.
-                        let list: Vec<Group> =
-                            Group::ALL.into_iter().filter(|h| if *h == g { on } else { tpl.controls.contains(h) }).collect();
-                        run = Some(json!({"name": d.picked, "controls": list}));
-                    }
-                }
-                // What it holds of scale, detail level and visual style, to set.
-                ui.add_space(4.0);
-                Grid::new("template-settings").num_columns(2).show(ui, |ui| {
-                    let l = ui.label(t("View Scale:"));
-                    if let Some(n) = scale_combo(ui, "template-scale", l.id, tpl.graphics.scale_n(model.units), model.units) {
-                        run = Some(json!({"name": d.picked, "scale": n}));
-                    }
-                    ui.end_row();
-                    let l = ui.label(t("Detail Level:"));
-                    if let Some(level) = detail_combo(ui, "template-detail", l.id, tpl.graphics.detail) {
-                        run = Some(json!({"name": d.picked, "detail": level.name()}));
-                    }
-                    ui.end_row();
-                    let l = ui.label(t("Visual Style:"));
-                    if let Some(v) = style_combo(ui, "template-style", l.id, tpl.graphics.style) {
-                        run = Some(json!({"name": d.picked, "visual_style": v.name()}));
-                    }
-                    ui.end_row();
-                });
-                if let Some(view) = &view {
-                    let now = own.template.as_ref() == Some(&d.picked);
+                    // What it holds of scale, detail level and visual style, to set.
                     ui.add_space(4.0);
-                    let label = if now { t("Stop Following in This View") } else { t("Follow in This View") };
-                    if ui.button(label).clicked() {
-                        assign = Some(json!({"view": view, "template": if now { Value::Null } else { json!(d.picked) }}));
+                    Grid::new("template-settings").num_columns(2).show(ui, |ui| {
+                        let l = ui.label(t("View Scale:"));
+                        if let Some(n) = scale_combo(ui, "template-scale", l.id, tpl.graphics.scale_n(model.units), model.units) {
+                            run = Some(json!({"name": d.picked, "scale": n}));
+                        }
+                        ui.end_row();
+                        let l = ui.label(t("Detail Level:"));
+                        if let Some(level) = detail_combo(ui, "template-detail", l.id, tpl.graphics.detail) {
+                            run = Some(json!({"name": d.picked, "detail": level.name()}));
+                        }
+                        ui.end_row();
+                        let l = ui.label(t("Visual Style:"));
+                        if let Some(v) = style_combo(ui, "template-style", l.id, tpl.graphics.style) {
+                            run = Some(json!({"name": d.picked, "visual_style": v.name()}));
+                        }
+                        ui.end_row();
+                    });
+                    if let Some(view) = &view {
+                        let now = own.template.as_ref() == Some(&d.picked);
+                        ui.add_space(4.0);
+                        let label = if now { t("Stop Following in This View") } else { t("Follow in This View") };
+                        if ui.button(label).clicked() {
+                            assign = Some(json!({"view": view, "template": if now { Value::Null } else { json!(d.picked) }}));
+                        }
                     }
+                } else {
+                    ui.add_space(6.0);
+                    ui.label(RichText::new(t("No view templates yet: Create from This View makes one.")).color(pal().muted));
                 }
-            } else {
-                ui.add_space(6.0);
-                ui.label(RichText::new(t("No view templates yet: Create from This View makes one.")).color(pal().muted));
-            }
-            ui.add_space(8.0);
-            ui.separator();
-            ui.add_space(4.0);
-            ui.horizontal(|ui| {
-                let l = ui.label(t("New template:"));
-                ui.add(egui::TextEdit::singleline(&mut d.name).desired_width(180.0)).labelled_by(l.id);
-                let from = view.clone().filter(|_| !d.name.trim().is_empty());
-                let r = ui.add_enabled(from.is_some(), Button::new(t("Create from This View")));
-                if r.clicked()
-                    && let Some(from) = from
-                {
-                    run = Some(json!({"name": d.name.trim(), "from": from}));
-                    picked = Some(d.name.trim().to_string());
-                }
+                ui.add_space(8.0);
+                ui.separator();
+                ui.add_space(4.0);
+                ui.horizontal(|ui| {
+                    let l = ui.label(t("New template:"));
+                    ui.add(egui::TextEdit::singleline(&mut d.name).desired_width(180.0)).labelled_by(l.id);
+                    let from = view.clone().filter(|_| !d.name.trim().is_empty());
+                    let r = ui.add_enabled(from.is_some(), Button::new(t("Create from This View")));
+                    if r.clicked()
+                        && let Some(from) = from
+                    {
+                        run = Some(json!({"name": d.name.trim(), "from": from}));
+                        picked = Some(d.name.trim().to_string());
+                    }
+                });
             });
-            ui.add_space(8.0);
-            ui.with_layout(Layout::right_to_left(Align::Min), |ui| close = ui.button(t("Close")).clicked());
+            crate::popup::footer(ui, |ui| {
+                ui.with_layout(Layout::right_to_left(Align::Min), |ui| close = ui.button(t("Close")).clicked());
+            });
         });
         if let Some(p) = run
             && self.run("template", p).is_none()
@@ -948,54 +964,59 @@ fn paint_cell(ui: &Ui, p: &Painter, r: Rect, cell: Cell, o: &Override, ink: Colo
 fn cell_window(ctx: &Context, d: &mut VgDialog, model: &Model) {
     let Some(mut e) = d.cell.take() else { return };
     let (mut ok, mut cancel) = (false, false);
-    let r = Modal::new(UiId::new("vg-cell")).show(ctx, |ui| {
-        ui.set_width(if matches!(e.cell, Cell::ProjectionPatterns | Cell::CutPatterns) { 440.0 } else { 360.0 });
-        ui.label(RichText::new(t(e.cell.title())).heading());
-        ui.label(RichText::new(&e.name).color(pal().muted));
-        ui.add_space(6.0);
-        let (section, start) = if e.cell.cut() { ("Cut", e.start.cut) } else { ("Projection", e.start.projection) };
-        let style = if e.cell.cut() { &mut e.over.cut } else { &mut e.over.projection };
-        Grid::new("vg-cell-grid").num_columns(2).spacing(vec2(16.0, 6.0)).show(ui, |ui| match e.cell {
-            Cell::ProjectionLines | Cell::CutLines => line_rows(ui, section, style, start),
-            Cell::ProjectionPatterns | Cell::CutPatterns => {
-                fill_row(ui, section, style);
-                pattern_rows(ui, section, style, model);
-            }
-            Cell::Transparency => {
-                let l = ui.label(t("Transparency"));
-                let mut pct = f64::from(e.over.transparency);
-                ui.add(Slider::new(&mut pct, 0.0..=100.0).suffix("%")).labelled_by(l.id);
-                e.over.transparency = pct.round().clamp(0.0, 100.0) as u8;
-                ui.end_row();
-            }
-        });
-        if matches!(e.cell, Cell::ProjectionPatterns | Cell::CutPatterns) {
-            ui.label(RichText::new(t("Unchecked layers inherit; <None> hides a layer.")).small().color(pal().muted));
-            ui.label(
-                RichText::new(t("Patterns appear in plans, ceiling plans, section cuts and filled regions.")).small().color(pal().muted),
-            );
-        }
-        ui.add_space(8.0);
-        ui.horizontal(|ui| {
-            if ui.button(t("Clear Overrides")).clicked() {
-                match e.cell {
-                    Cell::ProjectionLines | Cell::CutLines => {
-                        let s = if e.cell.cut() { &mut e.over.cut } else { &mut e.over.projection };
-                        (s.color, s.weight, s.dash) = (None, None, None);
-                    }
+    let r = Modal::new(UiId::new("vg-cell"), t(e.cell.title()))
+        .width(if matches!(e.cell, Cell::ProjectionPatterns | Cell::CutPatterns) { 440.0 } else { 360.0 })
+        .show(ctx, |ui| {
+            crate::popup::body(ui, |ui| {
+                ui.label(RichText::new(&e.name).color(pal().muted));
+                ui.add_space(6.0);
+                let (section, start) = if e.cell.cut() { ("Cut", e.start.cut) } else { ("Projection", e.start.projection) };
+                let style = if e.cell.cut() { &mut e.over.cut } else { &mut e.over.projection };
+                Grid::new("vg-cell-grid").num_columns(2).spacing(vec2(16.0, 6.0)).show(ui, |ui| match e.cell {
+                    Cell::ProjectionLines | Cell::CutLines => line_rows(ui, section, style, start),
                     Cell::ProjectionPatterns | Cell::CutPatterns => {
-                        let s = if e.cell.cut() { &mut e.over.cut } else { &mut e.over.projection };
-                        (s.fill, s.foreground, s.background) = (None, None, None);
+                        fill_row(ui, section, style);
+                        pattern_rows(ui, section, style, model);
                     }
-                    Cell::Transparency => e.over.transparency = 0,
+                    Cell::Transparency => {
+                        let l = ui.label(t("Transparency"));
+                        let mut pct = f64::from(e.over.transparency);
+                        ui.add(Slider::new(&mut pct, 0.0..=100.0).suffix("%")).labelled_by(l.id);
+                        e.over.transparency = pct.round().clamp(0.0, 100.0) as u8;
+                        ui.end_row();
+                    }
+                });
+                if matches!(e.cell, Cell::ProjectionPatterns | Cell::CutPatterns) {
+                    ui.label(RichText::new(t("Unchecked layers inherit; <None> hides a layer.")).small().color(pal().muted));
+                    ui.label(
+                        RichText::new(t("Patterns appear in plans, ceiling plans, section cuts and filled regions."))
+                            .small()
+                            .color(pal().muted),
+                    );
                 }
-            }
-            ui.with_layout(Layout::right_to_left(Align::Min), |ui| {
-                cancel = ui.button(t("Cancel")).clicked();
-                ok = ui.button(t("OK")).clicked();
+            });
+            crate::popup::footer(ui, |ui| {
+                ui.horizontal(|ui| {
+                    if ui.button(t("Clear Overrides")).clicked() {
+                        match e.cell {
+                            Cell::ProjectionLines | Cell::CutLines => {
+                                let s = if e.cell.cut() { &mut e.over.cut } else { &mut e.over.projection };
+                                (s.color, s.weight, s.dash) = (None, None, None);
+                            }
+                            Cell::ProjectionPatterns | Cell::CutPatterns => {
+                                let s = if e.cell.cut() { &mut e.over.cut } else { &mut e.over.projection };
+                                (s.fill, s.foreground, s.background) = (None, None, None);
+                            }
+                            Cell::Transparency => e.over.transparency = 0,
+                        }
+                    }
+                    ui.with_layout(Layout::right_to_left(Align::Min), |ui| {
+                        cancel = ui.button(t("Cancel")).clicked();
+                        ok = ui.button(t("OK")).clicked();
+                    });
+                });
             });
         });
-    });
     if ok {
         let pick = e.pick.clone();
         put(d, model, &pick, e.over);

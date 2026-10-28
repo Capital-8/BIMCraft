@@ -1,11 +1,13 @@
 //! Keyboard shortcuts customization, management, loading from file, and modal dialog.
 
+use crate::popup::Modal;
+
 use std::collections::BTreeMap;
 use std::path::Path;
 
 use bimcraft_core::geom::P2;
 use bimcraft_core::snap::Kind as Snap;
-use egui::{Align, ComboBox, Context, Grid, Id as UiId, Layout, Modal, RichText, ScrollArea, TextEdit, vec2};
+use egui::{Align, ComboBox, Context, Grid, Id as UiId, Layout, RichText, ScrollArea, TextEdit, vec2};
 
 use crate::graphics;
 use crate::lang::{Lang, t, tf, translated_in};
@@ -381,185 +383,186 @@ impl BimApp {
         let mut close = false;
         let mut load_asked = false;
 
-        let r = Modal::new(UiId::new("shortcuts")).show(ctx, |ui| {
-            ui.horizontal(|ui| {
-                ui.label(RichText::new(t("Keyboard Shortcuts")).heading());
-            });
-            ui.add_space(4.0);
+        let r = Modal::new(UiId::new("shortcuts"), t("Keyboard Shortcuts")).width(580.0).show(ctx, |ui| {
+            crate::popup::body(ui, |ui| {
+                ui.add_space(4.0);
 
-            // Controls toolbar: Search, Load File, Add Shortcut, Restore Defaults
-            ui.horizontal(|ui| {
-                ui.add(TextEdit::singleline(&mut self.shortcuts_dialog.search).hint_text(t("Search…")).desired_width(180.0));
+                // Controls toolbar: Search, Load File, Add Shortcut, Restore Defaults
+                ui.horizontal(|ui| {
+                    ui.add(TextEdit::singleline(&mut self.shortcuts_dialog.search).hint_text(t("Search…")).desired_width(180.0));
 
-                if ui.button(t("Load File...")).clicked() {
-                    load_asked = true;
-                }
-
-                let add_label = if self.shortcuts_dialog.adding { t("Cancel") } else { t("Add Shortcut") };
-                if ui.button(add_label).clicked() {
-                    self.shortcuts_dialog.adding = !self.shortcuts_dialog.adding;
-                    self.shortcuts_dialog.error = None;
-                    self.shortcuts_dialog.message = None;
-                    if self.shortcuts_dialog.new_action.is_empty() {
-                        self.shortcuts_dialog.new_action = ACTIONS.first().copied().unwrap_or("Wall").to_string();
+                    if ui.button(t("Load File...")).clicked() {
+                        load_asked = true;
                     }
-                }
 
-                if !self.custom_shortcuts.is_empty() && ui.button(t("Restore Defaults")).clicked() {
-                    self.custom_shortcuts.clear();
-                    self.shortcuts_dialog.error = None;
-                    self.shortcuts_dialog.message = Some(t("Restore Defaults").to_string());
-                }
-            });
-
-            // Form to add a new keyboard shortcut (with duplicate checking)
-            if self.shortcuts_dialog.adding {
-                ui.add_space(6.0);
-                ui.group(|ui| {
-                    ui.label(RichText::new(t("Add Shortcut")).strong());
-                    ui.horizontal(|ui| {
-                        ui.label(t("Shortcut Keys:"));
-                        let r = ui.add(TextEdit::singleline(&mut self.shortcuts_dialog.new_keys).desired_width(60.0));
-                        if r.changed() {
-                            self.shortcuts_dialog.new_keys = self.shortcuts_dialog.new_keys.to_ascii_uppercase();
+                    let add_label = if self.shortcuts_dialog.adding { t("Cancel") } else { t("Add Shortcut") };
+                    if ui.button(add_label).clicked() {
+                        self.shortcuts_dialog.adding = !self.shortcuts_dialog.adding;
+                        self.shortcuts_dialog.error = None;
+                        self.shortcuts_dialog.message = None;
+                        if self.shortcuts_dialog.new_action.is_empty() {
+                            self.shortcuts_dialog.new_action = ACTIONS.first().copied().unwrap_or("Wall").to_string();
                         }
+                    }
 
-                        ui.label(t("Command / Tool:"));
-                        let current_action = self.shortcuts_dialog.new_action.clone();
-                        ComboBox::from_id_salt("new_shortcut_action").selected_text(t(&current_action)).show_ui(ui, |ui| {
-                            for &act in ACTIONS {
-                                ui.selectable_value(&mut self.shortcuts_dialog.new_action, act.to_string(), t(act));
+                    if !self.custom_shortcuts.is_empty() && ui.button(t("Restore Defaults")).clicked() {
+                        self.custom_shortcuts.clear();
+                        self.shortcuts_dialog.error = None;
+                        self.shortcuts_dialog.message = Some(t("Restore Defaults").to_string());
+                    }
+                });
+
+                // Form to add a new keyboard shortcut (with duplicate checking)
+                if self.shortcuts_dialog.adding {
+                    ui.add_space(6.0);
+                    ui.group(|ui| {
+                        ui.label(RichText::new(t("Add Shortcut")).strong());
+                        ui.horizontal(|ui| {
+                            ui.label(t("Shortcut Keys:"));
+                            let r = ui.add(TextEdit::singleline(&mut self.shortcuts_dialog.new_keys).desired_width(60.0));
+                            if r.changed() {
+                                self.shortcuts_dialog.new_keys = self.shortcuts_dialog.new_keys.to_ascii_uppercase();
+                            }
+
+                            ui.label(t("Command / Tool:"));
+                            let current_action = self.shortcuts_dialog.new_action.clone();
+                            ComboBox::from_id_salt("new_shortcut_action").selected_text(t(&current_action)).show_ui(ui, |ui| {
+                                for &act in ACTIONS {
+                                    ui.selectable_value(&mut self.shortcuts_dialog.new_action, act.to_string(), t(act));
+                                }
+                            });
+
+                            if ui.button(t("Add")).clicked() {
+                                let key = self.shortcuts_dialog.new_keys.trim().to_ascii_uppercase();
+                                let action = self.shortcuts_dialog.new_action.trim().to_string();
+
+                                if !is_key(&key) {
+                                    self.shortcuts_dialog.error =
+                                        Some(t("Shortcut keys are two characters, letters or numbers.").to_string());
+                                    self.shortcuts_dialog.message = None;
+                                } else if action.is_empty() {
+                                    self.shortcuts_dialog.error = Some(t("Select an action to assign.").to_string());
+                                    self.shortcuts_dialog.message = None;
+                                } else if let Some(conflict) = find_conflict(&key, &action, self) {
+                                    // Verification: already exists!
+                                    self.shortcuts_dialog.error =
+                                        Some(tf("The shortcut '{}' already exists for '{}'.", &[&key, t(&conflict)]));
+                                    self.shortcuts_dialog.message = None;
+                                } else {
+                                    self.custom_shortcuts.insert(key.clone(), action.clone());
+                                    self.shortcuts_dialog.message = Some(tf("Shortcut '{}' added for '{}'.", &[&key, t(&action)]));
+                                    self.shortcuts_dialog.error = None;
+                                    self.shortcuts_dialog.new_keys.clear();
+                                    self.shortcuts_dialog.adding = false;
+                                }
                             }
                         });
+                    });
+                }
 
-                        if ui.button(t("Add")).clicked() {
-                            let key = self.shortcuts_dialog.new_keys.trim().to_ascii_uppercase();
-                            let action = self.shortcuts_dialog.new_action.trim().to_string();
+                // Notification message / error banner
+                if let Some(err) = &self.shortcuts_dialog.error {
+                    ui.add_space(4.0);
+                    ui.label(RichText::new(err).color(pal().error));
+                } else if let Some(msg) = &self.shortcuts_dialog.message {
+                    ui.add_space(4.0);
+                    ui.label(RichText::new(msg).color(pal().accent_ink));
+                }
 
-                            if !is_key(&key) {
-                                self.shortcuts_dialog.error = Some(t("Shortcut keys are two characters, letters or numbers.").to_string());
-                                self.shortcuts_dialog.message = None;
-                            } else if action.is_empty() {
-                                self.shortcuts_dialog.error = Some(t("Select an action to assign.").to_string());
-                                self.shortcuts_dialog.message = None;
-                            } else if let Some(conflict) = find_conflict(&key, &action, self) {
-                                // Verification: already exists!
-                                self.shortcuts_dialog.error = Some(tf("The shortcut '{}' already exists for '{}'.", &[&key, t(&conflict)]));
-                                self.shortcuts_dialog.message = None;
+                ui.add_space(6.0);
+
+                // Build map of action -> list of shortcut keys
+                let mut by_action: BTreeMap<String, Vec<String>> = BTreeMap::new();
+                for (letters, name) in crate::shortcuts() {
+                    if !self.custom_shortcuts.contains_key(letters) {
+                        by_action.entry(name.to_string()).or_default().push(letters.to_string());
+                    }
+                }
+                for (key, act) in &self.custom_shortcuts {
+                    by_action.entry(act.clone()).or_default().push(key.clone());
+                }
+
+                let search_term = self.shortcuts_dialog.search.trim().to_lowercase();
+                let mut rows: Vec<(String, Vec<String>)> = by_action
+                    .into_iter()
+                    .filter(|(act, keys)| {
+                        if search_term.is_empty() {
+                            return true;
+                        }
+                        act.to_lowercase().contains(&search_term)
+                            || t(act).to_lowercase().contains(&search_term)
+                            || keys.iter().any(|k| k.to_lowercase().contains(&search_term))
+                    })
+                    .collect();
+                rows.sort_by(|a, b| t(&a.0).cmp(t(&b.0)));
+
+                let mut save_edit = None;
+                let mut cancel_edit = false;
+
+                ScrollArea::vertical().max_height(420.0).show(ui, |ui| {
+                    Grid::new("shortcuts_table").num_columns(3).striped(true).spacing(vec2(16.0, 6.0)).show(ui, |ui| {
+                        for (action, keys) in rows {
+                            let is_editing = self.shortcuts_dialog.editing_action.as_deref() == Some(&action);
+
+                            // Column 1: Action label
+                            ui.label(RichText::new(t(&action)).strong());
+
+                            // Column 2: Keys display or editor
+                            if is_editing {
+                                let r = ui.add(TextEdit::singleline(&mut self.shortcuts_dialog.edit_keys).desired_width(100.0));
+                                if r.changed() {
+                                    self.shortcuts_dialog.edit_keys = self.shortcuts_dialog.edit_keys.to_ascii_uppercase();
+                                }
                             } else {
-                                self.custom_shortcuts.insert(key.clone(), action.clone());
-                                self.shortcuts_dialog.message = Some(tf("Shortcut '{}' added for '{}'.", &[&key, t(&action)]));
-                                self.shortcuts_dialog.error = None;
-                                self.shortcuts_dialog.new_keys.clear();
-                                self.shortcuts_dialog.adding = false;
+                                ui.monospace(keys.join(", "));
                             }
+
+                            // Column 3: Edit / Save / Cancel button
+                            ui.horizontal(|ui| {
+                                if is_editing {
+                                    if ui.button(t("Save")).clicked() {
+                                        save_edit = Some(action.clone());
+                                    }
+                                    if ui.button(t("Cancel")).clicked() {
+                                        cancel_edit = true;
+                                    }
+                                } else if ui.button(t("Edit")).clicked() {
+                                    self.shortcuts_dialog.editing_action = Some(action.clone());
+                                    self.shortcuts_dialog.edit_keys = keys.first().cloned().unwrap_or_default();
+                                    self.shortcuts_dialog.error = None;
+                                    self.shortcuts_dialog.message = None;
+                                }
+                            });
+
+                            ui.end_row();
                         }
                     });
                 });
-            }
 
-            // Notification message / error banner
-            if let Some(err) = &self.shortcuts_dialog.error {
-                ui.add_space(4.0);
-                ui.label(RichText::new(err).color(pal().error));
-            } else if let Some(msg) = &self.shortcuts_dialog.message {
-                ui.add_space(4.0);
-                ui.label(RichText::new(msg).color(pal().accent_ink));
-            }
-
-            ui.add_space(6.0);
-
-            // Build map of action -> list of shortcut keys
-            let mut by_action: BTreeMap<String, Vec<String>> = BTreeMap::new();
-            for (letters, name) in crate::shortcuts() {
-                if !self.custom_shortcuts.contains_key(letters) {
-                    by_action.entry(name.to_string()).or_default().push(letters.to_string());
-                }
-            }
-            for (key, act) in &self.custom_shortcuts {
-                by_action.entry(act.clone()).or_default().push(key.clone());
-            }
-
-            let search_term = self.shortcuts_dialog.search.trim().to_lowercase();
-            let mut rows: Vec<(String, Vec<String>)> = by_action
-                .into_iter()
-                .filter(|(act, keys)| {
-                    if search_term.is_empty() {
-                        return true;
-                    }
-                    act.to_lowercase().contains(&search_term)
-                        || t(act).to_lowercase().contains(&search_term)
-                        || keys.iter().any(|k| k.to_lowercase().contains(&search_term))
-                })
-                .collect();
-            rows.sort_by(|a, b| t(&a.0).cmp(t(&b.0)));
-
-            let mut save_edit = None;
-            let mut cancel_edit = false;
-
-            ScrollArea::vertical().max_height(420.0).show(ui, |ui| {
-                Grid::new("shortcuts_table").num_columns(3).striped(true).spacing(vec2(16.0, 6.0)).show(ui, |ui| {
-                    for (action, keys) in rows {
-                        let is_editing = self.shortcuts_dialog.editing_action.as_deref() == Some(&action);
-
-                        // Column 1: Action label
-                        ui.label(RichText::new(t(&action)).strong());
-
-                        // Column 2: Keys display or editor
-                        if is_editing {
-                            let r = ui.add(TextEdit::singleline(&mut self.shortcuts_dialog.edit_keys).desired_width(100.0));
-                            if r.changed() {
-                                self.shortcuts_dialog.edit_keys = self.shortcuts_dialog.edit_keys.to_ascii_uppercase();
-                            }
-                        } else {
-                            ui.monospace(keys.join(", "));
-                        }
-
-                        // Column 3: Edit / Save / Cancel button
-                        ui.horizontal(|ui| {
-                            if is_editing {
-                                if ui.button(t("Save")).clicked() {
-                                    save_edit = Some(action.clone());
-                                }
-                                if ui.button(t("Cancel")).clicked() {
-                                    cancel_edit = true;
-                                }
-                            } else if ui.button(t("Edit")).clicked() {
-                                self.shortcuts_dialog.editing_action = Some(action.clone());
-                                self.shortcuts_dialog.edit_keys = keys.first().cloned().unwrap_or_default();
-                                self.shortcuts_dialog.error = None;
-                                self.shortcuts_dialog.message = None;
-                            }
-                        });
-
-                        ui.end_row();
-                    }
-                });
-            });
-
-            if cancel_edit {
-                self.shortcuts_dialog.editing_action = None;
-                self.shortcuts_dialog.error = None;
-            }
-
-            if let Some(action) = save_edit {
-                let new_key = self.shortcuts_dialog.edit_keys.trim().to_ascii_uppercase();
-                if !is_key(&new_key) {
-                    self.shortcuts_dialog.error = Some(t("Shortcut keys are two characters, letters or numbers.").to_string());
-                } else if let Some(conflict) = find_conflict(&new_key, &action, self) {
-                    self.shortcuts_dialog.error = Some(tf("The shortcut '{}' already exists for '{}'.", &[&new_key, t(&conflict)]));
-                } else {
-                    // Remove any previous keys assigned specifically to this action in custom
-                    self.custom_shortcuts.retain(|_, v| *v != action);
-                    self.custom_shortcuts.insert(new_key.clone(), action.clone());
-                    self.shortcuts_dialog.message = Some(tf("Shortcut '{}' updated.", &[&new_key]));
-                    self.shortcuts_dialog.error = None;
+                if cancel_edit {
                     self.shortcuts_dialog.editing_action = None;
+                    self.shortcuts_dialog.error = None;
                 }
-            }
 
-            ui.add_space(8.0);
-            ui.with_layout(Layout::right_to_left(Align::Min), |ui| close = ui.button(t("Close")).clicked());
+                if let Some(action) = save_edit {
+                    let new_key = self.shortcuts_dialog.edit_keys.trim().to_ascii_uppercase();
+                    if !is_key(&new_key) {
+                        self.shortcuts_dialog.error = Some(t("Shortcut keys are two characters, letters or numbers.").to_string());
+                    } else if let Some(conflict) = find_conflict(&new_key, &action, self) {
+                        self.shortcuts_dialog.error = Some(tf("The shortcut '{}' already exists for '{}'.", &[&new_key, t(&conflict)]));
+                    } else {
+                        // Remove any previous keys assigned specifically to this action in custom
+                        self.custom_shortcuts.retain(|_, v| *v != action);
+                        self.custom_shortcuts.insert(new_key.clone(), action.clone());
+                        self.shortcuts_dialog.message = Some(tf("Shortcut '{}' updated.", &[&new_key]));
+                        self.shortcuts_dialog.error = None;
+                        self.shortcuts_dialog.editing_action = None;
+                    }
+                }
+            });
+            crate::popup::footer(ui, |ui| {
+                ui.with_layout(Layout::right_to_left(Align::Min), |ui| close = ui.button(t("Close")).clicked());
+            });
         });
 
         if load_asked {

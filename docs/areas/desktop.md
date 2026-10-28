@@ -30,6 +30,12 @@ New and Open (`BimApp::reopened`) keep the look: a new `BimApp` would run `style
 preference back to the system's (and `keep_settings` would then write that over the user's choice), so `reopened` carries
 `styled`, `theme_wanted` and `light_canvas` over.
 
+Application dialogs use `popup.rs`: a shared modal frame with a draggable title bar and a corner × button. Each dialog keeps its own
+position while the application is open; dragging is constrained to the application window. The × button follows Cancel/Close, so it never
+applies a draft. Nested dialogs keep their own positions and close independently. The dialog body scrolls separately from its footer;
+OK, Cancel, Apply and other closing actions stay at the bottom, including on shorter windows and when tabs have different amounts of content.
+Imports and installations keep their close button disabled while they replace the project or application. Native file dialogs keep their system frames.
+
 The system's file dialogs (Open, Save As, the exports, Load Family, Link Model, a material's picture) are asked for through
 `BimApp::ask_file` (`dialog.rs`), never with a blocking `rfd::FileDialog`: a native dialog run inside the window's event
 handler nests a run loop in it, and on macOS a drag reaching the window meanwhile re-enters the handler and aborts the app
@@ -147,7 +153,7 @@ is drawn in plans only (a door's in a box, a window's in a hexagon, any other's 
 with it. The Tag tool picks whatever `anchor` finds a point for, and the Options Bar's Label field is the `label` the click passes on; Tag All (`tag` without `ids`)
 still takes doors and windows unless given a `category`.
 
-Type Properties (`typeprops.rs`). Every kind of type opens in one dialog, after Revit's: `title`, then `head` (Family, shown and not picked, and
+Type Properties (`typeprops.rs`). Every kind of type opens in one dialog, after Revit's: the shared title bar, then `head` (Family, shown and not picked, and
 Type, with Duplicate… and Rename… beside it; either opens a Name row under it, Enter or its button doing it), then `table` (Parameter and Value
 under group bars that fold, `Table::row` and its helpers for a field, a check box, a drop-down, a dragged number, a colour, a value worked out, and
 `Table::full` for what spans both columns, a type's layers or a sample), then `foot` (what stopped it, and OK, Cancel and Apply). Each dialog keeps its
