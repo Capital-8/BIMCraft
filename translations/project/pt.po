@@ -43,7 +43,7 @@ msgstr "Janela de abrir"
 msgid "Ceiling Luminaire"
 msgstr "Luminária de teto"
 
-#: crates/core/src/render.rs:1836
+#: crates/core/src/render.rs:1867
 msgid "Ceiling Plan"
 msgstr "Planta de forro"
 
@@ -87,7 +87,7 @@ msgstr "Contagem"
 msgid "Crosshatch"
 msgstr "Hachura cruzada"
 
-#: crates/core/src/render.rs:2379
+#: crates/core/src/render.rs:2410
 msgid "DN"
 msgstr "DESCE"
 
@@ -325,7 +325,7 @@ msgstr "Metal"
 msgid "Mounting Height"
 msgstr "Altura de instalação"
 
-#: crates/core/src/render.rs:1701
+#: crates/core/src/render.rs:1732
 msgid "NOT ENCLOSED"
 msgstr "NÃO DELIMITADO"
 
@@ -554,7 +554,7 @@ msgstr "Piso"
 msgid "Type"
 msgstr "Tipo"
 
-#: crates/core/src/render.rs:2379
+#: crates/core/src/render.rs:2410
 msgid "UP"
 msgstr "SOBE"
 

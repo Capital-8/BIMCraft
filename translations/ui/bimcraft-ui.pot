@@ -1695,7 +1695,7 @@ msgstr ""
 msgid "Cylinder"
 msgstr ""
 
-#: crates/core/src/render.rs:2379
+#: crates/core/src/render.rs:2410
 msgid "DN"
 msgstr ""
 
@@ -3695,7 +3695,7 @@ msgstr ""
 msgid "Multiple Categories ({})"
 msgstr ""
 
-#: crates/core/src/render.rs:1701
+#: crates/core/src/render.rs:1732
 msgid "NOT ENCLOSED"
 msgstr ""
 
@@ -6379,7 +6379,7 @@ msgstr ""
 msgid "Types"
 msgstr ""
 
-#: crates/core/src/render.rs:2379
+#: crates/core/src/render.rs:2410
 msgid "UP"
 msgstr ""
 
