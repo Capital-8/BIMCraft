@@ -112,3 +112,27 @@ fn edit_type_on_a_dimension_opens_dimension_type_properties_where_a_duplicate_is
     assert!(!m.dimension_types["Dots"].centre_mark);
     assert_eq!(dimension(&h, id).type_name, "Dots", "OK puts the dimension on the type shown");
 }
+
+#[test]
+fn arc_length_picks_an_arc_then_two_points_on_it_to_measure_between() {
+    let on = |deg: f64| P2(3000.0 * deg.to_radians().cos(), 3000.0 * deg.to_radians().sin());
+    let (a, b) = (on(30.0), on(60.0));
+    let script = format!(
+        "{BOX}\ndetail_line {{\"start\": [3000, 0], \"end\": [0, 3000], \"arc\": 90}}\ndetail_line {{\"start\": [0, 0], \"end\": [{}, {}]}}\ndetail_line {{\"start\": [0, 0], \"end\": [{}, {}]}}",
+        a.0, a.1, b.0, b.1
+    );
+    let mut h = app(&script);
+    press(&mut h, "Annotate");
+    if h.query_by_label("Arc Length").is_none() {
+        press(&mut h, "Dimension ▾");
+    }
+    press(&mut h, "Arc Length");
+    click(&mut h, on(45.0));
+    click(&mut h, a);
+    click(&mut h, b);
+    assert!(matches!(&h.state().tool, Tool::Round(DimKind::ArcLength, picked) if picked.len() == 3));
+    click(&mut h, on(45.0) * 0.6);
+    let dims = ids(&h, "dimension");
+    let v = field(&h, dims[0], "values")[0].as_f64().unwrap_or_default();
+    assert!((v - 3000.0 * std::f64::consts::PI / 6.0).abs() < 0.01, "{v}");
+}

@@ -524,8 +524,8 @@ pub static ALL: &[Command] = &[
          horizontal or vertical as `orient` says, or without one as `at` lies: east or west of the points, vertical, else \
          horizontal (its lines must run square to it); angular: the angle between two references that meet, on the side \
          of `at`; radial: a round column's, curved wall's, circle's or arc's radius, toward `at`; diameter: the same \
-         across, through its centre; arc_length: how long a curved wall's centre line or face, or an arc, is along it, \
-         its line an arc through `at`. A ref is {id, face?}: a wall's centre (the default), left or right face (of its \
+         across, through its centre; arc_length: how long a curved wall's centre line or face, or an arc, is along it \
+         (all of it, or with two point refs after it, between them), its line an arc through `at`. A ref is {id, face?}: a wall's centre (the default), left or right face (of its \
          start-to-end direction), start or end; a door's or window's centre, or its jamb toward its wall's start or end; \
          a grid's line; a straight detail line, or its start or end (radial: a circle or an arc of one). With `point: \
          start|end`, {id, face?, point} is the point at that end of the line: a wall's centre line's end, a face's \

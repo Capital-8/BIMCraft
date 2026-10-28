@@ -4095,6 +4095,31 @@ impl Model {
         }
     }
 
+    /// What an arc length dimension measures along: its arc ([`Model::reference_sweep`]), all of it, or with two points
+    /// after it, from one to the other along it (either order). An error when a point isn't on the arc.
+    pub fn arc_span(&self, d: &Dimension) -> Result<(P2, f64, f64, f64), String> {
+        let Some(arc) = d.refs.first() else { return Err("an arc length dimension measures along an arc".into()) };
+        let (c, radius, a0, sweep) = self.reference_sweep(arc)?;
+        let points = &d.refs[1..];
+        if points.is_empty() {
+            return Ok((c, radius, a0, sweep));
+        }
+        let [p, q] = points else { return Err("an arc length dimension measures between two points on its arc, or all of it".into()) };
+        let along = |r: &Reference| -> Result<f64, String> {
+            let p = self.reference_point(r)?;
+            let what = format!("{} {}'s {}", self.cat(r.id), self.shown(r.id), if r.point == Some(End::Start) { "start" } else { "end" });
+            // How far round from the arc's start, the way it sweeps; on it, give or take a millimetre.
+            let t = (sweep.signum() * ((p.1 - c.1).atan2(p.0 - c.0) - a0)).rem_euclid(TAU);
+            let t = if t > sweep.abs() && TAU - t < 1.0 / radius.max(1.0) { 0.0 } else { t };
+            if (p.dist(c) - radius).abs() > TOL || t > sweep.abs() + 1.0 / radius.max(1.0) {
+                return Err(format!("{what} isn't on the arc it measures along"));
+            }
+            Ok(t.min(sweep.abs()))
+        };
+        let (s, e) = (along(p)?, along(q)?);
+        Ok((c, radius, a0 + sweep.signum() * s.min(e), sweep.signum() * (s - e).abs()))
+    }
+
     /// An angular dimension's arc: where its two lines meet, the angle (radians, counter-clockwise
     /// from east) of the ray it starts on, and how far it sweeps counter-clockwise to the other:
     /// the one of the four angles the lines make that holds `at`.
@@ -4197,9 +4222,7 @@ impl Model {
             DimKind::Angular => self.angle_sector(d).map(|(_, _, sweep)| sweep.to_degrees()).into_iter().collect(),
             DimKind::Radial => d.refs.first().and_then(|r| self.reference_arc(r).ok()).map(|(_, r)| r).into_iter().collect(),
             DimKind::Diameter => d.refs.first().and_then(|r| self.reference_arc(r).ok()).map(|(_, r)| 2.0 * r).into_iter().collect(),
-            DimKind::ArcLength => {
-                d.refs.first().and_then(|r| self.reference_sweep(r).ok()).map(|(_, r, _, t)| r * t.abs()).into_iter().collect()
-            }
+            DimKind::ArcLength => self.arc_span(d).ok().map(|(_, r, _, t)| r * t.abs()).into_iter().collect(),
         }
     }
 
@@ -4809,7 +4832,12 @@ impl Model {
                         (DimKind::Angular, _) => return Err(format!("{who}: an angular dimension measures between two lines")),
                         (DimKind::Radial, _) => return Err(format!("{who}: a radial dimension measures one round element")),
                         (DimKind::Diameter, _) => return Err(format!("{who}: a diameter dimension measures one round element")),
-                        (DimKind::ArcLength, _) => return Err(format!("{who}: an arc length dimension measures along one arc")),
+                        (DimKind::ArcLength, 3) => {}
+                        (DimKind::ArcLength, _) => {
+                            return Err(format!(
+                                "{who}: an arc length dimension measures along one arc, all of it or between two points on it"
+                            ));
+                        }
                     }
                     match (d.kind, d.orient) {
                         (DimKind::Linear, None) => {
@@ -4833,8 +4861,8 @@ impl Model {
                                 continue;
                             }
                             DimKind::ArcLength => {
-                                self.reference_sweep(r).map_err(|e| format!("{who}: {e}"))?;
-                                continue;
+                                self.arc_span(d).map_err(|e| format!("{who}: {e}"))?;
+                                break;
                             }
                             _ => {}
                         }

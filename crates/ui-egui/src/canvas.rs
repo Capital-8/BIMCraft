@@ -1062,9 +1062,13 @@ impl BimApp {
                 .pick_all(q, PICK)
                 .into_iter()
                 .find(|id| reference_for(&model, DimKind::Angular, refs.first(), *id, view.mm(q), near).is_some()),
-            Tool::Round(kind, None) => {
+            Tool::Round(kind, picked) if picked.is_empty() => {
                 d.pick_all(q, PICK).into_iter().find(|id| bimcraft_core::dims::round_at(&model, *id, view.mm(q), *kind).is_some())
             }
+            // An arc length's points, on its arc.
+            Tool::Round(DimKind::ArcLength, picked) => picked.first().and_then(|arc| {
+                d.pick_all(q, PICK).into_iter().find(|id| bimcraft_core::dims::arc_point(&model, arc, *id, view.mm(q), near).is_some())
+            }),
             // What a spot elevation would read.
             Tool::Spot => model.spot_host(level, view.mm(q)),
             Tool::Tag => d.pick(q, PICK).filter(|id| model.anchor(*id).is_some()),
@@ -1669,19 +1673,36 @@ impl BimApp {
                     _ => {}
                 }
             }
-            &Tool::Round(kind, picked) => match (picked, hovered) {
-                (None, Some(id)) => self.tool = Tool::Round(kind, bimcraft_core::dims::round_at(m, id, v.mm(at), kind)),
-                (Some(r), _) => {
-                    let mut p = json!({"kind": kind, "refs": [r], "at": point(round(v.mm(at))), "level": key});
-                    if let Some(t) = self.dimension_type_for(kind) {
-                        p["type"] = json!(t);
+            // What is round, then (an arc length's) two points on its arc if it measures part of it, then where it goes.
+            Tool::Round(kind, picked) => {
+                let (kind, mut picked) = (*kind, picked.clone());
+                let near = 2.0 * f64::from(PICK) / v.scale;
+                let on_arc = match (kind, picked.first()) {
+                    (DimKind::ArcLength, Some(arc)) => hovered.and_then(|id| bimcraft_core::dims::arc_point(m, arc, id, v.mm(at), near)),
+                    _ => None,
+                };
+                match (picked.len(), on_arc) {
+                    (0, _) => {
+                        if let Some(r) = hovered.and_then(|id| bimcraft_core::dims::round_at(m, id, v.mm(at), kind)) {
+                            self.tool = Tool::Round(kind, vec![r]);
+                        }
                     }
-                    if self.run("dimension", p).is_some() {
-                        self.tool = Tool::Round(kind, None);
+                    (1 | 2, Some(r)) if !picked.contains(&r) => {
+                        picked.push(r);
+                        self.tool = Tool::Round(kind, picked);
+                    }
+                    (2, _) => {}
+                    _ => {
+                        let mut p = json!({"kind": kind, "refs": picked, "at": point(round(v.mm(at))), "level": key});
+                        if let Some(t) = self.dimension_type_for(kind) {
+                            p["type"] = json!(t);
+                        }
+                        if self.run("dimension", p).is_some() {
+                            self.tool = Tool::Round(kind, Vec::new());
+                        }
                     }
                 }
-                (None, None) => {}
-            },
+            }
             Tool::Text => self.write_note(key, round(v.mm(at))),
             Tool::DetailGroup => self.place_group(key, self.snap(m, level, v, at, &[], false).at),
             &Tool::RepeatingDetail(start) => {
@@ -2977,14 +2998,14 @@ impl BimApp {
                 }
                 return;
             }
-            &Tool::Round(kind, Some(r)) => {
+            Tool::Round(kind, picked) if picked.len() == 1 || picked.len() == 3 => {
                 sketched(&Element::Dimension(Dimension {
                     level: m.guid(level),
                     view: in_view(),
-                    kind,
-                    refs: vec![r],
+                    kind: *kind,
+                    refs: picked.clone(),
                     at: round(v.mm(q)),
-                    type_name: self.dimension_type_for(kind).unwrap_or_default(),
+                    type_name: self.dimension_type_for(*kind).unwrap_or_default(),
                     ..Dimension::default()
                 }));
                 return;

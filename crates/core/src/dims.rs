@@ -380,3 +380,12 @@ pub fn round_at(m: &Model, id: impl Key, p: P2, kind: DimKind) -> Option<Referen
         .min_by(|a, b| a.1.total_cmp(&b.1))
         .map(|(r, _)| r)
 }
+
+/// Of element `id`'s ends, the one within `near` mm of `p` that lies on the arc `arc` measures along: where an arc length
+/// dimension between two points starts or ends.
+pub fn arc_point(m: &Model, arc: &Reference, id: impl Key, p: P2, near: f64) -> Option<Reference> {
+    let (c, radius, _, _) = m.reference_sweep(arc).ok()?;
+    let (r, d) = m.endpoint_at(id, p)?;
+    let q = m.reference_point(&r).ok()?;
+    (d <= near && (q.dist(c) - radius).abs() <= crate::model::TOL).then_some(r)
+}

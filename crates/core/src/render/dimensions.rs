@@ -272,7 +272,7 @@ fn radial(d: &mut Drawing, m: &Model, dim: &Dimension, ink: &Ink, across: bool) 
 /// An arc length dimension: an arc through `at` round the arc's centre, as far round as it sweeps, witness lines out
 /// along the radii from its ends, ticks where they cross, and its length outside its middle.
 fn arc_length(d: &mut Drawing, m: &Model, dim: &Dimension, ink: &Ink) {
-    let Some(Ok((o, radius, from, sweep))) = dim.refs.first().map(|x| m.reference_sweep(x)) else { return };
+    let Ok((o, radius, from, sweep)) = m.arc_span(dim) else { return };
     let r = dim.at.dist(o);
     if r <= 0.0 {
         return;

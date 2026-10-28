@@ -356,3 +356,38 @@ fn a_dimension_from_before_dimension_types_opens_in_its_kind_s_type() {
     };
     assert_eq!((ty(d), ty(r)), (crate::dims::DIAGONAL.to_string(), crate::dims::ARROW.to_string()));
 }
+
+#[test]
+fn an_arc_length_dimension_measures_between_two_points_on_its_arc() {
+    let mut s = Session::new();
+    // A quarter circle 2000 round [0, 0], from east to north, and two lines ending on it at 30° and 60°.
+    let arc = id_of(&run(&mut s, "detail_line", json!({"start": [2000, 0], "end": [0, 2000], "arc": 90})));
+    let on = |deg: f64| [2000.0 * deg.to_radians().cos(), 2000.0 * deg.to_radians().sin()];
+    let a = id_of(&run(&mut s, "detail_line", json!({"start": [0, 0], "end": on(30.0)})));
+    let b = id_of(&run(&mut s, "detail_line", json!({"start": [0, 0], "end": on(60.0)})));
+    let pi = std::f64::consts::PI;
+    let refs = json!([{"id": arc}, {"id": a, "point": "end"}, {"id": b, "point": "end"}]);
+    let d = run(&mut s, "dimension", json!({"kind": "arc_length", "refs": refs, "at": [2500, 2500]}));
+    let v = d["values"][0].as_f64().unwrap_or_default();
+    assert!((v - 2000.0 * pi / 6.0).abs() < 0.01, "{v}");
+    // In either order.
+    let refs = json!([{"id": arc}, {"id": b, "point": "end"}, {"id": a, "point": "end"}]);
+    let v =
+        run(&mut s, "dimension", json!({"kind": "arc_length", "refs": refs, "at": [2500, 2500]}))["values"][0].as_f64().unwrap_or_default();
+    assert!((v - 2000.0 * pi / 6.0).abs() < 0.01, "{v}");
+    // A point off the arc, and one point alone, are refused.
+    let off = id_of(&run(&mut s, "detail_line", json!({"start": [0, 0], "end": [500, 500]})));
+    let e = err(
+        &mut s,
+        "dimension",
+        json!({"kind": "arc_length", "refs": [{"id": arc}, {"id": a, "point": "end"}, {"id": off, "point": "end"}], "at": [0, 0]}),
+    );
+    assert!(e.contains("on the arc"), "{e}");
+    let e = err(&mut s, "dimension", json!({"kind": "arc_length", "refs": [{"id": arc}, {"id": a, "point": "end"}], "at": [0, 0]}));
+    assert!(e.contains("two points"), "{e}");
+    // The second line turns to 80°: the dimension follows.
+    let id = id_of(&d);
+    run(&mut s, "modify", json!({"id": b, "end": on(80.0)}));
+    let v = values(&mut s, id)[0].as_f64().unwrap_or_default();
+    assert!((v - 2000.0 * pi * 50.0 / 180.0).abs() < 0.01, "{v}");
+}

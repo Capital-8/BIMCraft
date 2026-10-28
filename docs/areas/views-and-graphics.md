@@ -408,7 +408,7 @@ and points all in one place. Mirror keeps the end of a line along the element an
 both. A linear one given no `orient` runs vertical where `at` is east or west of everything it measures, else horizontal; the desktop's Auto
 (`dims::Placing::kind`) also lays an aligned one where the cursor is among the points (`Orient::follow`), as Archicad does. Radial and diameter
 dimensions measure round columns, curved walls (centre line or a face) and circles and arcs (`reference_arc`); arc length, a curved wall's or an
-arc's length along it (`reference_sweep`), its line an arc through `at` round the same centre. `dims::round_at` picks the face nearest a click.
+arc's length along it (`reference_sweep`), all of it or, with two point references after the arc, between them (`Model::arc_span`), its line an arc through `at` round the same centre. `dims::round_at` picks the face nearest a click.
 
 Each dimension has a dimension type (`dims.rs`, `Model::dimension_types`, a library entry `Kind::DimensionType`, the `dimension_type` command),
 Revit's type parameters with lengths in mm on paper: Dimension String Type (continuous, baseline, ordinate), tick mark (diagonal, arrow, open

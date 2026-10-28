@@ -169,8 +169,9 @@ pub enum Tool {
     Dimension(DimMode, Vec<Reference>),
     /// An angular dimension: the lines picked so far, two that meet; then a click where its arc goes.
     Angular(Vec<Reference>),
-    /// A radial, diameter or arc length dimension: what round was picked, then a click toward where it goes.
-    Round(DimKind, Option<Reference>),
+    /// A radial, diameter or arc length dimension: what round was picked (an arc length's, then two points on its arc, if
+    /// it measures part of it), then a click toward where it goes.
+    Round(DimKind, Vec<Reference>),
     /// A text note where clicked, saying what the Options Bar says.
     Text,
     /// A spot elevation where clicked.
@@ -1898,7 +1899,7 @@ impl BimApp {
                 }
                 DimKind::Linear => Tool::Dimension(DimMode::Horizontal, Vec::new()),
                 DimKind::Angular => Tool::Angular(Vec::new()),
-                k @ (DimKind::Radial | DimKind::Diameter | DimKind::ArcLength) => Tool::Round(k, None),
+                k @ (DimKind::Radial | DimKind::Diameter | DimKind::ArcLength) => Tool::Round(k, Vec::new()),
             },
             Some(Element::Text(_)) => Tool::Text,
             Some(Element::DetailLine(l)) => {
@@ -2185,7 +2186,7 @@ impl BimApp {
             Tool::TrimTo { boundary: Some(_), many } => Tool::TrimTo { boundary: None, many },
             Tool::Dimension(mode, refs) if !refs.is_empty() => Tool::Dimension(mode, Vec::new()),
             Tool::Angular(refs) if !refs.is_empty() => Tool::Angular(Vec::new()),
-            Tool::Round(k, Some(_)) => Tool::Round(k, None),
+            Tool::Round(k, picked) if !picked.is_empty() => Tool::Round(k, Vec::new()),
             Tool::Section(Some(_)) => Tool::Section(None),
             Tool::Measure(Some(_)) => Tool::Measure(None),
             // The ruler laid goes first, then the tool.
@@ -2286,7 +2287,7 @@ impl BimApp {
             Tool::Wall(chain) => chain.clear(),
             Tool::Grid(start) | Tool::Run(_, start) => *start = None,
             Tool::Dimension(_, refs) | Tool::Angular(refs) => refs.clear(),
-            Tool::Round(_, r) => *r = None,
+            Tool::Round(_, picked) => picked.clear(),
             Tool::Section(start) | Tool::Shaft(start) | Tool::Measure(start) => *start = None,
             Tool::Stair(pts)
             | Tool::Ramp(pts)
@@ -3075,19 +3076,19 @@ impl BimApp {
                 Icon::Radial,
                 msg!("Radial"),
                 msg!("Radial Dimension: pick a round column, a curved wall, a circle or an arc, then click where the radius goes"),
-                Tool::Round(DimKind::Radial, None),
+                Tool::Round(DimKind::Radial, Vec::new()),
             ),
             (
                 Icon::Diameter,
                 msg!("Diameter"),
                 msg!("Diameter Dimension: pick a round column, a curved wall, a circle or an arc, then click where it goes"),
-                Tool::Round(DimKind::Diameter, None),
+                Tool::Round(DimKind::Diameter, Vec::new()),
             ),
             (
                 Icon::ArcLength,
                 msg!("Arc Length"),
                 msg!("Arc Length Dimension: pick a curved wall or an arc, then click where the dimension's arc goes"),
-                Tool::Round(DimKind::ArcLength, None),
+                Tool::Round(DimKind::ArcLength, Vec::new()),
             ),
             (
                 Icon::Spot,
@@ -4089,11 +4090,14 @@ impl BimApp {
             Tool::Tag => msg!("Click an element to tag it with its type, a door's or window's with its mark, or with the field in Label."),
             Tool::Angular(refs) if refs.len() < 2 => msg!("Pick a wall, a grid or another line; then one that meets it."),
             Tool::Angular(_) => msg!("Click where the arc goes: the angle on that side. Esc cancels."),
-            Tool::Round(DimKind::ArcLength, None) => msg!("Pick a curved wall or an arc."),
-            Tool::Round(_, None) => msg!("Pick a round column, a curved wall, a circle or an arc."),
-            Tool::Round(DimKind::ArcLength, Some(_)) => msg!("Click where the dimension's arc goes. Esc cancels."),
-            Tool::Round(DimKind::Diameter, Some(_)) => msg!("Click where the diameter goes. Esc cancels."),
-            Tool::Round(_, Some(_)) => msg!("Click where the radius goes. Esc cancels."),
+            Tool::Round(DimKind::ArcLength, picked) if picked.is_empty() => msg!("Pick a curved wall or an arc."),
+            Tool::Round(_, picked) if picked.is_empty() => msg!("Pick a round column, a curved wall, a circle or an arc."),
+            Tool::Round(DimKind::ArcLength, picked) if picked.len() == 2 => msg!("Pick the second point on the arc. Esc cancels."),
+            Tool::Round(DimKind::ArcLength, _) => {
+                msg!("Click where the dimension's arc goes, or pick two points on the arc to measure between. Esc cancels.")
+            }
+            Tool::Round(DimKind::Diameter, _) => msg!("Click where the diameter goes. Esc cancels."),
+            Tool::Round(..) => msg!("Click where the radius goes. Esc cancels."),
             Tool::Text => msg!("Type the note in the Options Bar, then click where it goes: its top left corner."),
             Tool::Spot => msg!("Click a floor, a roof, a stair or a wall: the spot elevation reads the height of its top there."),
             Tool::Section(None) => msg!("Click the section's start: it looks to the left of the line you draw."),
