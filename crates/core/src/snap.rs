@@ -4,6 +4,8 @@
 //! and from the line before it), to a wall's centre line, or to the nearest 10 mm. The ruler's
 //! numbers and graduations are here too, so every front end reads them alike.
 
+use bimcraft_i18n::ui_msg;
+
 use crate::curves::Curve;
 use crate::geom::{self, P2};
 use crate::graphics::Look;
@@ -53,16 +55,16 @@ impl Kind {
     /// What it's called, in English.
     pub fn name(self) -> &'static str {
         match self {
-            Kind::Endpoint => "Endpoint",
-            Kind::Midpoint => "Midpoint",
-            Kind::Intersection => "Intersection",
+            Kind::Endpoint => ui_msg!("Endpoint"),
+            Kind::Midpoint => ui_msg!("Midpoint"),
+            Kind::Intersection => ui_msg!("Intersection"),
             Kind::Centre => "Centre",
-            Kind::Perpendicular => "Perpendicular",
-            Kind::Quadrant => "Quadrant",
-            Kind::Tangent => "Tangent",
-            Kind::Nearest => "Nearest",
+            Kind::Perpendicular => ui_msg!("Perpendicular"),
+            Kind::Quadrant => ui_msg!("Quadrant"),
+            Kind::Tangent => ui_msg!("Tangent"),
+            Kind::Nearest => ui_msg!("Nearest"),
             Kind::Point => "Point Cloud",
-            Kind::Angle => "Angle",
+            Kind::Angle => ui_msg!("Angle"),
             Kind::Free => "",
         }
     }

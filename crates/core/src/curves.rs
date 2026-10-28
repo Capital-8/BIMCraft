@@ -20,6 +20,8 @@
 //! `centre` and `radius`, `centre` and `radii` (with `angle` and `span`), `control` (with `knots`), or `fit` (with
 //! `start_tangent` and `end_tangent`).
 
+use bimcraft_i18n::ui_msg;
+
 use std::f64::consts::TAU;
 
 use serde::{Deserialize, Serialize};
@@ -120,17 +122,17 @@ impl Curve {
         match self {
             Curve::Poly { points, arcs, closed: false } if points.len() == 2 => {
                 if arcs.first().is_some_and(|a| *a != 0.0) {
-                    "arc"
+                    ui_msg!("arc")
                 } else {
-                    "line"
+                    ui_msg!("line")
                 }
             }
-            Curve::Poly { .. } => "polyline",
-            Curve::Circle { .. } => "circle",
-            Curve::Ellipse { span: None, .. } => "ellipse",
-            Curve::Ellipse { .. } => "partial ellipse",
-            Curve::Spline { .. } => "spline",
-            Curve::Fit { .. } => "fitted spline",
+            Curve::Poly { .. } => ui_msg!("polyline"),
+            Curve::Circle { .. } => ui_msg!("circle"),
+            Curve::Ellipse { span: None, .. } => ui_msg!("ellipse"),
+            Curve::Ellipse { .. } => ui_msg!("partial ellipse"),
+            Curve::Spline { .. } => ui_msg!("spline"),
+            Curve::Fit { .. } => ui_msg!("fitted spline"),
         }
     }
 

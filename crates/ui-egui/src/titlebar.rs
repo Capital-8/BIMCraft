@@ -4,6 +4,8 @@
 //! and resizing are the system's own (`StartDrag`, `BeginResize`), so Windows' snapping to the screen's edges works as it does
 //! with the system's bar, and Close asks as the system's Close does, so unsaved work is still asked about.
 
+use bimcraft_i18n::msg;
+
 use egui::{Color32, CursorIcon, Id, LayerId, Order, PointerButton, Rect, ResizeDirection, Sense, Stroke, StrokeKind, Ui, ViewportCommand};
 use egui::{WidgetInfo, WidgetType, pos2, vec2};
 
@@ -78,9 +80,9 @@ pub(crate) fn caption_buttons(ui: &mut Ui, bar: Rect) {
     for (i, c) in CAPTIONS.into_iter().enumerate() {
         let rect = Rect::from_min_size(pos2(bar.right() - (3 - i) as f32 * BUTTON_WIDTH, bar.top()), vec2(BUTTON_WIDTH, bar.height()));
         let label = t(match c {
-            Caption::Minimize => "Minimize",
-            Caption::Maximize if max => "Restore Down",
-            Caption::Maximize => "Maximize",
+            Caption::Minimize => msg!("Minimize"),
+            Caption::Maximize if max => msg!("Restore Down"),
+            Caption::Maximize => msg!("Maximize"),
             Caption::Close => "Close",
         });
         let r = ui.interact(rect, Id::new(("caption", c as u8)), Sense::click());

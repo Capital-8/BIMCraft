@@ -1,6 +1,8 @@
 //! CAD drawings: Insert > Import CAD and Link CAD ask for a DXF file, then a box for how to bring it in (name, colours,
 //! layers, units, positioning, current view only, as Revit's Import CAD Formats asks), and run `import_cad`.
 
+use bimcraft_i18n::msg;
+
 use std::path::PathBuf;
 
 use egui::{Align, Button, Checkbox, ComboBox, Context, Grid, Id as UiId, Layout, Modal, RichText, TextEdit};
@@ -14,7 +16,7 @@ use crate::style::pal;
 const UNITS: [&str; 6] = ["auto", "mm", "cm", "m", "in", "ft"];
 
 /// How its colours come in, as `import_cad` names them, and their labels.
-const COLORS: [(&str, &str); 3] = [("preserve", "Preserve"), ("invert", "Invert"), ("black", "Black and White")];
+const COLORS: [(&str, &str); 3] = [("preserve", msg!("Preserve")), ("invert", "Invert"), ("black", msg!("Black and White"))];
 
 /// Bringing a drawing in: what was picked and how, until OK or Cancel.
 pub(crate) struct CadBox {

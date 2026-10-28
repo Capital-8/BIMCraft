@@ -9,9 +9,10 @@ startup, tags) is [the desktop](../../docs/areas/desktop.md).
 
 - **A tool or a button runs a command.** A new one is a command first (core), then a ribbon button or a tool that passes its
   parameters; its Revit shortcut goes in `SHORTCUTS` (`lib.rs`) and so in Keyboard Shortcuts (KS).
-- **Every label has a row in `WORDS`** (`lang.rs`) with its Portuguese and its Spanish, and should have one in `lang/zh.rs` (Chinese, English key
-  and the Chinese: a row it lacks shows in English); `nothing_a_translated_interface_shows_is_left_in_english` fails for a label the
-  table knows that the window forgot to translate, in all three. The core's messages stay English, because agents read them.
+- **Labels use English source messages**, translated through `lang::t`, `lang::tf` or `lang::tc`. Mark indirectly selected labels
+  with `bimcraft_i18n::msg!`; run `cargo i18n update` after changing messages. Translations live in `translations/ui/*.po`;
+  unfinished entries fall back to English. See [translations](../../docs/areas/translations.md).
+  `nothing_a_translated_interface_shows_is_left_in_english` catches known translations the window forgot to use. Core diagnostics stay English.
 - **A ribbon tool that drops choices down** goes through `ribbon::choices(ui, &response, open, content)`, not `Popup::menu`: the
   tool may be a row in its panel's list, where a popup of its own would close the list (egui keeps one popup open).
 - **A palette or a window** that docks or floats goes through `dock.rs`; settings the user keeps go in `settings.rs`

@@ -9,6 +9,8 @@
 //! says, its boundary in a line style or unseen. Patterns and types are entries of the project's library; a type names its
 //! patterns, a region its type and its line style.
 
+use bimcraft_i18n::msg;
+
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
@@ -348,10 +350,10 @@ pub fn at_origin(p: &P2) -> bool {
 }
 
 /// The fill pattern every project has, which fills solid: in English.
-pub const SOLID_FILL: &str = "Solid fill";
+pub const SOLID_FILL: &str = msg!("Solid fill");
 /// The filled region type a region takes unless told another, and the one Masking Region takes: in English.
-pub const SOLID_BLACK: &str = "Solid Black";
-pub const MASKING: &str = "Masking";
+pub const SOLID_BLACK: &str = msg!("Solid Black");
+pub const MASKING: &str = msg!("Masking");
 
 /// The fill patterns a project starts with, named in `language`: our own, drafting ones mm on paper and model ones mm in the
 /// building.
@@ -361,23 +363,23 @@ pub fn patterns(language: Language) -> BTreeMap<String, FillPattern> {
     let s = HatchLine::simple;
     [
         (SOLID_FILL, drafting(Vec::new())),
-        ("Diagonal Up", drafting(vec![s(45.0, 1.5)])),
-        ("Diagonal Down", drafting(vec![s(135.0, 1.5)])),
-        ("Diagonal Crosshatch", drafting(vec![s(45.0, 2.0), s(135.0, 2.0)])),
-        ("Crosshatch", drafting(vec![s(0.0, 2.0), s(90.0, 2.0)])),
-        ("Horizontal", drafting(vec![s(0.0, 1.5)])),
-        ("Vertical", drafting(vec![s(90.0, 1.5)])),
+        (msg!("Diagonal Up"), drafting(vec![s(45.0, 1.5)])),
+        (msg!("Diagonal Down"), drafting(vec![s(135.0, 1.5)])),
+        (msg!("Diagonal Crosshatch"), drafting(vec![s(45.0, 2.0), s(135.0, 2.0)])),
+        (msg!("Crosshatch"), drafting(vec![s(0.0, 2.0), s(90.0, 2.0)])),
+        (msg!("Horizontal"), drafting(vec![s(0.0, 1.5)])),
+        (msg!("Vertical"), drafting(vec![s(90.0, 1.5)])),
         // A dot every mm, each row half a step along from the last.
-        ("Sand", drafting(vec![HatchLine { shift: 0.5, dashes: vec![0.0, -1.0], ..s(0.0, 1.0) }])),
+        (msg!("Sand"), drafting(vec![HatchLine { shift: 0.5, dashes: vec![0.0, -1.0], ..s(0.0, 1.0) }])),
         // Courses 75 mm high; joints every 225 mm, half a brick along from one course to the next.
         (
-            "Brick 225 x 75",
+            msg!("Brick 225 x 75"),
             model(vec![
                 s(0.0, 75.0),
                 HatchLine { angle: 90.0, origin: P2(0.0, 0.0), shift: 75.0, spacing: 112.5, dashes: vec![75.0, -75.0] },
             ]),
         ),
-        ("Tile 300", model(vec![s(0.0, 300.0), s(90.0, 300.0)])),
+        (msg!("Tile 300"), model(vec![s(0.0, 300.0), s(90.0, 300.0)])),
     ]
     .into_iter()
     .map(|(n, p)| (language.word(n).to_string(), p))
