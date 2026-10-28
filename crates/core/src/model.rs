@@ -661,7 +661,7 @@ pub struct Clearance {
 /// side of `at`, its arc through `at`. Radial: a round element's radius, its line toward `at`; diameter, across it through
 /// its centre. Arc length: how long an arc is along it, its line an arc through `at` round the same centre. It
 /// measures the model as it is, so it follows what it measures.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Dimension {
     pub level: Guid,
@@ -675,6 +675,25 @@ pub struct Dimension {
     pub orient: Option<Orient>,
     pub refs: Vec<Reference>,
     pub at: P2,
+    /// Its dimension type (`crate::dims`): how it draws and letters its numbers.
+    #[serde(rename = "type", default)]
+    pub type_name: String,
+    /// Before and after each number, as Revit's Prefix and Suffix.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub prefix: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub suffix: String,
+    /// Over and under its numbers.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub above: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub below: String,
+    /// What shows instead of each number, as Revit's Replace With Text.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub replace: String,
+    /// Its segments show its type's equality text (EQ) instead of their lengths.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub equality: bool,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -2095,6 +2114,9 @@ pub struct Model {
     /// Its text types, by name: the font, size and lettering of the notes of each.
     #[serde(default = "crate::text::default_types")]
     pub text_types: BTreeMap<String, crate::text::TextType>,
+    /// Its dimension types, by name: how the dimensions of each draw and letter their numbers.
+    #[serde(default = "crate::dims::types")]
+    pub dimension_types: BTreeMap<String, crate::dims::DimensionType>,
     /// Its detail group types, by name: the members each one placed draws.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub detail_groups: BTreeMap<String, crate::groups::GroupType>,
@@ -2153,6 +2175,7 @@ impl Model {
             fill_patterns: fills::patterns(language),
             region_types: fills::region_types(language),
             text_types: crate::text::types(language),
+            dimension_types: crate::dims::types(),
             detail_groups: BTreeMap::new(),
             elements: Elements::new(),
             library: crate::library::Library::default(),
@@ -2599,9 +2622,32 @@ impl Model {
         // 7 to 8: a note's size is its text type's. A note of a size gets a type of it.
         self.typed_notes();
         // 8 to 9: freely ordered graphic line segments; existing dash/space/dot patterns need no conversion.
-        // 9 to 10: a dimension may measure to a line's end (`point`) and run horizontal or vertical (`linear`); a file of 9
-        // holds neither, so it needs no step, but one of 10 read by 9 would measure its points as lines.
+        // 9 to 10: a dimension may measure to a line's end (`point`) and run horizontal or vertical (`linear`), and has a
+        // dimension type; one of 10 read by 9 would measure its points as lines. A dimension of 9 gets its kind's type.
+        self.typed_dimensions();
         self.format = FORMAT;
+    }
+
+    /// Each dimension from before dimension types given the one its kind starts in.
+    fn typed_dimensions(&mut self) {
+        let types = &self.dimension_types;
+        let type_one = |d: &mut Dimension| {
+            if d.type_name.is_empty() {
+                d.type_name = crate::dims::default_type(types, d.kind).cloned().unwrap_or_default();
+            }
+        };
+        for e in self.elements.values_mut() {
+            if let Element::Dimension(d) = e {
+                type_one(d);
+            }
+        }
+        for g in self.detail_groups.values_mut() {
+            for member in &mut g.members {
+                if let Element::Dimension(d) = &mut member.element {
+                    type_one(d);
+                }
+            }
+        }
     }
 
     /// Each note from before text types (a `size`, or no type) given a text type of its size.
@@ -3056,6 +3102,7 @@ impl Model {
         match crate::commands::category(category).as_str() {
             "region" => names(&self.region_types),
             "text" => names(&self.text_types),
+            "dimension" => names(&self.dimension_types),
             "wall" => names(&self.types.wall),
             "floor" => names(&self.types.floor),
             "door" => names(&self.types.door),
@@ -3077,6 +3124,7 @@ impl Model {
         let preferred = match crate::commands::category(category).as_str() {
             "region" => return fills::default_region_type(&self.region_types, self.language).map(String::as_str),
             "text" => return crate::text::default_type(&self.text_types).map(String::as_str),
+            "dimension" => return crate::dims::default_type(&self.dimension_types, DimKind::Aligned).map(String::as_str),
             "wall" | "floor" => "Generic - 200mm",
             "door" => "Single 900 x 2100",
             "column" => "Rectangular 400 x 400",
@@ -4092,6 +4140,47 @@ impl Model {
         (n, v)
     }
 
+    /// The type dimension `d` draws in: its own, else (a type deleted while a command runs) one as a project starts with.
+    pub fn dimension_type(&self, d: &Dimension) -> crate::dims::DimensionType {
+        self.dimension_types.get(&d.type_name).cloned().unwrap_or_default()
+    }
+
+    /// What a dimension's numbers read, as its type and its own text say: each segment's length (a baseline string's
+    /// from its first reference; an ordinate's, each witness line's, the first 0), an angle in degrees, a radius or a
+    /// diameter after its type's symbol, an arc's length. Its prefix and suffix round each; its replacement stands for
+    /// each; with equality, a string of more than one segment shows its type's equality text.
+    pub fn dimension_labels(&self, d: &Dimension) -> Vec<String> {
+        let t = self.dimension_type(d);
+        let values = self.dimension_values(d);
+        let length = |x: f64| t.length(self.units, x);
+        let shown: Vec<String> = match d.kind {
+            DimKind::Aligned | DimKind::Linear => {
+                let sums = values.iter().scan(0.0, |sum, v| {
+                    *sum += v;
+                    Some(*sum)
+                });
+                match t.string {
+                    crate::dims::DimString::Continuous => values.iter().map(|&v| length(v)).collect(),
+                    crate::dims::DimString::Baseline => sums.map(length).collect(),
+                    crate::dims::DimString::Ordinate => std::iter::once(0.0).chain(sums).map(length).collect(),
+                }
+            }
+            DimKind::Angular => values.iter().map(|v| format!("{}°", (v * 100.0).round() / 100.0 + 0.0)).collect(),
+            DimKind::Radial => values.iter().map(|&v| format!("{} {}", t.radius_symbol, length(v)).trim().to_string()).collect(),
+            DimKind::Diameter => values.iter().map(|&v| format!("{} {}", t.diameter_symbol, length(v)).trim().to_string()).collect(),
+            DimKind::ArcLength => values.iter().map(|&v| length(v)).collect(),
+        };
+        let equal = d.equality && values.len() > 1 && t.string == crate::dims::DimString::Continuous;
+        shown
+            .into_iter()
+            .map(|v| match () {
+                _ if equal => t.equality_text.clone(),
+                _ if !d.replace.is_empty() => d.replace.clone(),
+                _ => format!("{}{v}{}", d.prefix, d.suffix),
+            })
+            .collect()
+    }
+
     /// What a dimension shows: an aligned one's lengths, segment by segment (west to east, or
     /// south to north); an angular one's angle, in degrees; a radial one's radius.
     pub fn dimension_values(&self, d: &Dimension) -> Vec<f64> {
@@ -4293,6 +4382,9 @@ impl Model {
             t.check(n, &self.fill_patterns)?;
         }
         for (n, t) in &self.text_types {
+            t.check(n)?;
+        }
+        for (n, t) in &self.dimension_types {
             t.check(n)?;
         }
         for (n, x) in &self.materials {
@@ -4698,6 +4790,15 @@ impl Model {
                             .ok_or_else(|| format!("{who}: view {} isn't a plan view of its level", self.shown(v)))?;
                     }
                     point(&who, d.at)?;
+                    if !self.dimension_types.contains_key(&d.type_name) {
+                        let there: Vec<&str> = self.dimension_types.keys().map(String::as_str).collect();
+                        return Err(format!("{who}: there's no dimension type `{}` (there are: {})", d.type_name, there.join(", ")));
+                    }
+                    for (what, t) in
+                        [("prefix", &d.prefix), ("suffix", &d.suffix), ("above", &d.above), ("below", &d.below), ("replace", &d.replace)]
+                    {
+                        crate::dims::dim_text(&who, what, t)?;
+                    }
                     match (d.kind, d.refs.len()) {
                         (DimKind::Aligned | DimKind::Linear, 2..=MAX_POINTS)
                         | (DimKind::Angular, 2)

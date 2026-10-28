@@ -243,3 +243,116 @@ fn diameter_and_arc_length_dimensions_draw_across_and_round() {
     assert!(dark(on(30.0)) && dark(on(60.0)), "the arc length's line, an arc 3000 mm round");
     assert!(!dark(on(120.0)), "only as far round as the arc sweeps");
 }
+
+#[test]
+fn a_project_starts_with_dimension_types_and_a_dimension_takes_its_kind_s() {
+    let mut s = Session::new();
+    let w = house(&mut s);
+    let listed = run(&mut s, "dimension_type", json!({}));
+    assert!(listed["types"][crate::dims::DIAGONAL]["tick"] == "diagonal", "{listed}");
+    assert!(listed["types"][crate::dims::ARROW]["tick"] == "arrow", "{listed}");
+    let d = id_of(&run(&mut s, "dimension", json!({"refs": [{"id": w[1]}, {"id": w[3]}], "at": [4000, 3000]})));
+    assert_eq!(crate::commands::element_json(&s.model, d)["type"], json!(crate::dims::DIAGONAL));
+    let col = id_of(&run(&mut s, "column", json!({"at": [4000, 3000], "type": "Round 300"})));
+    let r = id_of(&run(&mut s, "dimension", json!({"kind": "radial", "refs": [{"id": col}], "at": [4500, 3500]})));
+    assert_eq!(crate::commands::element_json(&s.model, r)["type"], json!(crate::dims::ARROW));
+    // Made like another, its own values; renamed, what is of it follows; deleted only once nothing is.
+    let made = run(
+        &mut s,
+        "dimension_type",
+        json!({"name": "Site", "like": crate::dims::DIAGONAL, "tick": "dot", "text_size": 3.5, "units": "m", "decimals": 3}),
+    );
+    assert_eq!(made["type"]["tick"], json!("dot"));
+    run(&mut s, "modify", json!({"id": d, "type": "Site"}));
+    assert_eq!(crate::commands::element_json(&s.model, d)["labels"], json!(["8.000"]));
+    run(&mut s, "dimension_type", json!({"name": "Site", "rename": "Survey"}));
+    assert_eq!(crate::commands::element_json(&s.model, d)["type"], json!("Survey"));
+    let e = err(&mut s, "dimension_type", json!({"name": "Survey", "delete": true}));
+    assert!(e.contains(&d.to_string()), "{e}");
+    let e = err(&mut s, "dimension_type", json!({"name": "Survey", "tick_size": -1}));
+    assert!(e.contains("tick size"), "{e}");
+    let e = err(&mut s, "dimension", json!({"refs": [{"id": w[1]}, {"id": w[3]}], "at": [4000, 3000], "type": "Nope"}));
+    assert!(e.contains("no dimension type"), "{e}");
+}
+
+#[test]
+fn a_dimension_s_own_text_goes_round_its_value_or_replaces_it() {
+    let mut s = Session::new();
+    let w = house(&mut s);
+    let grid = id_of(&run(&mut s, "grid", json!({"start": [4000, -2000], "end": [4000, 8000]})));
+    let d = id_of(&run(
+        &mut s,
+        "dimension",
+        json!({"refs": [{"id": w[3]}, {"id": grid}, {"id": w[1]}], "at": [0, -1000], "prefix": "(", "suffix": ")", "above": "TYP.", "below": "CL"}),
+    ));
+    let shown = crate::commands::element_json(&s.model, d);
+    assert_eq!(shown["labels"], json!(["(4000)", "(4000)"]));
+    assert_eq!((shown["above"].clone(), shown["below"].clone()), (json!("TYP."), json!("CL")));
+    // Equal segments show EQ, Revit's Equality Display.
+    run(&mut s, "modify", json!({"id": d, "equality": true}));
+    assert_eq!(crate::commands::element_json(&s.model, d)["labels"], json!(["EQ", "EQ"]));
+    run(&mut s, "modify", json!({"id": d, "equality": false, "replace": "VARIES"}));
+    assert_eq!(crate::commands::element_json(&s.model, d)["labels"], json!(["VARIES", "VARIES"]));
+    let e = err(&mut s, "modify", json!({"id": d, "prefix": "a\nb"}));
+    assert!(e.contains("prefix"), "{e}");
+    // A radius and a diameter say what they are, as their type's symbols.
+    let col = id_of(&run(&mut s, "column", json!({"at": [2000, 3000], "type": "Round 300"})));
+    let r = id_of(&run(&mut s, "dimension", json!({"kind": "radial", "refs": [{"id": col}], "at": [2500, 3500]})));
+    assert_eq!(crate::commands::element_json(&s.model, r)["labels"], json!(["R 150"]));
+    let r = id_of(&run(&mut s, "dimension", json!({"kind": "diameter", "refs": [{"id": col}], "at": [2500, 3500]})));
+    assert_eq!(crate::commands::element_json(&s.model, r)["labels"], json!(["Ø 300"]));
+    // Baseline and ordinate strings show what each witness line is from the first.
+    run(&mut s, "dimension_type", json!({"name": "Ordinate", "string": "ordinate"}));
+    run(&mut s, "modify", json!({"id": d, "replace": "", "prefix": "", "suffix": "", "type": "Ordinate"}));
+    assert_eq!(crate::commands::element_json(&s.model, d)["labels"], json!(["0", "4000", "8000"]));
+    run(&mut s, "dimension_type", json!({"name": "Ordinate", "string": "baseline"}));
+    assert_eq!(crate::commands::element_json(&s.model, d)["labels"], json!(["4000", "8000"]));
+}
+
+#[test]
+fn a_dimension_s_type_draws_its_ticks_its_lines_and_its_strings() {
+    let mut s = Session::new();
+    let a = id_of(&run(&mut s, "detail_line", json!({"start": [0, 0], "end": [0, 3000]})));
+    let b = id_of(&run(&mut s, "detail_line", json!({"start": [4000, 0], "end": [4000, 3000]})));
+    let c = id_of(&run(&mut s, "detail_line", json!({"start": [8000, 0], "end": [8000, 3000]})));
+    run(&mut s, "dimension_type", json!({"name": "Baseline", "string": "baseline", "baseline_spacing": 10}));
+    run(&mut s, "dimension", json!({"refs": [{"id": a}, {"id": b}, {"id": c}], "at": [2000, -2000], "type": "Baseline"}));
+    let level = s.model.levels().first().map(|l| l.0).unwrap_or_default();
+    let d = crate::render::plan(&s.model, level, 800, 600);
+    let png = crate::render::png(&d).unwrap_or_default();
+    let pm = tiny_skia::Pixmap::decode_png(&png).unwrap_or_else(|e| panic!("{e}"));
+    let dark = |(x, y): (f32, f32)| pm.pixel(x as u32, y as u32).is_some_and(|c| c.red() < 200 && c.green() < 200 && c.blue() < 200);
+    // The first line from a to b at `at`, the next, a to c, 10 mm of paper further out (down the page).
+    let first = d.view.px(crate::geom::P2(6000.0, -2000.0));
+    // A mm of paper, in model mm.
+    let mm = f64::from(d.k) / d.view.scale * crate::sheet::DENSITY;
+    let below = d.view.px(crate::geom::P2(6000.0, -2000.0 - 10.0 * mm));
+    assert!(!dark(first), "a to b ends at b: nothing past it on the first line");
+    assert!(dark(below), "a to c, one baseline spacing out");
+}
+
+#[test]
+fn a_dimension_from_before_dimension_types_opens_in_its_kind_s_type() {
+    let mut s = Session::new();
+    let w = house(&mut s);
+    let d = id_of(&run(&mut s, "dimension", json!({"refs": [{"id": w[1]}, {"id": w[3]}], "at": [4000, 3000]})));
+    let col = id_of(&run(&mut s, "column", json!({"at": [4000, 3000], "type": "Round 300"})));
+    let r = id_of(&run(&mut s, "dimension", json!({"kind": "radial", "refs": [{"id": col}], "at": [4500, 3500]})));
+    let mut v: Value = serde_json::from_str(&s.model.to_json().unwrap_or_default()).unwrap_or_default();
+    v["format"] = json!(9);
+    if let Some(o) = v.as_object_mut() {
+        o.remove("dimension_types");
+    }
+    for e in v["elements"].as_object_mut().into_iter().flat_map(|es| es.values_mut()) {
+        if let Some(o) = e.as_object_mut().filter(|o| o.get("category") == Some(&json!("dimension"))) {
+            o.remove("type");
+        }
+    }
+    let (m, left_out) = Model::read(&v.to_string()).unwrap_or_else(|e| panic!("{e}"));
+    assert!(left_out.is_empty(), "{left_out:?}");
+    let ty = |id: Id| match m.elements.get(id) {
+        Some(crate::model::Element::Dimension(d)) => d.type_name.clone(),
+        _ => String::new(),
+    };
+    assert_eq!((ty(d), ty(r)), (crate::dims::DIAGONAL.to_string(), crate::dims::ARROW.to_string()));
+}

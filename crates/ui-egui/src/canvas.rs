@@ -2907,6 +2907,8 @@ impl BimApp {
                         orient: None,
                         refs: refs.clone(),
                         at: round(v.mm(q)),
+                        type_name: bimcraft_core::dims::default_type(&m.dimension_types, DimKind::Aligned).cloned().unwrap_or_default(),
+                        ..Dimension::default()
                     }));
                 }
                 return;
@@ -2941,6 +2943,8 @@ impl BimApp {
                         orient: None,
                         refs: refs.clone(),
                         at: round(v.mm(q)),
+                        type_name: bimcraft_core::dims::default_type(&m.dimension_types, DimKind::Angular).cloned().unwrap_or_default(),
+                        ..Dimension::default()
                     }));
                 }
                 return;
@@ -2953,6 +2957,8 @@ impl BimApp {
                     orient: None,
                     refs: vec![r],
                     at: round(v.mm(q)),
+                    type_name: bimcraft_core::dims::default_type(&m.dimension_types, DimKind::Radial).cloned().unwrap_or_default(),
+                    ..Dimension::default()
                 }));
                 return;
             }

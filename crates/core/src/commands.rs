@@ -566,6 +566,25 @@ pub static ALL: &[Command] = &[
         text_type,
     ),
     edit(
+        "dimension_type",
+        "Dimension Types",
+        &[],
+        "{name?, like?, rename?, delete?: true, …values} a dimension type of the project's, as Revit's type parameters, \
+         lengths mm on paper. Graphics: `string` continuous|baseline|ordinate (Dimension String Type; baseline lines \
+         `baseline_spacing` apart, 7), `tick` diagonal|arrow|open_arrow|dot|none, `tick_size` (2), `line_pen` and `tick_pen` \
+         (0 to 16; 4 and 7), `color` (\"#rrggbb\" or [r, g, b]), `line_extension` past the outer witness lines (0.8), `witness` \
+         gap_to_element|fixed (Witness Line Control), `witness_length` when fixed (5), `witness_gap` off what it measures \
+         (0.6), `witness_extension` past the dimension line (0.8), `centre_mark` on radial and diameter ones. Text: `font` (as \
+         text types take; Arial), `text_size` (2.5), `bold`, `italic`, `underline`, `width_factor` (1), `text_offset` off \
+         the line (1), `background` opaque|transparent, `read` up_then_left|up_then_right (Read Convention), `units` (mm, cm, \
+         m, in, ft, ft-in; null for the project's) and `decimals` (0 to 6; null as the units show), `radius_symbol` (R), \
+         `diameter_symbol` (Ø), `equality_text` (EQ). A new one starts as `like` says, else as the default. A project starts \
+         with `Diagonal - 2.5mm Arial` (aligned, linear, angular and arc length dimensions start in it) and `Arrow - 2.5mm \
+         Arial` (radial and diameter ones). `rename` renames it, its dimensions following; `delete` takes it away while no \
+         dimension is of it. Without `name`, it lists every type",
+        dimension_type,
+    ),
+    edit(
         "spot",
         ui_msg!("Spot Elevation"),
         &["EL"],
@@ -1801,6 +1820,7 @@ pub fn element_json(m: &Model, id: Id) -> Value {
         }
         Element::Dimension(d) => {
             extra.insert("values".into(), json!(m.dimension_values(d).into_iter().map(hundredth).collect::<Vec<_>>()));
+            extra.insert("labels".into(), json!(m.dimension_labels(d)));
         }
         // Every parameter's value, worked out, and how high it reaches over its base.
         Element::Component(cp) => {
@@ -4749,7 +4769,26 @@ fn dimension(s: &mut Session, p: &Value) -> R {
         let beside = xs.iter().all(|&x| x < at.0) || xs.iter().all(|&x| x > at.0);
         orient = Some(if beside && !xs.is_empty() { Orient::Vertical } else { Orient::Horizontal });
     }
-    let d = Dimension { level, view, kind, orient, refs, at };
+    let type_name = match name_param(c, p, "type")? {
+        Some(t) => t,
+        None => crate::dims::default_type(&m.dimension_types, kind).cloned().unwrap_or_default(),
+    };
+    let text = |key: &str| string(c, p, key).map(Option::unwrap_or_default);
+    let d = Dimension {
+        level,
+        view,
+        kind,
+        orient,
+        refs,
+        at,
+        type_name,
+        prefix: text("prefix")?,
+        suffix: text("suffix")?,
+        above: text("above")?,
+        below: text("below")?,
+        replace: text("replace")?,
+        equality: flag(c, p, "equality")?,
+    };
     let values: Vec<f64> = m.dimension_values(&d).into_iter().map(hundredth).collect();
     let id = s.model_mut().insert(Element::Dimension(d));
     Ok(json!({"id": id, "values": values}))
@@ -4924,6 +4963,71 @@ fn text_type(s: &mut Session, p: &Value) -> R {
     t.check(&name).map_err(|e| bad(c, e))?;
     if m.text_types.get(&name) != Some(&t) {
         m.text_types.insert(name.clone(), t.clone());
+    }
+    Ok(json!({"name": name, "type": t}))
+}
+
+fn dimension_type(s: &mut Session, p: &Value) -> R {
+    use crate::dims::DimensionType;
+    let c = "dimension_type";
+    let Some(name) = name_param(c, p, "name")? else {
+        return Ok(json!({"types": s.model.dimension_types, "fonts": crate::text::families()}));
+    };
+    let m = s.model_mut();
+    if flag(c, p, "delete")? {
+        if let Some((id, _)) = m.elements.iter().find(|(_, e)| matches!(e, Element::Dimension(d) if d.type_name == name)) {
+            return Err(bad(c, format!("dimension {id} is of `{name}`; give it another type first")));
+        }
+        if m.dimension_types.remove(&name).is_none() {
+            return Err(bad(c, format!("there's no dimension type `{name}`")));
+        }
+        return Ok(json!({"deleted": name}));
+    }
+    let t = match (m.dimension_types.get(&name), name_param(c, p, "like")?) {
+        (Some(t), _) => t.clone(),
+        (None, Some(like)) => {
+            m.dimension_types.get(&like).cloned().ok_or_else(|| bad(c, format!("there's no dimension type `{like}` to start from")))?
+        }
+        (None, None) => DimensionType::default(),
+    };
+    // What it is, with the values given over it, read as a file reads one: a key it hasn't is an error.
+    let mut v = serde_json::to_value(&t).map_err(|e| bad(c, e.to_string()))?;
+    let mut font = None;
+    if let Some(o) = v.as_object_mut() {
+        for (key, value) in p.as_object().into_iter().flatten() {
+            match key.as_str() {
+                "name" | "like" | "rename" | "delete" => {}
+                "font" => font = name_param(c, p, "font")?,
+                "color" if !value.is_null() => {
+                    let rgb =
+                        colour(value).ok_or_else(|| bad(c, format!("`color` is \"#rrggbb\" or [r, g, b], each 0 to 255, not {value}")))?;
+                    o.insert(key.clone(), json!(rgb));
+                }
+                _ => {
+                    o.insert(key.clone(), value.clone());
+                }
+            }
+        }
+    }
+    let mut t: DimensionType = serde_json::from_value(v).map_err(|e| bad(c, e.to_string()))?;
+    if let Some(f) = font.filter(|f| !f.trim().eq_ignore_ascii_case(t.font.trim())) {
+        t.font = crate::text::known(&f)
+            .ok_or_else(|| bad(c, format!("this system has no font `{f}`; `dimension_type` without `name` lists them")))?;
+    }
+    let name = match name_param(c, p, "rename")? {
+        Some(to) if to != name => {
+            if m.dimension_types.contains_key(&to) {
+                return Err(bad(c, format!("there's already a dimension type `{to}`")));
+            }
+            m.dimension_types.remove(&name);
+            rename_entry(m, &LibKind::DimensionType, &name, &to);
+            to
+        }
+        _ => name,
+    };
+    t.check(&name).map_err(|e| bad(c, e))?;
+    if m.dimension_types.get(&name) != Some(&t) {
+        m.dimension_types.insert(name.clone(), t.clone());
     }
     Ok(json!({"name": name, "type": t}))
 }
