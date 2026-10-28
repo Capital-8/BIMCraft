@@ -1144,6 +1144,16 @@ impl BimApp {
             self.edit_note(id);
             return;
         }
+        // On a dimension, its text: the number under the cursor's, as Revit's Dimension Text.
+        if response.double_clicked()
+            && !writing
+            && let (Some(q), Some(Element::Dimension(dim))) = (local, hovered.and_then(|id| model.elements.get(id)))
+            && let Some(id) = hovered
+        {
+            let segment = model.dimension_segment_at(dim, view.mm(q));
+            self.dimension_text_dialog = Some(crate::dimtypes::DimensionTextDialog::new(&model, id, segment));
+            return;
+        }
         if let Some(at) = self.clicked_at(&response).filter(|_| !dragged && !writing) {
             let q = (at.x - rect.min.x, at.y - rect.min.y);
             // What lay under the press, which the hand may have left by the time the button came up.

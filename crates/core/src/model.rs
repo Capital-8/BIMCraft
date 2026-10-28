@@ -694,6 +694,54 @@ pub struct Dimension {
     /// Its segments show its type's equality text (EQ) instead of their lengths.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub equality: bool,
+    /// Text of single segments' own, over the dimension's (Revit's Dimension Text on one segment).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub texts: Vec<SegmentText>,
+}
+
+/// One segment's own text: what it shows in place of the dimension's where it says something. `segment` counts its numbers
+/// as [`Model::dimension_labels`] gives them, from 0: west to east, or south to north.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SegmentText {
+    pub segment: usize,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub prefix: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub suffix: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub above: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub below: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub replace: String,
+}
+
+impl SegmentText {
+    /// Its texts by name, as the dimension's are.
+    pub fn fields(&self) -> [(&'static str, &String); 5] {
+        [("prefix", &self.prefix), ("suffix", &self.suffix), ("above", &self.above), ("below", &self.below), ("replace", &self.replace)]
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.fields().iter().all(|(_, t)| t.is_empty())
+    }
+}
+
+impl Dimension {
+    /// Segment `i`'s text `field` (prefix, suffix, above, below or replace): its own, else the dimension's.
+    pub fn text(&self, i: usize, field: &str) -> &str {
+        let own =
+            self.texts.iter().find(|t| t.segment == i).and_then(|t| t.fields().into_iter().find(|(n, _)| *n == field)).map(|(_, t)| t);
+        let whole = match field {
+            "prefix" => &self.prefix,
+            "suffix" => &self.suffix,
+            "above" => &self.above,
+            "below" => &self.below,
+            _ => &self.replace,
+        };
+        own.filter(|t| !t.is_empty()).unwrap_or(whole)
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -4198,12 +4246,39 @@ impl Model {
         let equal = d.equality && values.len() > 1 && t.string == crate::dims::DimString::Continuous;
         shown
             .into_iter()
-            .map(|v| match () {
+            .enumerate()
+            .map(|(i, v)| match d.text(i, "replace") {
                 _ if equal => t.equality_text.clone(),
-                _ if !d.replace.is_empty() => d.replace.clone(),
-                _ => format!("{}{v}{}", d.prefix, d.suffix),
+                r if !r.is_empty() => r.to_string(),
+                _ => format!("{}{v}{}", d.text(i, "prefix"), d.text(i, "suffix")),
             })
             .collect()
+    }
+
+    /// What number `i` of dimension `d` has over and under it.
+    pub fn dimension_extra(&self, d: &Dimension, i: usize) -> (String, String) {
+        (d.text(i, "above").to_string(), d.text(i, "below").to_string())
+    }
+
+    /// Which of dimension `d`'s numbers (as [`Model::dimension_labels`] counts them) is over point `p`: an aligned or a
+    /// linear one's segment `p` lies across (an ordinate's witness line nearest it), else its only one.
+    pub fn dimension_segment_at(&self, d: &Dimension, p: P2) -> usize {
+        if !matches!(d.kind, DimKind::Aligned | DimKind::Linear) {
+            return 0;
+        }
+        let (n, cross) = self.crossings(d);
+        let s = (p - d.at).dot(n);
+        let ss: Vec<f64> = cross.iter().map(|c| c.0).collect();
+        let last = ss.len().saturating_sub(2);
+        match self.dimension_type(d).string {
+            crate::dims::DimString::Ordinate => {
+                ss.iter().enumerate().min_by(|a, b| (a.1 - s).abs().total_cmp(&(b.1 - s).abs())).map_or(0, |(i, _)| i)
+            }
+            // The segment it is over: a baseline's lines are told by where each ends, the first end past the point.
+            crate::dims::DimString::Baseline | crate::dims::DimString::Continuous => {
+                ss.iter().skip(1).position(|&e| s <= e).unwrap_or(last).min(last)
+            }
+        }
     }
 
     /// What a dimension shows: an aligned one's lengths, segment by segment (west to east, or
@@ -4821,6 +4896,15 @@ impl Model {
                         [("prefix", &d.prefix), ("suffix", &d.suffix), ("above", &d.above), ("below", &d.below), ("replace", &d.replace)]
                     {
                         crate::dims::dim_text(&who, what, t)?;
+                    }
+                    let mut segments = BTreeSet::new();
+                    for st in &d.texts {
+                        if st.segment >= MAX_POINTS || !segments.insert(st.segment) {
+                            return Err(format!("{who}: segment {}'s text is given twice, or there's no such segment", st.segment));
+                        }
+                        for (what, t) in st.fields() {
+                            crate::dims::dim_text(&format!("{who} segment {}", st.segment), what, t)?;
+                        }
                     }
                     match (d.kind, d.refs.len()) {
                         (DimKind::Aligned | DimKind::Linear, 2..=MAX_POINTS)

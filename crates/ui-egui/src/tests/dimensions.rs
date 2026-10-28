@@ -136,3 +136,22 @@ fn arc_length_picks_an_arc_then_two_points_on_it_to_measure_between() {
     let v = field(&h, dims[0], "values")[0].as_f64().unwrap_or_default();
     assert!((v - 3000.0 * std::f64::consts::PI / 6.0).abs() < 0.01, "{v}");
 }
+
+#[test]
+fn a_double_click_on_a_dimension_s_number_opens_dimension_text_for_that_segment() {
+    let script = format!(
+        "{BOX}\ngrid {{\"start\": [2000, -2000], \"end\": [2000, 8000]}}\ndimension {{\"refs\": [[100, 3000], [2000, 3000], [7900, 3000]], \"at\": [4000, 3000]}}"
+    );
+    let mut h = app_at(&script, 0.05);
+    let id = ids(&h, "dimension")[0];
+    // On the line, over the second segment.
+    double_click(&mut h, P2(5000.0, 3000.0));
+    assert!(h.state().dimension_text_dialog.is_some());
+    type_into(&mut h, "Below:", "CLEAR");
+    press(&mut h, "OK");
+    assert!(h.state().dimension_text_dialog.is_none(), "{}", h.state().status.text);
+    match h.state().session.model.elements.get(id) {
+        Some(Element::Dimension(d)) => assert_eq!((d.texts.len(), d.texts[0].segment, d.texts[0].below.as_str()), (1, 1, "CLEAR")),
+        e => panic!("{e:?}"),
+    }
+}

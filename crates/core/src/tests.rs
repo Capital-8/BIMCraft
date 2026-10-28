@@ -1586,6 +1586,8 @@ fn hostile_params_never_panic_or_break_the_model() {
         json!({"name": "D", "like": "nope", "witness": 5, "line_pen": 99, "color": "x", "font": "", "string": []}),
         json!({"name": "Diagonal - 2.5mm Arial", "rename": "Arrow - 2.5mm Arial", "delete": "x", "unknown": 1}),
         json!({"name": "Arrow - 2.5mm Arial", "delete": true}),
+        json!({"id": 100007, "segment": 1e300, "prefix": "x", "below": 5}),
+        json!({"id": 100007, "segment": -1, "replace": "a\nb", "nope": 1}),
         json!({"sheet": "A101", "view": "Room Schedule", "scale": -1}),
         json!({"sheet": "A101", "view": "{3D}", "azimuth": 1e300, "elevation": 90}),
         json!({"id": 100000, "name": "{3D}"}),

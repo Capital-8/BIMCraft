@@ -566,6 +566,16 @@ pub static ALL: &[Command] = &[
         text_type,
     ),
     edit(
+        "dimension_text",
+        "Dimension Text",
+        &[],
+        "{id, segment?, prefix?, suffix?, above?, below?, replace?} a dimension's text, as Revit's Dimension Text: what goes \
+         before and after its numbers, over and under them, or in place of them. With `segment` (its numbers counted from 0, \
+         west to east or south to north, as `labels` lists them), that one's own, over the dimension's where it says \
+         something; an empty text clears it, and a segment with none left goes back to the dimension's",
+        dimension_text,
+    ),
+    edit(
         "dimension_type",
         "Dimension Types",
         &[],
@@ -4788,6 +4798,7 @@ fn dimension(s: &mut Session, p: &Value) -> R {
         below: text("below")?,
         replace: text("replace")?,
         equality: flag(c, p, "equality")?,
+        texts: Vec::new(),
     };
     let values: Vec<f64> = m.dimension_values(&d).into_iter().map(hundredth).collect();
     let id = s.model_mut().insert(Element::Dimension(d));
@@ -4965,6 +4976,58 @@ fn text_type(s: &mut Session, p: &Value) -> R {
         m.text_types.insert(name.clone(), t.clone());
     }
     Ok(json!({"name": name, "type": t}))
+}
+
+fn dimension_text(s: &mut Session, p: &Value) -> R {
+    use crate::model::SegmentText;
+    let c = "dimension_text";
+    only(c, p, &["id", "segment", "prefix", "suffix", "above", "below", "replace"])?;
+    let id = element_id(c, &s.model, p.get("id").unwrap_or(&Value::Null))?;
+    let Some(Element::Dimension(d)) = s.model.elements.get(id) else {
+        return Err(bad(c, format!("{} {id} isn't a dimension", s.model.elements.get(id).map_or("nothing", |e| e.category()))));
+    };
+    let mut d = d.clone();
+    let count = s.model.dimension_labels(&d).len();
+    let given = |key: &str| string(c, p, key);
+    match num(c, p, "segment")? {
+        None => {
+            for (key, slot) in [
+                ("prefix", &mut d.prefix),
+                ("suffix", &mut d.suffix),
+                ("above", &mut d.above),
+                ("below", &mut d.below),
+                ("replace", &mut d.replace),
+            ] {
+                if let Some(t) = given(key)? {
+                    *slot = t;
+                }
+            }
+        }
+        Some(i) if i.fract() == 0.0 && i >= 0.0 && (i as usize) < count => {
+            let i = i as usize;
+            let mut st = d.texts.iter().find(|t| t.segment == i).cloned().unwrap_or(SegmentText { segment: i, ..SegmentText::default() });
+            for (key, slot) in [
+                ("prefix", &mut st.prefix),
+                ("suffix", &mut st.suffix),
+                ("above", &mut st.above),
+                ("below", &mut st.below),
+                ("replace", &mut st.replace),
+            ] {
+                if let Some(t) = given(key)? {
+                    *slot = t;
+                }
+            }
+            d.texts.retain(|t| t.segment != i);
+            if !st.is_empty() {
+                d.texts.push(st);
+                d.texts.sort_by_key(|t| t.segment);
+            }
+        }
+        Some(i) => return Err(bad(c, format!("dimension {id} has segments 0 to {}, not {i}", count.saturating_sub(1)))),
+    }
+    let labels = s.model.dimension_labels(&d);
+    s.model_mut().elements.insert(id, Element::Dimension(d));
+    Ok(json!({"id": id, "labels": labels}))
 }
 
 fn dimension_type(s: &mut Session, p: &Value) -> R {

@@ -7,7 +7,7 @@ use bimcraft_core::dims::{Background, DimString, DimensionType, Read, Tick, Witn
 use bimcraft_core::model::{DimKind, Element, Id, Model};
 use bimcraft_core::units::Units;
 use bimcraft_i18n::msg;
-use egui::{ComboBox, Context, DragValue, Id as UiId, Key, Modal, TextEdit};
+use egui::{ComboBox, Context, DragValue, Grid, Id as UiId, Key, Modal, TextEdit};
 use serde_json::{Value, json};
 
 use crate::BimApp;
@@ -223,5 +223,96 @@ impl BimApp {
             }
         }
         self.dimension_type_dialog = Some(d);
+    }
+}
+
+/// Dimension Text, as Revit's: what one number of a dimension has before and after it, over and under it, or in its place.
+/// A dimension of one number edits its own text; of several, the number double-clicked's.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct DimensionTextDialog {
+    id: Id,
+    /// Which number, when the dimension has several.
+    segment: Option<usize>,
+    /// Prefix, suffix, above, below and the replacement, as typed.
+    typed: [String; 5],
+    error: Option<String>,
+}
+
+const FIELDS: [(&str, &str); 5] = [
+    ("prefix", msg!("Prefix:")),
+    ("suffix", msg!("Suffix:")),
+    ("above", msg!("Above:")),
+    ("below", msg!("Below:")),
+    ("replace", msg!("Replace With Text:")),
+];
+
+impl DimensionTextDialog {
+    pub(crate) fn new(m: &Model, id: Id, segment: usize) -> DimensionTextDialog {
+        let (segment, typed) = match m.elements.get(id) {
+            Some(Element::Dimension(d)) => {
+                let several = m.dimension_labels(d).len() > 1;
+                let segment = several.then_some(segment);
+                // A segment's own text; the dimension's shows through where it has none, as it draws.
+                let typed = FIELDS.map(|(f, _)| match segment {
+                    Some(i) => d.texts.iter().find(|t| t.segment == i).map_or_else(String::new, |t| {
+                        t.fields().into_iter().find(|(n, _)| *n == f).map_or_else(String::new, |(_, v)| v.clone())
+                    }),
+                    None => d.text(0, f).to_string(),
+                });
+                (segment, typed)
+            }
+            _ => (None, Default::default()),
+        };
+        DimensionTextDialog { id, segment, typed, error: None }
+    }
+
+    /// The `dimension_text` command for what is typed.
+    fn params(&self) -> Value {
+        let mut p = json!({"id": self.id});
+        if let Some(i) = self.segment {
+            p["segment"] = json!(i);
+        }
+        for ((f, _), t) in FIELDS.iter().zip(&self.typed) {
+            p[*f] = json!(t);
+        }
+        p
+    }
+}
+
+impl BimApp {
+    /// Dimension Text, while it's open.
+    pub(crate) fn dimension_text_window(&mut self, ctx: &Context) {
+        let Some(mut d) = self.dimension_text_dialog.take() else { return };
+        let (mut ok, mut cancel) = (false, false);
+        Modal::new(UiId::new("dimension-text")).show(ctx, |ui| {
+            ui.heading(t("Dimension Text"));
+            if let Some(i) = d.segment {
+                ui.label(tf("Segment {}", &[&(i + 1).to_string()]));
+            }
+            Grid::new("dimension-text-fields").num_columns(2).spacing([12.0, 6.0]).show(ui, |ui| {
+                for ((_, label), typed) in FIELDS.iter().zip(d.typed.iter_mut()) {
+                    let l = ui.label(t(label));
+                    ui.add_sized([260.0, ui.spacing().interact_size.y], TextEdit::singleline(typed)).labelled_by(l.id);
+                    ui.end_row();
+                }
+            });
+            if let Some(e) = &d.error {
+                ui.colored_label(crate::style::pal().error, e);
+            }
+            ui.horizontal(|ui| {
+                ok = ui.button(t("OK")).clicked();
+                cancel = ui.button(t("Cancel")).clicked();
+            });
+        });
+        if cancel || ctx.input(|i| i.key_pressed(Key::Escape)) {
+            return;
+        }
+        if ok {
+            match self.session.execute("dimension_text", &d.params()) {
+                Ok(_) => return,
+                Err(e) => d.error = Some(e),
+            }
+        }
+        self.dimension_text_dialog = Some(d);
     }
 }

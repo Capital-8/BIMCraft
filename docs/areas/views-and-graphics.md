@@ -418,7 +418,9 @@ dimension line with its length), witness line gap and extension, baseline spacin
 rounding (`DimensionType::length`), and the radius and diameter symbols and the equality text. A project starts with `Diagonal - 2.5mm Arial`,
 which aligned, linear, angular and arc length dimensions start in, and `Arrow - 2.5mm Arial`, which radial and diameter ones do
 (`dims::default_type`); a file of format 9 gives its dimensions their kind's (`Model::typed_dimensions`). A dimension's own text, Revit's
-instance values, is a prefix, a suffix, text above and below, Replace With Text and Equality Display; `Model::dimension_labels` is what its
+instance values, is a prefix, a suffix, text above and below, Replace With Text and Equality Display, and a segment may have its own over it
+(`texts`, `SegmentText`, the `dimension_text` command; `Dimension::text` reads one through the other, `dimension_segment_at` finds a segment by a
+point); `Model::dimension_labels` is what its
 numbers read (and `elements` shows as `labels`): a baseline string's each from its first reference, an ordinate's each witness line's, the first 0.
 `render/dimensions.rs` draws them all as the type says (`Ink`: its lines, ticks and witness lines, and its numbers laid out by `crate::text`
 over the paper where the background is opaque).

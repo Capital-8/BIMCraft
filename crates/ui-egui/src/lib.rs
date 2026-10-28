@@ -527,6 +527,7 @@ pub struct BimApp {
     /// Text Type Properties, while it's open.
     text_type_dialog: Option<notes::TextTypeDialog>,
     dimension_type_dialog: Option<dimtypes::DimensionTypeDialog>,
+    dimension_text_dialog: Option<dimtypes::DimensionTextDialog>,
     /// The line style the Detail Line tool draws in; blank for the project's Thin Lines.
     line_style: String,
     /// The Linework tool's line style: a style's name, or `<Invisible lines>` or `<By Category>` (in English).
@@ -995,6 +996,7 @@ impl BimApp {
             note_edit: None,
             text_type_dialog: None,
             dimension_type_dialog: None,
+            dimension_text_dialog: None,
             line_style: String::new(),
             linework_style: String::new(),
             group_type: String::new(),
@@ -1466,6 +1468,7 @@ impl BimApp {
         if self.type_dialog.is_some()
             || self.text_type_dialog.is_some()
             || self.dimension_type_dialog.is_some()
+            || self.dimension_text_dialog.is_some()
             || self.materials_dialog.is_some()
             || self.family_dialog.is_some()
             || self.favorites_dialog.is_some()
@@ -4382,6 +4385,7 @@ impl BimApp {
         self.fill_patterns_window(ctx);
         self.text_type_window(ctx);
         self.dimension_type_window(ctx);
+        self.dimension_text_window(ctx);
         self.options_window(ctx);
         self.purge_window(ctx);
         if std::mem::take(&mut self.link_dialog) {

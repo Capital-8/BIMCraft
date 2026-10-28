@@ -126,15 +126,15 @@ impl Ink {
 
     /// A number `label` beside the line at `at` running along `along`, on its `up` side, with the dimension's text above
     /// and below it: what reads the way the type's read convention says.
-    fn label(&self, d: &mut Drawing, dim: &Dimension, label: &str, at: P2, along: P2, up: P2) {
+    fn label(&self, d: &mut Drawing, (above, below): &(String, String), label: &str, at: P2, along: P2, up: P2) {
         let (size, off) = (self.t.text_size * self.mm, self.t.text_offset * self.mm);
         // A line running up the page reads from its foot, or with up then right from its head.
         let along = if self.t.read == Read::UpThenRight && along.1.abs() > along.0.abs() { along * -1.0 } else { along };
         let mid = at + up * (off + size / 2.0);
         self.letter(d, label, mid, along);
         let step = up * (size * 1.5);
-        self.letter(d, &dim.above, mid + step, along);
-        self.letter(d, &dim.below, at - up * (off + size / 2.0), along);
+        self.letter(d, above, mid + step, along);
+        self.letter(d, below, at - up * (off + size / 2.0), along);
     }
 }
 
@@ -186,21 +186,21 @@ fn aligned(d: &mut Drawing, m: &Model, dim: &Dimension, ink: &Ink) {
     }
     match ink.t.string {
         DimString::Continuous => {
-            for (pair, label) in cross.windows(2).zip(&labels) {
+            for (i, (pair, label)) in cross.windows(2).zip(&labels).enumerate() {
                 let [(s0, _), (s1, _)] = pair else { continue };
-                ink.label(d, dim, label, on((s0 + s1) / 2.0, 0.0), n, u);
+                ink.label(d, &m.dimension_extra(dim, i), label, on((s0 + s1) / 2.0, 0.0), n, u);
             }
         }
         DimString::Baseline => {
-            for (&(w, i, j), label) in lines.iter().zip(&labels) {
+            for (k, (&(w, i, j), label)) in lines.iter().zip(&labels).enumerate() {
                 let (Some(&(s0, _)), Some(&(s1, _))) = (cross.get(i), cross.get(j)) else { continue };
                 let prev = cross.get(j.saturating_sub(1)).map_or(s0, |c| c.0);
-                ink.label(d, dim, label, on((prev + s1) / 2.0, w), n, u);
+                ink.label(d, &m.dimension_extra(dim, k), label, on((prev + s1) / 2.0, w), n, u);
             }
         }
         DimString::Ordinate => {
-            for (&(s, _), label) in cross.iter().zip(&labels) {
-                ink.label(d, dim, label, on(s, 0.0), n, u);
+            for (i, (&(s, _), label)) in cross.iter().zip(&labels).enumerate() {
+                ink.label(d, &m.dimension_extra(dim, i), label, on(s, 0.0), n, u);
             }
         }
     }
@@ -234,7 +234,7 @@ fn angular(d: &mut Drawing, m: &Model, dim: &Dimension, ink: &Ink) {
         // Read along the arc's middle, outside it.
         let along = if mid.perp().0 < 0.0 { mid.perp() * -1.0 } else { mid.perp() };
         let up = if mid.dot(along.perp()) >= 0.0 { along.perp() } else { along.perp() * -1.0 };
-        ink.label(d, dim, label, o + mid * r, along, up);
+        ink.label(d, &m.dimension_extra(dim, 0), label, o + mid * r, along, up);
     }
 }
 
@@ -265,7 +265,7 @@ fn radial(d: &mut Drawing, m: &Model, dim: &Dimension, ink: &Ink, across: bool) 
         let tt = ink.t.lettering();
         let wide = crate::text::layout(&tt, label, &crate::text::styles(&tt, label, false, &[])).width * ink.mm;
         let at = end + u * (wide / 2.0 + ink.t.text_offset * ink.mm) - up * (ink.t.text_offset * ink.mm + ink.t.text_size * ink.mm / 2.0);
-        ink.label(d, dim, label, at, along, up);
+        ink.label(d, &m.dimension_extra(dim, 0), label, at, along, up);
     }
 }
 
@@ -291,6 +291,6 @@ fn arc_length(d: &mut Drawing, m: &Model, dim: &Dimension, ink: &Ink) {
     if let Some(label) = m.dimension_labels(dim).first() {
         let along = if mid.perp().0 < 0.0 { mid.perp() * -1.0 } else { mid.perp() };
         let up = if mid.dot(along.perp()) >= 0.0 { along.perp() } else { along.perp() * -1.0 };
-        ink.label(d, dim, label, o + mid * r, along, up);
+        ink.label(d, &m.dimension_extra(dim, 0), label, o + mid * r, along, up);
     }
 }

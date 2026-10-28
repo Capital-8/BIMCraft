@@ -391,3 +391,40 @@ fn an_arc_length_dimension_measures_between_two_points_on_its_arc() {
     let v = values(&mut s, id)[0].as_f64().unwrap_or_default();
     assert!((v - 2000.0 * pi * 50.0 / 180.0).abs() < 0.01, "{v}");
 }
+
+#[test]
+fn a_segment_of_a_dimension_has_text_of_its_own_over_the_dimension_s() {
+    let mut s = Session::new();
+    let w = house(&mut s);
+    let g = id_of(&run(&mut s, "grid", json!({"start": [2000, -2000], "end": [2000, 8000]})));
+    let d = id_of(&run(&mut s, "dimension", json!({"refs": [{"id": w[3]}, {"id": g}, {"id": w[1]}], "at": [0, -1000], "suffix": " mm"})));
+    // The second segment, west to east: its own prefix, text under it, and the dimension's suffix still.
+    run(&mut s, "dimension_text", json!({"id": d, "segment": 1, "prefix": "~", "below": "CLEAR"}));
+    let shown = crate::commands::element_json(&s.model, d);
+    assert_eq!(shown["labels"], json!(["2000 mm", "~6000 mm"]));
+    let dim = match s.model.elements.get(d) {
+        Some(crate::model::Element::Dimension(x)) => x.clone(),
+        _ => panic!("no dimension"),
+    };
+    assert_eq!(s.model.dimension_extra(&dim, 1), ("".to_string(), "CLEAR".to_string()));
+    // Its replacement replaces it alone; the whole dimension's, without `segment`.
+    run(&mut s, "dimension_text", json!({"id": d, "segment": 0, "replace": "VARIES"}));
+    assert_eq!(crate::commands::element_json(&s.model, d)["labels"], json!(["VARIES", "~6000 mm"]));
+    run(&mut s, "dimension_text", json!({"id": d, "suffix": ""}));
+    assert_eq!(crate::commands::element_json(&s.model, d)["labels"], json!(["VARIES", "~6000"]));
+    // Cleared, a segment's text goes.
+    run(&mut s, "dimension_text", json!({"id": d, "segment": 0, "replace": ""}));
+    assert_eq!(crate::commands::element_json(&s.model, d)["texts"].as_array().map(Vec::len), Some(1));
+    // Which segment a point is over: what a double click on a number edits.
+    assert_eq!(
+        (
+            s.model.dimension_segment_at(&dim, crate::geom::P2(1000.0, -900.0)),
+            s.model.dimension_segment_at(&dim, crate::geom::P2(5000.0, -900.0))
+        ),
+        (0, 1)
+    );
+    let e = err(&mut s, "dimension_text", json!({"id": d, "segment": 7, "prefix": "x"}));
+    assert!(e.contains("segment"), "{e}");
+    let e = err(&mut s, "dimension_text", json!({"id": w[0], "prefix": "x"}));
+    assert!(e.contains("dimension"), "{e}");
+}
