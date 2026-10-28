@@ -14,6 +14,7 @@ mod clouds;
 mod context;
 pub mod control;
 mod dialog;
+mod dimtypes;
 mod dock;
 mod draw;
 mod editor;
@@ -61,6 +62,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use bimcraft_core::dims::Placing as DimMode;
 use bimcraft_core::engine::{self, Session};
 use bimcraft_core::geom::P2;
 use bimcraft_core::model::{CEILING_HEIGHT, DimKind, Element, Id, Justify, Location, Model, RAMP_WIDTH, Reference, STAIR_WIDTH};
@@ -162,12 +164,13 @@ pub enum Tool {
     Paint,
     /// Take the paint off the face clicked in the 3D view.
     Unpaint,
-    /// An aligned dimension: the references picked so far. A click away from any places it.
-    Dimension(Vec<Reference>),
+    /// An aligned or linear dimension, laid as its mode says: the references and points picked so far. A click away from
+    /// any places it.
+    Dimension(DimMode, Vec<Reference>),
     /// An angular dimension: the lines picked so far, two that meet; then a click where its arc goes.
     Angular(Vec<Reference>),
-    /// A radial dimension: the round column picked, then a click toward where its radius goes.
-    Radial(Option<Reference>),
+    /// A radial, diameter or arc length dimension: what round was picked, then a click toward where it goes.
+    Round(DimKind, Option<Reference>),
     /// A text note where clicked, saying what the Options Bar says.
     Text,
     /// A spot elevation where clicked.
@@ -522,6 +525,7 @@ pub struct BimApp {
     note_edit: Option<notes::NoteEdit>,
     /// Text Type Properties, while it's open.
     text_type_dialog: Option<notes::TextTypeDialog>,
+    dimension_type_dialog: Option<dimtypes::DimensionTypeDialog>,
     /// The line style the Detail Line tool draws in; blank for the project's Thin Lines.
     line_style: String,
     /// The Linework tool's line style: a style's name, or `<Invisible lines>` or `<By Category>` (in English).
@@ -989,6 +993,7 @@ impl BimApp {
             note_text: String::new(),
             note_edit: None,
             text_type_dialog: None,
+            dimension_type_dialog: None,
             line_style: String::new(),
             linework_style: String::new(),
             group_type: String::new(),
@@ -1138,7 +1143,7 @@ impl BimApp {
             Tool::Room => Some(msg!("Place Room")),
             Tool::Level => Some(msg!("Place Level")),
             Tool::Grid(_) => Some(msg!("Place Grid")),
-            Tool::Dimension(_) | Tool::Angular(_) | Tool::Radial(_) => Some(msg!("Place Dimensions")),
+            Tool::Dimension(..) | Tool::Angular(_) | Tool::Round(..) => Some(msg!("Place Dimensions")),
             Tool::Text => Some(msg!("Place Text")),
             Tool::DetailGroup => Some(msg!("Place Detail Group")),
             Tool::RepeatingDetail(_) => Some(msg!("Place Repeating Detail")),
@@ -1459,6 +1464,7 @@ impl BimApp {
         // A dialog takes the keys while it's open.
         if self.type_dialog.is_some()
             || self.text_type_dialog.is_some()
+            || self.dimension_type_dialog.is_some()
             || self.materials_dialog.is_some()
             || self.family_dialog.is_some()
             || self.favorites_dialog.is_some()
@@ -1556,6 +1562,12 @@ impl BimApp {
         }
         if self.tool == Tool::Modify && pressed(Modifiers::NONE, Key::Space) {
             self.flip();
+        }
+        // Space steps the Dimension tool's lay: Auto, Aligned, Horizontal, Vertical.
+        if let Tool::Dimension(mode, _) = &mut self.tool
+            && pressed(Modifiers::NONE, Key::Space)
+        {
+            *mode = mode.next();
         }
         if matches!(self.tool, Tool::Component | Tool::Fixture(_)) && pressed(Modifiers::NONE, Key::Space) {
             self.component_angle = (self.component_angle + 90.0) % 360.0;
@@ -1763,7 +1775,7 @@ impl BimApp {
                     self.ungroup();
                     return true;
                 }
-                Some("dimension") => Tool::Dimension(Vec::new()),
+                Some("dimension") => Tool::Dimension(DimMode::Aligned, Vec::new()),
                 Some("text") => Tool::Text,
                 Some("detail_line") => {
                     (self.drawing.insulation, self.drawing.cloud) = (None, None);
@@ -1880,9 +1892,13 @@ impl BimApp {
             Some(Element::Level(_)) => Tool::Level,
             Some(Element::Grid(_)) => Tool::Grid(None),
             Some(Element::Dimension(d)) => match d.kind {
-                DimKind::Aligned | DimKind::Linear => Tool::Dimension(Vec::new()),
+                DimKind::Aligned => Tool::Dimension(DimMode::Aligned, Vec::new()),
+                DimKind::Linear if d.orient == Some(bimcraft_core::model::Orient::Vertical) => {
+                    Tool::Dimension(DimMode::Vertical, Vec::new())
+                }
+                DimKind::Linear => Tool::Dimension(DimMode::Horizontal, Vec::new()),
                 DimKind::Angular => Tool::Angular(Vec::new()),
-                DimKind::Radial | DimKind::Diameter | DimKind::ArcLength => Tool::Radial(None),
+                k @ (DimKind::Radial | DimKind::Diameter | DimKind::ArcLength) => Tool::Round(k, None),
             },
             Some(Element::Text(_)) => Tool::Text,
             Some(Element::DetailLine(l)) => {
@@ -2167,9 +2183,9 @@ impl BimApp {
             }
             Tool::Trim(Some(_)) => Tool::Trim(None),
             Tool::TrimTo { boundary: Some(_), many } => Tool::TrimTo { boundary: None, many },
-            Tool::Dimension(refs) if !refs.is_empty() => Tool::Dimension(Vec::new()),
+            Tool::Dimension(mode, refs) if !refs.is_empty() => Tool::Dimension(mode, Vec::new()),
             Tool::Angular(refs) if !refs.is_empty() => Tool::Angular(Vec::new()),
-            Tool::Radial(Some(_)) => Tool::Radial(None),
+            Tool::Round(k, Some(_)) => Tool::Round(k, None),
             Tool::Section(Some(_)) => Tool::Section(None),
             Tool::Measure(Some(_)) => Tool::Measure(None),
             // The ruler laid goes first, then the tool.
@@ -2269,8 +2285,8 @@ impl BimApp {
         match &mut self.tool {
             Tool::Wall(chain) => chain.clear(),
             Tool::Grid(start) | Tool::Run(_, start) => *start = None,
-            Tool::Dimension(refs) | Tool::Angular(refs) => refs.clear(),
-            Tool::Radial(r) => *r = None,
+            Tool::Dimension(_, refs) | Tool::Angular(refs) => refs.clear(),
+            Tool::Round(_, r) => *r = None,
             Tool::Section(start) | Tool::Shaft(start) | Tool::Measure(start) => *start = None,
             Tool::Stair(pts)
             | Tool::Ramp(pts)
@@ -3026,41 +3042,85 @@ impl BimApp {
         );
     }
 
+    /// Annotate > Dimension, as Revit's: Aligned and Linear big, the others small beside them, two rows of three.
+    fn dimension_panel(&mut self, ui: &mut Ui) {
+        let big: [(Icon, &str, &str, Tool); 2] = [
+            (
+                Icon::Dimension,
+                msg!("Aligned"),
+                msg!(
+                    "Aligned Dimension (DI): pick parallel wall faces, wall ends, doors, windows or grids, or endpoints, then click \
+                     where the dimension line goes"
+                ),
+                Tool::Dimension(DimMode::Aligned, Vec::new()),
+            ),
+            (
+                Icon::Linear,
+                msg!("Linear"),
+                msg!(
+                    "Linear Dimension: pick endpoints (wall ends and corners, line ends, grid ends), then click where it goes: \
+                     horizontal or vertical as the cursor lies"
+                ),
+                Tool::Dimension(DimMode::Auto, Vec::new()),
+            ),
+        ];
+        let small: [(Icon, &str, &str, Tool); 5] = [
+            (
+                Icon::Angular,
+                msg!("Angular"),
+                msg!("Angular Dimension: pick two lines that meet, then click where the arc goes"),
+                Tool::Angular(Vec::new()),
+            ),
+            (
+                Icon::Radial,
+                msg!("Radial"),
+                msg!("Radial Dimension: pick a round column, a curved wall, a circle or an arc, then click where the radius goes"),
+                Tool::Round(DimKind::Radial, None),
+            ),
+            (
+                Icon::Diameter,
+                msg!("Diameter"),
+                msg!("Diameter Dimension: pick a round column, a curved wall, a circle or an arc, then click where it goes"),
+                Tool::Round(DimKind::Diameter, None),
+            ),
+            (
+                Icon::ArcLength,
+                msg!("Arc Length"),
+                msg!("Arc Length Dimension: pick a curved wall or an arc, then click where the dimension's arc goes"),
+                Tool::Round(DimKind::ArcLength, None),
+            ),
+            (
+                Icon::Spot,
+                "Spot Elevation",
+                msg!("Spot Elevation (EL): click a floor, a roof or a stair; in a section, a point"),
+                Tool::Spot,
+            ),
+        ];
+        panel(ui, "Dimension", |ui| {
+            for (icon, label, tip, tool) in &big {
+                if big_button(ui, *icon, label, structure::same_tool(&self.tool, tool), tip).clicked() {
+                    self.set_tool(tool.clone());
+                }
+            }
+            ui.vertical(|ui| {
+                ui.spacing_mut().item_spacing.y = 2.0;
+                for row in small.chunks(3) {
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing.x = 1.0;
+                        for (icon, label, tip, tool) in row {
+                            if small_button(ui, *icon, label, structure::same_tool(&self.tool, tool), tip).clicked() {
+                                self.set_tool(tool.clone());
+                            }
+                        }
+                    });
+                }
+            });
+        });
+    }
+
     fn annotate_tab(&mut self, ui: &mut Ui) {
         self.select_panel(ui);
-        self.tools(
-            ui,
-            "Dimension",
-            &[
-                (
-                    Icon::Dimension,
-                    msg!("Aligned"),
-                    msg!(
-                        "Aligned Dimension (DI): pick parallel wall faces, wall ends, doors, windows or grids, then click where the \
-                     dimension line goes"
-                    ),
-                    Tool::Dimension(Vec::new()),
-                ),
-                (
-                    Icon::Angular,
-                    msg!("Angular"),
-                    msg!("Angular Dimension: pick two lines that meet, then click where the arc goes"),
-                    Tool::Angular(Vec::new()),
-                ),
-                (
-                    Icon::Radial,
-                    msg!("Radial"),
-                    msg!("Radial Dimension: pick a round column, then click where the radius goes"),
-                    Tool::Radial(None),
-                ),
-                (
-                    Icon::Spot,
-                    "Spot Elevation",
-                    msg!("Spot Elevation (EL): click a floor, a roof or a stair; in a section, a point"),
-                    Tool::Spot,
-                ),
-            ],
-        );
+        self.dimension_panel(ui);
         self.detail_panel(ui);
         self.region_panel(ui);
         self.tools(
@@ -3837,6 +3897,22 @@ impl BimApp {
                         .labelled_by(l.id);
                 }
                 Tool::DetailLine(_) => self.line_style_options(ui),
+                // Between endpoints: as the cursor lies, aligned, horizontal or vertical (Space steps them).
+                Tool::Dimension(mode, _) => {
+                    ui.label(t("Place:"));
+                    for (m, label) in [
+                        (DimMode::Auto, msg!("Auto")),
+                        (DimMode::Aligned, msg!("Aligned")),
+                        (DimMode::Horizontal, msg!("Horizontal")),
+                        (DimMode::Vertical, msg!("Vertical")),
+                    ] {
+                        if ui.selectable_label(mode == m, t(label)).clicked()
+                            && let Tool::Dimension(now, _) = &mut self.tool
+                        {
+                            *now = m;
+                        }
+                    }
+                }
                 Tool::Text => {
                     let l = ui.label(t("Text:"));
                     ui.add(TextEdit::singleline(&mut self.note_text).desired_width(240.0).hint_text(t("what the note says")))
@@ -4000,18 +4076,24 @@ impl BimApp {
             Tool::RepeatingDetail(Some(_)) => msg!("Click where it ends: the group repeats along the line every spacing."),
             Tool::Paint => msg!("Click a face to paint it with the material in the Options Bar; the 3D view orbits as ever."),
             Tool::Unpaint => msg!("Click a painted face to take its paint off."),
-            Tool::Dimension(refs) if refs.is_empty() => {
-                msg!("Pick a wall face, centre line or end, a door, a window or a grid to measure from.")
+            Tool::Dimension(_, refs) if refs.is_empty() => {
+                msg!("Pick a wall face, centre line or end, a door, a window, a grid, or an endpoint to measure from.")
             }
-            Tool::Dimension(refs) if refs.len() == 1 => msg!("Pick the next reference, parallel to the first."),
-            Tool::Dimension(_) => msg!("Pick more references, or click away from them where the dimension line goes. Esc cancels."),
+            Tool::Dimension(_, refs) if refs.len() == 1 => msg!("Pick the next reference or endpoint."),
+            Tool::Dimension(..) => msg!(
+                "Pick more references, or click away from them where the dimension line goes; Space steps Auto, Aligned, Horizontal, \
+                 Vertical. Esc cancels."
+            ),
             Tool::Measure(None) => msg!("Click the ruler's start: points snap as they do drawing."),
             Tool::Measure(Some(_)) => msg!("Click its end: its length and angle read beside it. Esc cancels."),
             Tool::Tag => msg!("Click an element to tag it with its type, a door's or window's with its mark, or with the field in Label."),
             Tool::Angular(refs) if refs.len() < 2 => msg!("Pick a wall, a grid or another line; then one that meets it."),
             Tool::Angular(_) => msg!("Click where the arc goes: the angle on that side. Esc cancels."),
-            Tool::Radial(None) => msg!("Pick a round column."),
-            Tool::Radial(Some(_)) => msg!("Click where the radius goes. Esc cancels."),
+            Tool::Round(DimKind::ArcLength, None) => msg!("Pick a curved wall or an arc."),
+            Tool::Round(_, None) => msg!("Pick a round column, a curved wall, a circle or an arc."),
+            Tool::Round(DimKind::ArcLength, Some(_)) => msg!("Click where the dimension's arc goes. Esc cancels."),
+            Tool::Round(DimKind::Diameter, Some(_)) => msg!("Click where the diameter goes. Esc cancels."),
+            Tool::Round(_, Some(_)) => msg!("Click where the radius goes. Esc cancels."),
             Tool::Text => msg!("Type the note in the Options Bar, then click where it goes: its top left corner."),
             Tool::Spot => msg!("Click a floor, a roof, a stair or a wall: the spot elevation reads the height of its top there."),
             Tool::Section(None) => msg!("Click the section's start: it looks to the left of the line you draw."),
@@ -4295,6 +4377,7 @@ impl BimApp {
         self.line_styles_window(ctx);
         self.fill_patterns_window(ctx);
         self.text_type_window(ctx);
+        self.dimension_type_window(ctx);
         self.options_window(ctx);
         self.purge_window(ctx);
         if std::mem::take(&mut self.link_dialog) {

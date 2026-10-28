@@ -8,7 +8,9 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::model::DimKind;
+use crate::geom::P2;
+use crate::ids::Key;
+use crate::model::{DimKind, Face, Model, Orient, Reference};
 use crate::pen::Pen;
 use crate::text::TextType;
 use crate::units::Units;
@@ -315,4 +317,66 @@ pub fn types() -> BTreeMap<String, DimensionType> {
 pub fn default_type(types: &BTreeMap<String, DimensionType>, kind: DimKind) -> Option<&String> {
     let wanted = if matches!(kind, DimKind::Radial | DimKind::Diameter) { ARROW } else { DIAGONAL };
     types.get_key_value(wanted).map(|(k, _)| k).or_else(|| types.keys().next())
+}
+
+/// How the desktop's Dimension tool lays a dimension between what was picked: as the cursor says (between points only:
+/// aligned among them, else horizontal or vertical, [`Orient::follow`]), aligned, horizontal or vertical.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Placing {
+    #[default]
+    Auto,
+    Aligned,
+    Horizontal,
+    Vertical,
+}
+
+impl Placing {
+    pub const ALL: [Placing; 4] = [Placing::Auto, Placing::Aligned, Placing::Horizontal, Placing::Vertical];
+
+    /// The next, as Space steps through them.
+    pub fn next(self) -> Placing {
+        match self {
+            Placing::Auto => Placing::Aligned,
+            Placing::Aligned => Placing::Horizontal,
+            Placing::Horizontal => Placing::Vertical,
+            Placing::Vertical => Placing::Auto,
+        }
+    }
+
+    /// The kind and orientation of a dimension placed this way through `at` between `refs`. A line picked fixes the way
+    /// an automatic one runs: square to it.
+    pub fn kind(self, m: &Model, refs: &[Reference], at: P2) -> (DimKind, Option<Orient>) {
+        match self {
+            Placing::Aligned => (DimKind::Aligned, None),
+            Placing::Horizontal => (DimKind::Linear, Some(Orient::Horizontal)),
+            Placing::Vertical => (DimKind::Linear, Some(Orient::Vertical)),
+            Placing::Auto if refs.iter().any(|r| r.point.is_none()) => (DimKind::Aligned, None),
+            Placing::Auto => {
+                let points: Vec<P2> = refs.iter().filter_map(|r| m.reference_point(r).ok()).collect();
+                match Orient::follow(&points, at) {
+                    Some(o) => (DimKind::Linear, Some(o)),
+                    None => (DimKind::Aligned, None),
+                }
+            }
+        }
+    }
+}
+
+/// Of element `id`'s round lines a dimension of `kind` measures (radial and diameter: a round column's edge, a curved
+/// wall's centre line or faces, a circle or an arc; arc length: a curved wall's or an arc), the one passing nearest `p`.
+pub fn round_at(m: &Model, id: impl Key, p: P2, kind: DimKind) -> Option<Reference> {
+    let id = m.guid(id);
+    [Face::Centre, Face::Left, Face::Right]
+        .into_iter()
+        .map(|face| Reference::line(id, face))
+        .filter_map(|r| {
+            let (c, radius) = match kind {
+                DimKind::ArcLength => m.reference_sweep(&r).ok().map(|(c, radius, _, _)| (c, radius))?,
+                _ => m.reference_arc(&r).ok()?,
+            };
+            Some((r, (p.dist(c) - radius).abs()))
+        })
+        .min_by(|a, b| a.1.total_cmp(&b.1))
+        .map(|(r, _)| r)
 }

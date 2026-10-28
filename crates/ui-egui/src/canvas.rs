@@ -9,8 +9,8 @@ use std::sync::{Arc, Weak};
 
 use bimcraft_core::geom::{self, P2};
 use bimcraft_core::model::{
-    Clearance, Column, Component, DEFAULT_HEIGHT, DimKind, Dimension, Element, Extrusion, Face, Id, Landing, Line, MAX_COORD, Mass, Model,
-    RISER, Ramp, Reference, Roof, Section, Spot, Stair, TOL, TREAD, Tag, Wall,
+    Clearance, Column, Component, DEFAULT_HEIGHT, DimKind, Dimension, Element, Extrusion, Id, Landing, Line, MAX_COORD, Mass, Model, RISER,
+    Ramp, Reference, Roof, Section, Spot, Stair, TOL, TREAD, Tag, Wall,
 };
 use bimcraft_core::render::{self, Drawing, Prim, Rgb, View};
 use bimcraft_core::snap::{self, Found, Kind, Reach};
@@ -793,6 +793,16 @@ pub(crate) fn box_shapes(rect: Rect, from: (f32, f32), q: (f32, f32)) -> Vec<Sha
     }
 }
 
+/// What the Dimension tool takes of element `id` at `p`, after `refs`: an end of one of its lines within `near` mm (a wall's
+/// end or corner, a line's or a grid's end, a jamb's), as Archicad and Revit snap to them, else one of its lines parallel
+/// to the first line picked.
+fn dimension_pick(m: &Model, refs: &[Reference], id: Id, p: P2, near: f64) -> Option<Reference> {
+    if let Some((r, _)) = m.endpoint_at(id, p).filter(|(_, d)| *d <= near) {
+        return Some(r);
+    }
+    reference_for(m, DimKind::Aligned, refs.iter().find(|r| r.point.is_none()), id, p, near)
+}
+
 /// Of element `id`'s lines that a dimension of `kind` can take after `first` (for an aligned one,
 /// parallel to it; for an angular one, across it), the nearest `p`, if it's within `near` mm: a
 /// wall's far end isn't picked by a click on its middle.
@@ -1045,16 +1055,15 @@ impl BimApp {
             Tool::Mirror { draw: false, .. } => d.pick(q, PICK).filter(|id| !model.reference_lines(*id).is_empty()),
             // Something to measure to: with a line parallel to the first one picked, or for an angle,
             // one across it.
-            Tool::Dimension(refs) => d
-                .pick_all(q, PICK)
-                .into_iter()
-                .find(|id| reference_for(&model, DimKind::Aligned, refs.first(), *id, view.mm(q), near).is_some()),
+            Tool::Dimension(_, refs) => {
+                d.pick_all(q, PICK).into_iter().find(|id| dimension_pick(&model, refs, *id, view.mm(q), near).is_some())
+            }
             Tool::Angular(refs) if refs.len() < 2 => d
                 .pick_all(q, PICK)
                 .into_iter()
                 .find(|id| reference_for(&model, DimKind::Angular, refs.first(), *id, view.mm(q), near).is_some()),
-            Tool::Radial(None) => {
-                d.pick_all(q, PICK).into_iter().find(|id| model.reference_arc(&Reference::line(model.guid(*id), Face::Centre)).is_ok())
+            Tool::Round(kind, None) => {
+                d.pick_all(q, PICK).into_iter().find(|id| bimcraft_core::dims::round_at(&model, *id, view.mm(q), *kind).is_some())
             }
             // What a spot elevation would read.
             Tool::Spot => model.spot_host(level, view.mm(q)),
@@ -1614,21 +1623,29 @@ impl BimApp {
             }
             // Paint works in the 3D view, which it opens; a plan's tool goes back to Modify.
             Tool::Paint | Tool::Unpaint => {}
-            // A reference under the cursor joins the dimension; a click away from them places it.
-            Tool::Dimension(refs) => {
-                let mut refs = refs.clone();
-                match hovered.and_then(|id| reference_for(m, DimKind::Aligned, refs.first(), id, v.mm(at), 2.0 * f64::from(PICK) / v.scale))
-                {
+            // An endpoint or a reference under the cursor joins the dimension; a click away from them places it, laid as
+            // its mode says.
+            Tool::Dimension(mode, refs) => {
+                let (mode, mut refs) = (*mode, refs.clone());
+                match hovered.and_then(|id| dimension_pick(m, &refs, id, v.mm(at), 2.0 * f64::from(PICK) / v.scale)) {
                     Some(r) => {
                         if !refs.contains(&r) {
                             refs.push(r);
                         }
-                        self.tool = Tool::Dimension(refs);
+                        self.tool = Tool::Dimension(mode, refs);
                     }
                     None if refs.len() >= 2 => {
-                        let p = json!({"refs": refs, "at": point(round(v.mm(at))), "level": key});
+                        let at = round(v.mm(at));
+                        let (kind, orient) = mode.kind(m, &refs, at);
+                        let mut p = json!({"kind": kind, "refs": refs, "at": point(at), "level": key});
+                        if let Some(o) = orient {
+                            p["orient"] = json!(o);
+                        }
+                        if let Some(t) = self.dimension_type_for(kind) {
+                            p["type"] = json!(t);
+                        }
                         if self.run("dimension", p).is_some() {
-                            self.tool = Tool::Dimension(Vec::new());
+                            self.tool = Tool::Dimension(mode, Vec::new());
                         }
                     }
                     None => {}
@@ -1652,11 +1669,15 @@ impl BimApp {
                     _ => {}
                 }
             }
-            &Tool::Radial(picked) => match (picked, hovered) {
-                (None, Some(id)) => self.tool = Tool::Radial(Some(Reference::line(m.guid(id), Face::Centre))),
+            &Tool::Round(kind, picked) => match (picked, hovered) {
+                (None, Some(id)) => self.tool = Tool::Round(kind, bimcraft_core::dims::round_at(m, id, v.mm(at), kind)),
                 (Some(r), _) => {
-                    if self.run("dimension", json!({"kind": "radial", "refs": [r], "at": point(round(v.mm(at))), "level": key})).is_some() {
-                        self.tool = Tool::Radial(None);
+                    let mut p = json!({"kind": kind, "refs": [r], "at": point(round(v.mm(at))), "level": key});
+                    if let Some(t) = self.dimension_type_for(kind) {
+                        p["type"] = json!(t);
+                    }
+                    if self.run("dimension", p).is_some() {
+                        self.tool = Tool::Round(kind, None);
                     }
                 }
                 (None, None) => {}
@@ -2890,24 +2911,31 @@ impl BimApp {
                 }
                 return;
             }
-            // The references picked, the one under the cursor, else the dimension a click places.
-            Tool::Dimension(refs) => {
-                let candidate =
-                    hovered.and_then(|id| reference_for(m, DimKind::Aligned, refs.first(), id, v.mm(q), 2.0 * f64::from(PICK) / v.scale));
+            // The references and endpoints picked, the one under the cursor, else the dimension a click places.
+            Tool::Dimension(mode, refs) => {
+                let candidate = hovered.and_then(|id| dimension_pick(m, refs, id, v.mm(q), 2.0 * f64::from(PICK) / v.scale));
                 for r in refs.iter().chain(&candidate) {
-                    if let Ok((a, b)) = m.reference_line(r) {
-                        dashed(sc.screen(a), sc.screen(b));
+                    match (r.point, m.reference_geometry(r)) {
+                        (Some(_), Ok((a, _))) => {
+                            let c = sc.screen(a);
+                            p.rect_stroke(Rect::from_center_size(c, vec2(9.0, 9.0)), 0.0, stroke, StrokeKind::Middle);
+                        }
+                        (None, Ok((a, b))) => dashed(sc.screen(a), sc.screen(b)),
+                        _ => {}
                     }
                 }
                 if candidate.is_none() && refs.len() >= 2 {
+                    let at = round(v.mm(q));
+                    let (kind, orient) = mode.kind(m, refs, at);
+                    let type_name = self.dimension_type_for(kind).unwrap_or_default();
                     sketched(&Element::Dimension(Dimension {
                         level: m.guid(level),
                         view: in_view(),
-                        kind: DimKind::Aligned,
-                        orient: None,
+                        kind,
+                        orient,
                         refs: refs.clone(),
-                        at: round(v.mm(q)),
-                        type_name: bimcraft_core::dims::default_type(&m.dimension_types, DimKind::Aligned).cloned().unwrap_or_default(),
+                        at,
+                        type_name,
                         ..Dimension::default()
                     }));
                 }
@@ -2949,15 +2977,14 @@ impl BimApp {
                 }
                 return;
             }
-            &Tool::Radial(Some(r)) => {
+            &Tool::Round(kind, Some(r)) => {
                 sketched(&Element::Dimension(Dimension {
                     level: m.guid(level),
                     view: in_view(),
-                    kind: DimKind::Radial,
-                    orient: None,
+                    kind,
                     refs: vec![r],
                     at: round(v.mm(q)),
-                    type_name: bimcraft_core::dims::default_type(&m.dimension_types, DimKind::Radial).cloned().unwrap_or_default(),
+                    type_name: self.dimension_type_for(kind).unwrap_or_default(),
                     ..Dimension::default()
                 }));
                 return;
