@@ -5141,3 +5141,45 @@ fn room_separators_split_rooms_without_walls_and_survive_ifc() {
     areas.sort_by(f64::total_cmp);
     assert_eq!(areas, vec![18.0, 30.0]);
 }
+
+#[test]
+fn rooms_measure_at_the_wall_centre_lines_or_at_their_faces() {
+    let mut s = Session::new();
+    house(&mut s);
+    let t = run(&mut s, "elements", json!({"category": "wall"}))["elements"][0]["thickness"].as_f64().unwrap();
+    run(&mut s, "room", json!({"point": [4000, 3000], "name": "Living"}));
+    let area = |s: &mut Session| run(s, "elements", json!({"category": "room"}))["elements"][0]["area_m2"].as_f64().unwrap();
+    assert_eq!(run(&mut s, "room_area", json!({}))["at"], "centre", "as a project starts");
+    assert_eq!(area(&mut s), 48.0);
+    // At the faces: the floor inside the walls, half a wall in from each centre line.
+    assert_eq!(run(&mut s, "room_area", json!({"at": "finish"}))["at"], "finish");
+    let inside = (8000.0 - t) * (6000.0 - t) / 1e6;
+    assert!((area(&mut s) - inside).abs() < 1e-6, "{} vs {inside}", area(&mut s));
+    // A partition takes its faces too.
+    run(&mut s, "wall", json!({"points": [[5000, 0], [5000, 6000]], "type": "Interior - 100mm"}));
+    let left = (5000.0 - t / 2.0 - 50.0) * (6000.0 - t) / 1e6;
+    assert!((area(&mut s) - left).abs() < 1e-6, "{} vs {left}", area(&mut s));
+    // It is kept with the project and undone like any change.
+    let file = serde_json::to_value(&*s.model).unwrap();
+    assert_eq!(file["room_area"], "finish");
+    assert!(s.execute("room_area", &json!({"at": "core"})).unwrap_err().contains("centre or finish"));
+    assert!(s.execute("room_area", &json!({"to": "finish"})).is_err());
+
+    // IFC: the space follows the setting; its quantities give both, gross at the centre lines and net at the faces.
+    let ifc = crate::ifc::export(&s.model);
+    assert!(ifc.contains("'Qto_SpaceBaseQuantities'"), "{ifc}");
+    let q = |name: &str| -> f64 {
+        let at = ifc.find(&format!("IFCQUANTITYAREA('{name}',$,$,")).unwrap_or_else(|| panic!("no {name}"));
+        let rest = &ifc[at..];
+        let v = rest.split(',').nth(3).unwrap();
+        v.parse().unwrap()
+    };
+    assert!((q("GrossFloorArea") - 30.0).abs() < 1e-6);
+    assert!((q("NetFloorArea") - left).abs() < 1e-4);
+    assert!(ifc.contains("IFCQUANTITYLENGTH('Height',$,$,3000.,$)"), "{ifc}");
+
+    run(&mut s, "undo", json!({}));
+    run(&mut s, "undo", json!({}));
+    assert_eq!(area(&mut s), 48.0, "back at the centre lines");
+    assert!(serde_json::to_value(&*s.model).unwrap().get("room_area").is_none(), "a project at the centre lines doesn't say so");
+}

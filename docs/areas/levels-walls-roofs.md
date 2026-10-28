@@ -25,7 +25,10 @@ sections and IFC all draw that outline (`walls::outline`, `walls::prisms`). Room
 lines, run on or back to meet at joins (`walls::centre_line`). A room separator (`roomseparator`, made by `room_separator` a line per segment) bounds rooms as a wall's centre line
 would and nothing else: it is no edge of a floor, a ceiling or a roof (`Model::bounding_lines` takes it, `wall_lines` and
 `face_lines` don't), it is drawn in plan only, and it goes to IFC as an `IfcVirtualElement` of `ObjectType` `RoomSeparation`
-with an `Axis` polyline on its storey, which the import reads back. An attached top or base follows the roof's or floor's plane
+with an `Axis` polyline on its storey, which the import reads back. With `room_area {at: "finish"}` (`Model::room_area`, Revit's Area and
+Volume Computations) they are measured at the walls' faces instead (`face_lines`), the floor inside them; the IFC space
+takes that outline, and its `Qto_SpaceBaseQuantities` give both whichever is set: `GrossFloorArea` and `GrossPerimeter` at
+the centre lines, `NetFloorArea` and `NetPerimeter` at the faces, and `Height` up to the level above. An attached top or base follows the roof's or floor's plane
 over each part of the wall (a roof's slopes each over its own part of the plan); a mirrored wall runs back the other way.
 A roof by footprint is the straight skeleton of its outline and its `courtyards` (`skeleton::faces`: the outline
 counter-clockwise, the courtyards clockwise, the roof to the left of every edge): each edge moves in at speed 1, a gable's at

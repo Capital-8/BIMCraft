@@ -22,8 +22,8 @@ use crate::model::{
     CEILING_HEIGHT, Ceiling, CeilingType, Column, ColumnType, Component, DEFAULT_HEIGHT, DimKind, Dimension, Element, Extrusion, Face,
     Facing, Floor, FloorType, Grid, Guid, Id, Key, Landing, Layer, Level, Line, Location, MAX_COORD, MAX_POINTS, MAX_SLOPE, MAX_TEXT, Mass,
     Model, NOTE_SIZE, Note, Opening, OpeningType, PARAMETER_CATEGORIES, ParameterKind, Pattern, PlanView, PointCloud, ProjectParameter,
-    RAMP_SLOPE, RAMP_WIDTH, RISER, Railing, RailingType, Ramp, Reference, Roof, RoofType, Room, RoomSeparator, STAIR_WIDTH, Schedule,
-    Section, SectionBox, Shaft, Sheet, Side, Spot, Stair, TOL, TREAD, Tag, View3D, Viewport, Wall, WallType, heading, paper,
+    RAMP_SLOPE, RAMP_WIDTH, RISER, Railing, RailingType, Ramp, Reference, Roof, RoofType, Room, RoomArea, RoomSeparator, STAIR_WIDTH,
+    Schedule, Section, SectionBox, Shaft, Sheet, Side, Spot, Stair, TOL, TREAD, Tag, View3D, Viewport, Wall, WallType, heading, paper,
 };
 use crate::paint;
 use crate::phasing;
@@ -1058,6 +1058,16 @@ pub static ALL: &[Command] = &[
          millimetres, centimetres, metres, fractional inches, decimal feet, or feet and fractional inches (to 1/16\"); areas \
          in m², or ft² with inches and feet. The model, and every command, keep millimetres",
         units,
+    ),
+    edit(
+        "room_area",
+        "Area and Volume Computations",
+        &[],
+        "{at?: centre|finish} where the project measures its rooms' areas, perimeters and IFC spaces, as Revit's Area and \
+         Volume Computations: at the walls' centre lines (`centre`, as a project starts) or at their finish faces \
+         (`finish`, the floor inside the walls: the área útil Brazilian codes ask for). Rooms keep their points; only their \
+         measured outline changes. IFC spaces carry both areas in Qto_SpaceBaseQuantities whichever is chosen",
+        room_area,
     ),
     edit(
         "language",
@@ -7183,6 +7193,18 @@ fn units(s: &mut Session, p: &Value) -> R {
         }
     }
     Ok(json!({"length": s.model.units.name()}))
+}
+
+fn room_area(s: &mut Session, p: &Value) -> R {
+    let c = "room_area";
+    only(c, p, &["at"])?;
+    if let Some(name) = string(c, p, "at")? {
+        let at = RoomArea::parse(&name).ok_or_else(|| bad(c, format!("`at` is centre or finish, not `{name}`")))?;
+        if at != s.model.room_area {
+            s.model_mut().room_area = at;
+        }
+    }
+    Ok(json!({"at": s.model.room_area.name()}))
 }
 
 /// `kind` `from` is called `to` now: its library entry, and everything that names it.

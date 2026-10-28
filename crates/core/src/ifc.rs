@@ -15,7 +15,7 @@ use std::fmt::Write;
 use crate::geom::{self, P2};
 use serde_json::Value;
 
-use crate::model::{DEFAULT_HEIGHT, Element, Function, Guid, Id, Layer, Model, ParameterKind, Railing, heading, mix};
+use crate::model::{DEFAULT_HEIGHT, Element, Function, Guid, Id, Layer, Model, ParameterKind, Railing, RoomArea, heading, mix};
 use crate::phasing;
 use crate::stairs;
 use crate::view3d::P3;
@@ -54,6 +54,8 @@ const SYSTEMS: u64 = 45;
 const SYSTEM_MEMBERS: u64 = 46;
 const LOFTED: u64 = 47;
 const LOFTED_DEFINES: u64 = 48;
+const QUANTITIES: u64 = 49;
+const QUANTITY_DEFINES: u64 = 50;
 
 /// The property set an element's values of the project's parameters go in.
 pub const PARAMETERS: &str = "Project Parameters";
@@ -224,6 +226,13 @@ impl Step {
     fn define(&mut self, ent: u64, name: &str, props: &[u64], (set, relation): (u64, u64), key: u64) {
         let set = self.add(format!("IFCPROPERTYSET({},$,{},$,({}))", self.guid(set, key), s(name), refs(props)));
         self.add(format!("IFCRELDEFINESBYPROPERTIES({},$,$,$,(#{ent}),#{set})", self.guid(relation, key)));
+    }
+
+    /// Quantity set `name` of `(name, kind, value)` for `ent`: kind `AREA` in m², `LENGTH` in mm.
+    fn quantities(&mut self, ent: u64, name: &str, values: &[(&str, &str, f64)], key: u64) {
+        let qs: Vec<u64> = values.iter().map(|(n, kind, v)| self.add(format!("IFCQUANTITY{kind}({},$,$,{},$)", s(n), real(*v)))).collect();
+        let set = self.add(format!("IFCELEMENTQUANTITY({},$,{},$,$,({}))", self.guid(QUANTITIES, key), s(name), refs(&qs)));
+        self.add(format!("IFCRELDEFINESBYPROPERTIES({},$,$,$,(#{ent}),#{set})", self.guid(QUANTITY_DEFINES, key)));
     }
 
     /// A material by name, written once; one the library has, with its colour, for viewers to
@@ -602,9 +611,9 @@ pub fn export(m: &Model) -> String {
                 let Some(&(_, storey)) = storeys.get(&r.level) else { continue };
                 let at = w.place(Some(storey), (0.0, 0.0, 0.0), None);
                 // A room that isn't enclosed has no shape to give.
+                let height = m.level_above(r.level).map_or(DEFAULT_HEIGHT, |up| m.elevation(up) - m.elevation(r.level));
                 let shape = match m.room_region(r) {
                     Some(region) => {
-                        let height = m.level_above(r.level).map_or(DEFAULT_HEIGHT, |up| m.elevation(up) - m.elevation(r.level));
                         let profile = w.profile(&region.outer, &region.holes);
                         format!("#{}", w.body(profile, 0.0, height, &[]))
                     }
@@ -616,6 +625,17 @@ pub fn export(m: &Model) -> String {
                     s(&r.number),
                     s(&r.name)
                 ));
+                // Its areas both ways: gross at the walls' centre lines, net at their faces.
+                if let (Some(gross), Some(net)) = (m.room_region_at(r, RoomArea::Centre), m.room_region_at(r, RoomArea::Finish)) {
+                    let values = [
+                        ("Height", "LENGTH", height),
+                        ("GrossPerimeter", "LENGTH", gross.perimeter()),
+                        ("NetPerimeter", "LENGTH", net.perimeter()),
+                        ("GrossFloorArea", "AREA", gross.area() / 1e6),
+                        ("NetFloorArea", "AREA", net.area() / 1e6),
+                    ];
+                    w.quantities(ent, "Qto_SpaceBaseQuantities", &values, id);
+                }
                 spaces.entry(r.level).or_default().push(ent);
                 products.insert(id, ent);
             }

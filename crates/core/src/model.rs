@@ -1733,6 +1733,36 @@ impl ProjectParameter {
     }
 }
 
+/// Where a project measures its rooms' areas and perimeters (Revit's Area and Volume Computations).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum RoomArea {
+    /// At the walls' centre lines.
+    #[default]
+    Centre,
+    /// At the walls' finish faces: the floor inside them.
+    Finish,
+}
+
+impl RoomArea {
+    pub const ALL: [RoomArea; 2] = [RoomArea::Centre, RoomArea::Finish];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            RoomArea::Centre => "centre",
+            RoomArea::Finish => "finish",
+        }
+    }
+
+    pub fn parse(name: &str) -> Option<RoomArea> {
+        RoomArea::ALL.into_iter().find(|a| a.name() == name)
+    }
+
+    fn is_default(&self) -> bool {
+        *self == RoomArea::default()
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Model {
@@ -1748,6 +1778,9 @@ pub struct Model {
     /// What its drawings say, and the names commands give.
     #[serde(default)]
     pub language: Language,
+    /// Where room areas are measured: at the walls' centre lines, or at their finish faces.
+    #[serde(default, skip_serializing_if = "RoomArea::is_default")]
+    pub room_area: RoomArea,
     pub next_id: Id,
     pub types: Types,
     /// What layers are made of, by name.
@@ -1840,6 +1873,7 @@ impl Model {
             uid: fresh_uid(),
             units: Units::default(),
             language,
+            room_area: RoomArea::default(),
             next_id: FIRST_ID,
             types: Types::default(),
             materials: BTreeMap::new(),
@@ -3702,10 +3736,24 @@ impl Model {
             .collect()
     }
 
-    /// A room's boundary, from the walls around its point. `None` when it isn't enclosed.
-    /// Areas are measured at the wall centre lines (Revit's "At wall centerline" setting).
+    /// A room's boundary, from the walls around its point, where the project measures rooms (`room_area`). `None` when it
+    /// isn't enclosed.
     pub fn room_region(&self, r: &Room) -> Option<Region> {
-        geom::region_at(&self.bounding_lines(r.level), r.point, TOL)
+        self.room_region_at(r, self.room_area)
+    }
+
+    /// A room's boundary measured at `at`: the walls' centre lines (Revit's "At wall centerline") or their faces ("At wall
+    /// finish": the area inside the walls, which Brazilian codes call área útil).
+    pub fn room_region_at(&self, r: &Room, at: RoomArea) -> Option<Region> {
+        geom::region_at(&self.room_lines(r.level, at), r.point, TOL)
+    }
+
+    /// The lines rooms on `level` are found among, measured at `at`.
+    pub fn room_lines(&self, level: impl Key, at: RoomArea) -> Vec<(P2, P2)> {
+        match at {
+            RoomArea::Centre => self.bounding_lines(level),
+            RoomArea::Finish => self.face_lines(level),
+        }
     }
 
     /// What a detail line, a filled region or a text note must be, wherever it is: in a view or in a detail group.
