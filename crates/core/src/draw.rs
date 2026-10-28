@@ -9,6 +9,8 @@
 //! spline through points and a polyline, which Revit's detail lines don't have. Fillet Arc rounds two lines already
 //! drawn ([`crate::curves::fillet`]), and Pick Lines copies one ([`pick`]).
 
+use bimcraft_i18n::ui_msg;
+
 use serde::{Deserialize, Serialize};
 
 use crate::curves::{self, Curve};
@@ -99,21 +101,21 @@ impl Shape {
     pub fn label(self) -> &'static str {
         match self {
             Shape::Line => "Line",
-            Shape::Rectangle => "Rectangle",
-            Shape::Inscribed => "Inscribed Polygon",
-            Shape::Circumscribed => "Circumscribed Polygon",
+            Shape::Rectangle => ui_msg!("Rectangle"),
+            Shape::Inscribed => ui_msg!("Inscribed Polygon"),
+            Shape::Circumscribed => ui_msg!("Circumscribed Polygon"),
             Shape::Circle => "Circle",
-            Shape::Arc => "Start-End-Radius Arc",
-            Shape::CentreArc => "Center-ends Arc",
-            Shape::TangentArc => "Tangent End Arc",
+            Shape::Arc => ui_msg!("Start-End-Radius Arc"),
+            Shape::CentreArc => ui_msg!("Center-ends Arc"),
+            Shape::TangentArc => ui_msg!("Tangent End Arc"),
             Shape::Fillet => "Fillet Arc",
-            Shape::Spline => "Spline",
-            Shape::FitSpline => "Spline Through Points",
-            Shape::Ellipse => "Ellipse",
-            Shape::PartialEllipse => "Partial Ellipse",
-            Shape::Polyline => "Polyline",
-            Shape::PickLines => "Pick Lines",
-            Shape::PickFaces => "Pick Faces",
+            Shape::Spline => ui_msg!("Spline"),
+            Shape::FitSpline => ui_msg!("Spline Through Points"),
+            Shape::Ellipse => ui_msg!("Ellipse"),
+            Shape::PartialEllipse => ui_msg!("Partial Ellipse"),
+            Shape::Polyline => ui_msg!("Polyline"),
+            Shape::PickLines => ui_msg!("Pick Lines"),
+            Shape::PickFaces => ui_msg!("Pick Faces"),
         }
     }
 

@@ -856,7 +856,7 @@ pub static ALL: &[Command] = &[
     ),
     edit(
         "fillet",
-        "Fillet Arc",
+        ui_msg!("Fillet Arc"),
         &["FL"],
         "{ids: [a, b], radius} rounds the corner where two straight detail lines, or two straight walls, meet (or would, \
          extended) with an arc of `radius` mm, in the first's line style or of the first's type: each is cut back to the arc",

@@ -160,7 +160,7 @@ fn rows(category: &str) -> &'static [Row] {
             ("Dimensions", "area_m2", "Area", AreaShown),
             ("Dimensions", "thickness", "Thickness", LengthShown),
             ("Structural", "structural", "Structural", Flag),
-            ("Graphics", "pattern_angle", "Pattern Angle (°)", Number),
+            ("Graphics", "pattern_angle", msg!("Pattern Angle (°)"), Number),
         ],
         "ceiling" => &[
             ("Constraints", "level", "Level", Level),
@@ -205,10 +205,10 @@ fn rows(category: &str) -> &'static [Row] {
         "line" => &[
             ("Graphics", "style", "Line Style", LineStyle),
             ("Dimensions", "length", "Length", LengthShown),
-            ("Graphics", "centre_mark", "Center Mark Visible", Flag),
-            ("Dimensions", "insulation", "Insulation Width", LengthIf),
-            ("Dimensions", "cloud", "Arc Length", LengthIf),
-            ("Identity Data", "revision", "Revision", Text),
+            ("Graphics", "centre_mark", msg!("Center Mark Visible"), Flag),
+            ("Dimensions", "insulation", msg!("Insulation Width"), LengthIf),
+            ("Dimensions", "cloud", msg!("Arc Length"), LengthIf),
+            ("Identity Data", "revision", msg!("Revision"), Text),
             ("Other", "shape", "Shape", Shown),
         ],
         "region" => &[
@@ -219,7 +219,7 @@ fn rows(category: &str) -> &'static [Row] {
         "detailgroup" => &[
             ("Identity Data", "type", "Group", Shown),
             ("Other", "angle", "Rotation (°)", Number),
-            ("Other", "mirrored", "Mirrored", Flag),
+            ("Other", "mirrored", msg!("Mirrored"), Flag),
             ("Other", "at", "Origin", Point),
         ],
         "repeatingdetail" => &[
@@ -337,13 +337,13 @@ fn rows(category: &str) -> &'static [Row] {
         ],
         "cadimport" => &[
             ("Constraints", "level", "Level", Level),
-            ("Identity Data", "cad", "Drawing", Shown),
+            ("Identity Data", "cad", msg!("Drawing"), Shown),
             ("Identity Data", "source", "File", Shown),
-            ("Identity Data", "linked", "Linked File", Shown),
+            ("Identity Data", "linked", msg!("Linked File"), Shown),
             ("Identity Data", "unit", "Units", Shown),
-            ("Identity Data", "entities", "Entities", Shown),
+            ("Identity Data", "entities", msg!("Entities"), Shown),
             ("Identity Data", "layers", "Layers", Shown),
-            ("Other", "at", "Position", Point),
+            ("Other", "at", msg!("Position"), Point),
             ("Other", "angle", "Angle", Number),
             ("Other", "scale", "Scale", Number),
             ("Graphics", "colors", "Colors", Choice(&[("preserve", "Preserve"), ("invert", "Invert"), ("black", "Black and White")])),

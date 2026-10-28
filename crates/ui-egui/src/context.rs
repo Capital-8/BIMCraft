@@ -40,7 +40,7 @@ impl Action {
     pub(crate) fn label(self) -> &'static str {
         match self {
             Action::Cancel => "Cancel",
-            Action::Finish => "Finish Drawing",
+            Action::Finish => msg!("Finish Drawing"),
             Action::ZoomToFit => "Zoom to Fit",
             Action::ZoomIn => "Zoom In",
             Action::ZoomOut => "Zoom Out",
@@ -50,10 +50,10 @@ impl Action {
             Action::HideElement => "Hide Element",
             Action::HideCategory => "Hide Category",
             Action::OverrideGraphics => "Override Graphics",
-            Action::CreateGroup => "Create Group",
-            Action::Ungroup => "Ungroup",
+            Action::CreateGroup => msg!("Create Group"),
+            Action::Ungroup => msg!("Ungroup"),
             Action::Delete => "Delete",
-            Action::ReloadCad => "Reload CAD",
+            Action::ReloadCad => msg!("Reload CAD"),
         }
     }
 

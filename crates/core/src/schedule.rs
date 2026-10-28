@@ -449,7 +449,7 @@ const MORE: &[(&str, usize, &[Own])] = &[
     ("section", 0, &[NAME]),
     ("elevation", 0, &[NAME]),
     ("sheet", 0, &[("Number", Kind::Text, From::Key("number")), NAME]),
-    ("viewport", 0, &[("Title", Kind::Text, From::Key("title"))]),
+    ("viewport", 0, &[(ui_msg!("Title"), Kind::Text, From::Key("title"))]),
 ];
 
 /// The categories schedules are of, as `OWN` lists them.

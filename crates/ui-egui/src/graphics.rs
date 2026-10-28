@@ -31,7 +31,7 @@ use crate::{BimApp, Sheet, Status};
 
 /// Visibility/Graphics' tabs.
 const TABS: [&str; 6] =
-    [msg!("Model Categories"), msg!("Annotation Categories"), "Imported Categories", "Filters", "Elements", "Design Options"];
+    [msg!("Model Categories"), msg!("Annotation Categories"), msg!("Imported Categories"), "Filters", "Elements", "Design Options"];
 
 /// The Elements tab's place in [`TABS`].
 pub(crate) const ELEMENTS_TAB: usize = 4;

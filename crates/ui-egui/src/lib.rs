@@ -317,8 +317,8 @@ const SHORTCUTS: [(&str, &str); 50] = [
     ("SI", msg!("Snap to Intersections")),
     ("SC", msg!("Snap to Centres")),
     ("SP", msg!("Snap to Perpendiculars")),
-    ("SQ", "Snap to Quadrants"),
-    ("ST", "Snap to Tangents"),
+    ("SQ", msg!("Snap to Quadrants")),
+    ("ST", msg!("Snap to Tangents")),
     ("SN", msg!("Snap to Nearest")),
     ("SO", msg!("Snaps Off")),
     ("SS", msg!("Turn Snap Override Off")),
@@ -1132,11 +1132,11 @@ impl BimApp {
             Tool::Grid(_) => Some(msg!("Place Grid")),
             Tool::Dimension(_) | Tool::Angular(_) | Tool::Radial(_) => Some(msg!("Place Dimensions")),
             Tool::Text => Some(msg!("Place Text")),
-            Tool::DetailGroup => Some("Place Detail Group"),
-            Tool::RepeatingDetail(_) => Some("Place Repeating Detail"),
-            Tool::DetailLine(_) if self.drawing.insulation.is_some() => Some("Place Insulation"),
-            Tool::DetailLine(_) if self.drawing.cloud.is_some() => Some("Place Revision Cloud"),
-            Tool::DetailLine(_) => Some("Place Detail Lines"),
+            Tool::DetailGroup => Some(msg!("Place Detail Group")),
+            Tool::RepeatingDetail(_) => Some(msg!("Place Repeating Detail")),
+            Tool::DetailLine(_) if self.drawing.insulation.is_some() => Some(msg!("Place Insulation")),
+            Tool::DetailLine(_) if self.drawing.cloud.is_some() => Some(msg!("Place Revision Cloud")),
+            Tool::DetailLine(_) => Some(msg!("Place Detail Lines")),
             Tool::Spot => Some("Spot Elevation"),
             Tool::Measure(_) => Some("Measure"),
             Tool::Tag => Some("Tag"),
@@ -2843,7 +2843,7 @@ impl BimApp {
                 self.set_tool(Tool::Modify);
             }
             if !self.selection.is_empty() {
-                let tip = "Filter: keep some of the selection, by category or by the values of a parameter they all have";
+                let tip = msg!("Filter: keep some of the selection, by category or by the values of a parameter they all have");
                 if big_button(ui, Icon::Filter, "Filter", self.selection_filter.is_some(), tip).clicked() {
                     self.open_filter();
                 }
@@ -3115,7 +3115,7 @@ impl BimApp {
                 self.thin = !self.thin;
             }
             let dark = style::dark();
-            let tip = "Choose a theme, including a dark interface with a light canvas";
+            let tip = msg!("Choose a theme, including a dark interface with a light canvas");
             let r = big_button(ui, Icon::Theme, "Dark Mode", dark, tip);
             let at = r.rect.right_top() + vec2(-8.0, 9.0);
             ui.painter().add(egui::Shape::convex_polygon(
@@ -3258,14 +3258,17 @@ impl BimApp {
             if big_button(ui, Icon::PointCloud, "Point Cloud", self.cloud_box.is_some(), tip).clicked() {
                 self.cloud_dialog = true;
             }
-            let tip =
-                "Link CAD: a DXF drawing shown in the plans of a level, read again from its file on Reload and when the project opens";
+            let tip = msg!(
+                "Link CAD: a DXF drawing shown in the plans of a level, read again from its file on Reload and when the project opens"
+            );
             if big_button(ui, Icon::LinkCad, "Link CAD", self.cad_box.as_ref().is_some_and(|b| b.linked()), tip).clicked() {
                 self.cad_dialog = Some(true);
             }
         });
-        panel(ui, "Import", |ui| {
-            let tip = "Import CAD: a DXF drawing brought into the project, drawn under the model in the plans of a level, its layers, colours and linetypes kept, and snapped to";
+        panel(ui, msg!("Import"), |ui| {
+            let tip = msg!(
+                "Import CAD: a DXF drawing brought into the project, drawn under the model in the plans of a level, its layers, colours and linetypes kept, and snapped to"
+            );
             if big_button(ui, Icon::ImportCad, "Import CAD", self.cad_box.as_ref().is_some_and(|b| !b.linked()), tip).clicked() {
                 self.cad_dialog = Some(false);
             }
@@ -3296,7 +3299,8 @@ impl BimApp {
                 if stacked_button(ui, Icon::ObjectStyles, "Object Styles", self.object_styles_dialog.is_some(), tip).clicked() {
                     self.object_styles_dialog = Some(objectstyles::ObjectStylesDialog::new(&self.session.model));
                 }
-                let tip = "Line Styles: the pen, colour and line pattern detail lines draw in, and the patterns' dashes, dots and spaces";
+                let tip =
+                    msg!("Line Styles: the pen, colour and line pattern detail lines draw in, and the patterns' dashes, dots and spaces");
                 if stacked_button(ui, Icon::ThinLines, "Line Styles", self.line_styles_dialog.is_some(), tip).clicked() {
                     self.line_styles_dialog = Some(linestyles::LineStylesDialog::new(&self.session.model));
                 }
@@ -3309,7 +3313,7 @@ impl BimApp {
             }
             // Fills, snaps and units, stacked.
             stacked(ui, |ui| {
-                let tip = "Fill Patterns: the patterns filled regions fill with, and the filled region types";
+                let tip = msg!("Fill Patterns: the patterns filled regions fill with, and the filled region types");
                 if stacked_button(ui, Icon::FillPatterns, "Fill Patterns", self.fill_patterns_dialog.is_some(), tip).clicked() {
                     self.fill_patterns_dialog = Some(fillpatterns::FillPatternsDialog::new(&self.session.model));
                 }
@@ -3321,7 +3325,7 @@ impl BimApp {
                 }
                 let now = self.session.model.units;
                 let tip = tf("Project Units (UN): how lengths show and read; now {}", &[&t(now.label()).to_lowercase()]);
-                let r = stacked_button(ui, Icon::Units, "Project Units", false, &tip);
+                let r = stacked_button(ui, Icon::Units, msg!("Project Units"), false, &tip);
                 let asked = self.open_units;
                 let opened = ribbon::choices(ui, &r, asked, |ui| {
                     for u in Units::ALL {
@@ -3470,7 +3474,13 @@ impl BimApp {
                     Some(Tool::Align(None)),
                     true,
                 ),
-                (Icon::Offset, "Offset", "Offset (OF): pick a wall or a line; a copy goes to the cursor's side", Some(Tool::Offset), true),
+                (
+                    Icon::Offset,
+                    "Offset",
+                    msg!("Offset (OF): pick a wall or a line; a copy goes to the cursor's side"),
+                    Some(Tool::Offset),
+                    true,
+                ),
                 (
                     Icon::MirrorPick,
                     "Mirror Pick Axis",
@@ -3488,21 +3498,21 @@ impl BimApp {
                 (
                     Icon::Split,
                     msg!("Split Element"),
-                    "Split Element (SL): click a wall or a line where to split it",
+                    msg!("Split Element (SL): click a wall or a line where to split it"),
                     Some(Tool::Split),
                     true,
                 ),
                 (
                     Icon::Linework,
-                    "Linework",
-                    "Linework (LW): click an edge to draw it in another line style, or hide it, in this view only",
+                    msg!("Linework"),
+                    msg!("Linework (LW): click an edge to draw it in another line style, or hide it, in this view only"),
                     Some(Tool::Linework),
                     true,
                 ),
                 (
                     Icon::TrimSingle,
-                    "Trim/Extend Single Element",
-                    "Trim/Extend Single Element: pick the line to trim or extend to, then the line to change, on the part to keep",
+                    msg!("Trim/Extend Single Element"),
+                    msg!("Trim/Extend Single Element: pick the line to trim or extend to, then the line to change, on the part to keep"),
                     Some(Tool::TrimTo { boundary: None, many: false }),
                     true,
                 ),
@@ -3520,14 +3530,16 @@ impl BimApp {
                 (
                     Icon::Trim,
                     "Trim/Extend to Corner",
-                    "Trim/Extend to Corner (TR): pick two walls or two lines, on the parts to keep",
+                    msg!("Trim/Extend to Corner (TR): pick two walls or two lines, on the parts to keep"),
                     Some(Tool::Trim(None)),
                     true,
                 ),
                 (
                     Icon::TrimMultiple,
-                    "Trim/Extend Multiple Elements",
-                    "Trim/Extend Multiple Elements: pick the line to trim or extend to, then each line to change, on the part to keep",
+                    msg!("Trim/Extend Multiple Elements"),
+                    msg!(
+                        "Trim/Extend Multiple Elements: pick the line to trim or extend to, then each line to change, on the part to keep"
+                    ),
                     Some(Tool::TrimTo { boundary: None, many: true }),
                     true,
                 ),
@@ -3559,13 +3571,13 @@ impl BimApp {
         // Detail lines selected, or sketch lines picked: Join into Polyline and Explode Polyline.
         let picked = self.sketch.as_ref().map(|sk| sk.picked.len());
         if (self.lines_selected() && self.tool == Tool::Modify) || (picked.is_some() && self.tool == Tool::Modify) {
-            panel(ui, "Modify Lines", |ui| {
+            panel(ui, msg!("Modify Lines"), |ui| {
                 let two = picked.unwrap_or(self.selection.len()) >= 2;
-                let tip = "Join into Polyline (PJ): the lines selected, meeting end to end, become one polyline";
+                let tip = msg!("Join into Polyline (PJ): the lines selected, meeting end to end, become one polyline");
                 if ui.add_enabled_ui(two, |ui| big_button(ui, Icon::JoinPolyline, "Join into Polyline", false, tip)).inner.clicked() {
                     self.join_polyline();
                 }
-                let tip = "Explode Polyline (EX): a polyline taken apart into a line or an arc for each segment";
+                let tip = msg!("Explode Polyline (EX): a polyline taken apart into a line or an arc for each segment");
                 if big_button(ui, Icon::ExplodePolyline, "Explode Polyline", false, tip).clicked() {
                     self.explode_polyline();
                 }
@@ -3944,20 +3956,22 @@ impl BimApp {
             Tool::Mirror { draw: true, start: Some(_) } => msg!("Click the end of the mirror axis."),
             Tool::Align(None) => msg!("Pick a reference line: a grid, or a wall's face or centre line."),
             Tool::Align(Some(_)) => msg!("Pick the wall or grid to line up with the reference."),
-            Tool::Trim(None) => "Pick the first wall or line, on the part to keep.",
-            Tool::Trim(Some(_)) => "Pick the second wall or line, on the part to keep.",
-            Tool::TrimTo { boundary: None, .. } => "Pick the line to trim or extend to: a line, a wall or a grid.",
-            Tool::TrimTo { many: false, .. } => "Click the line to trim or extend to it, on the part to keep.",
-            Tool::TrimTo { many: true, .. } => "Click each line to trim or extend to it, on the part to keep; Esc picks another boundary.",
-            Tool::Vertex { delete: false } => "Click a polyline or a spline where a vertex goes.",
-            Tool::Vertex { delete: true } => "Click a polyline's corner or a spline's point to take it out.",
-            Tool::Split => "Click a wall or a line where to split it.",
-            Tool::Offset => "Point to a wall or a line: the offset goes to the cursor's side. Click to place it.",
+            Tool::Trim(None) => msg!("Pick the first wall or line, on the part to keep."),
+            Tool::Trim(Some(_)) => msg!("Pick the second wall or line, on the part to keep."),
+            Tool::TrimTo { boundary: None, .. } => msg!("Pick the line to trim or extend to: a line, a wall or a grid."),
+            Tool::TrimTo { many: false, .. } => msg!("Click the line to trim or extend to it, on the part to keep."),
+            Tool::TrimTo { many: true, .. } => {
+                msg!("Click each line to trim or extend to it, on the part to keep; Esc picks another boundary.")
+            }
+            Tool::Vertex { delete: false } => msg!("Click a polyline or a spline where a vertex goes."),
+            Tool::Vertex { delete: true } => msg!("Click a polyline's corner or a spline's point to take it out."),
+            Tool::Split => msg!("Click a wall or a line where to split it."),
+            Tool::Offset => msg!("Point to a wall or a line: the offset goes to the cursor's side. Click to place it."),
             Tool::Demolish => msg!("Click an element to take it down in the view's phase; click it again to take it back."),
-            Tool::Linework => "Click an edge to draw it in the line style in the Options Bar; <By Category> puts it back.",
-            Tool::DetailGroup => "Click where the group's origin goes.",
-            Tool::RepeatingDetail(None) => "Click where the repeating detail starts.",
-            Tool::RepeatingDetail(Some(_)) => "Click where it ends: the group repeats along the line every spacing.",
+            Tool::Linework => msg!("Click an edge to draw it in the line style in the Options Bar; <By Category> puts it back."),
+            Tool::DetailGroup => msg!("Click where the group's origin goes."),
+            Tool::RepeatingDetail(None) => msg!("Click where the repeating detail starts."),
+            Tool::RepeatingDetail(Some(_)) => msg!("Click where it ends: the group repeats along the line every spacing."),
             Tool::Paint => msg!("Click a face to paint it with the material in the Options Bar; the 3D view orbits as ever."),
             Tool::Unpaint => msg!("Click a painted face to take its paint off."),
             Tool::Dimension(refs) if refs.is_empty() => {
@@ -4012,11 +4026,11 @@ impl BimApp {
             Tool::Mass(pts) if pts.is_empty() => msg!("Click the first corner of the mass's footprint."),
             Tool::Mass(pts) if pts.len() < 3 => msg!("Click the footprint's next corner. Esc cancels."),
             Tool::Mass(_) => msg!("Click the next corner; Enter, or the first corner again, finishes the mass. Esc cancels."),
-            Tool::DetailLine(pts) if pts.is_empty() => "Click where the detail line starts.",
+            Tool::DetailLine(pts) if pts.is_empty() => msg!("Click where the detail line starts."),
             Tool::DetailLine(_) => "Click its next point; Enter finishes it, the first point again closes it. Esc cancels.",
             Tool::SlopeArrow(None) => msg!("Click the slope arrow's tail: where the floor's top stays at its height offset."),
             Tool::SlopeArrow(Some(_)) => msg!("Click its head: the floor rises toward it at the Options Bar's slope. Esc cancels."),
-            Tool::SketchLine(_) | Tool::SketchPick => "Click where the line starts.",
+            Tool::SketchLine(_) | Tool::SketchPick => msg!("Click where the line starts."),
         }
     }
 

@@ -302,10 +302,10 @@ impl BimApp {
     pub(crate) fn theme_choices(&mut self, ui: &mut Ui, menu: bool) {
         let current = (ui.ctx().options(|o| o.theme_preference), self.light_canvas);
         for (label, theme, light_canvas) in [
-            ("As the System", ThemePreference::System, false),
-            ("Light", ThemePreference::Light, false),
-            ("Dark", ThemePreference::Dark, false),
-            ("Dark UI, Light Canvas", ThemePreference::Dark, true),
+            (msg!("As the System"), ThemePreference::System, false),
+            (msg!("Light"), ThemePreference::Light, false),
+            (msg!("Dark"), ThemePreference::Dark, false),
+            (msg!("Dark UI, Light Canvas"), ThemePreference::Dark, true),
         ] {
             if ui.radio(current == (theme, light_canvas), t(label)).clicked() {
                 self.light_canvas = light_canvas;
@@ -323,9 +323,9 @@ impl BimApp {
         self.theme_choices(ui, false);
         heading(ui, msg!("Layout"));
         ui.horizontal(|ui| {
-            let tip = "The ribbon, the palettes and the bars as cards floating over the view";
+            let tip = msg!("The ribbon, the palettes and the bars as cards floating over the view");
             ui.radio_value(&mut self.compact, false, t("Floating")).on_hover_text(t(tip));
-            let tip = "The ribbon, the palettes and the bars flush to the window's edges";
+            let tip = msg!("The ribbon, the palettes and the bars flush to the window's edges");
             ui.radio_value(&mut self.compact, true, t("Compact")).on_hover_text(t(tip));
         });
         heading(ui, "Language");
