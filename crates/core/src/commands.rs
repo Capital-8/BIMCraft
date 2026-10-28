@@ -651,7 +651,7 @@ pub static ALL: &[Command] = &[
         "Edit Type",
         &[],
         "{category: wall|floor|ceiling|door|window|column|structuralcolumn|footing|roof|railing|beam|stripfooting|pipe|conduit|\
-         cabletray|wire|downconductor|groundconductor|cable, name, thickness? | width?, height?, sill? | width?, depth?, round?, \
+         cabletray|wire|downconductor|groundconductor|cable, name, thickness? | width?, height?, sill?, operation? | width?, depth?, round?, \
          material? | height?, spacing?} creates the type, or changes it everywhere it's used. A column's, a structural column's or \
          a footing's type is a `width` by `depth`, or `round` (`width` across); a run's (a beam's, a pipe's, a cable tray's…) too, \
          made of a `material` of the library. A wall type may have `layers` [{function?: structure|\
@@ -719,7 +719,8 @@ pub static ALL: &[Command] = &[
         "{name, category?: furniture|casework|plumbing|lighting|generic|door|window, parameters?: [{name, kind?: length|number|\
          angle|yesno|material, instance?, value?, formula?}], types?: {type: {parameter: value}}, forms?: [{plane?: xy|xz|yz, \
          profile?: [[a, b], …], circle?: {centre: [a, b], radius}, axis?: [[a, b], [a, b]], from?, to, material?, visible?, \
-         void?}], symbols?: [{line?: [[x, y], …] | arc?: {centre: [x, y], radius, from?, to}, visible?}], rename?, delete?: \
+         void?}], symbols?: [{line?: [[x, y], …] | arc?: {centre: [x, y], radius, from?, to}, visible?}], operation?: swing|\
+         double-swing|sliding|double-sliding|folding|fixed (a door's or window's, for IFC and schedules), rename?, delete?: \
          true, path?, save?} a family of \
          the project's, BIMCraft's own parametric component: created, changed, or loaded from the .json file at `path` (a family \
          as `inspect` shows it, with its `name`). Its forms are profiles drawn in its own axes (x along a component's angle, y \
@@ -1410,6 +1411,17 @@ fn string(c: &str, p: &Value, key: &str) -> Result<Option<String>, String> {
     }
 }
 
+/// How a door or a window opens, by its name; blank, not said.
+fn operation(c: &str, name: &str) -> Result<Option<crate::model::Operation>, String> {
+    if name.trim().is_empty() {
+        return Ok(None);
+    }
+    crate::model::Operation::parse(name).map(Some).ok_or_else(|| {
+        let names: Vec<&str> = crate::model::Operation::ALL.iter().map(|o| o.name()).collect();
+        bad(c, format!("`operation` is one of {}, not `{name}`", names.join(", ")))
+    })
+}
+
 /// An element of `m` by its id, or its GUID.
 fn element_id(c: &str, m: &Model, v: &Value) -> Result<Id, String> {
     let g = serde_json::from_value::<Guid>(v.clone()).map_err(|_| bad(c, format!("{v} is not an element id or GUID")))?;
@@ -1697,6 +1709,9 @@ pub fn element_json(m: &Model, id: Id) -> Value {
             if let (Some(t), Some(w)) = (m.opening_type(e), m.wall(o.host)) {
                 extra.insert("width".into(), json!(t.width));
                 extra.insert("height".into(), json!(t.height));
+                if let Some(op) = t.operation {
+                    extra.insert("operation".into(), json!(op.name()));
+                }
                 extra.insert("level".into(), json!(w.level));
                 extra.insert("at".into(), json!(m.anchor(id)));
                 // Of a family: every parameter's value, worked out.
@@ -6081,7 +6096,7 @@ fn family(s: &mut Session, p: &Value) -> R {
         let stem = path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
         let name = p.get("name").filter(|v| !v.is_null()).cloned().or_else(|| fields.remove("name")).unwrap_or(json!(stem));
         // Only the family it holds: what a file says to rename or delete isn't for it to say.
-        let mut family: Map<String, Value> = ["category", "parameters", "types", "forms", "symbols"]
+        let mut family: Map<String, Value> = ["category", "parameters", "types", "forms", "symbols", "operation"]
             .into_iter()
             .filter_map(|k| fields.remove(k).map(|v| (k.to_string(), v)))
             .collect();
@@ -6144,6 +6159,9 @@ fn family(s: &mut Session, p: &Value) -> R {
         let mut symbols: Vec<crate::family::Symbol> = serde_json::from_value(v.clone()).map_err(|e| field("symbols", e))?;
         crate::library::keep_parts(&mut f.symbols, &mut symbols);
         f.symbols = symbols;
+    }
+    if let Some(op) = string(c, &p, "operation")? {
+        f.operation = operation(c, &op)?;
     }
     if let Some(v) = p.get("types").filter(|v| !v.is_null()) {
         let mut types = serde_json::to_value(&f.types).map_err(|e| bad(c, e))?;
@@ -6365,10 +6383,15 @@ fn edit_type(s: &mut Session, p: &Value) -> R {
         "door" | "window" => {
             let map = if cat == "door" { &mut m.types.door } else { &mut m.types.window };
             let old = map.get(&name).cloned();
+            let op = match string(c, p, "operation")? {
+                Some(name) => operation(c, &name)?,
+                None => old.as_ref().and_then(|t| t.operation),
+            };
             let t = OpeningType {
                 width: width.or(old.as_ref().map(|t| t.width)).ok_or_else(|| need("width"))?,
                 height: height.or(old.as_ref().map(|t| t.height)).ok_or_else(|| need("height"))?,
                 sill: sill.or(old.as_ref().map(|t| t.sill)).unwrap_or(if cat == "window" { 900.0 } else { 0.0 }),
+                operation: op,
             };
             map.insert(name.clone(), t);
             json!(t)

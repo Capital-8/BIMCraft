@@ -304,6 +304,9 @@ pub struct Family {
     /// What a door's or a window's plan draws besides its forms: lines of its own.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub symbols: Vec<Symbol>,
+    /// How a door's or a window's leaves open, which IFC and schedules say; none, a door swings.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub operation: Option<crate::model::Operation>,
 }
 
 /// A parameter's value, worked out: a number (yes/no, 1 or 0), or a material's name.
@@ -1449,10 +1452,11 @@ pub fn library(language: crate::language::Language) -> BTreeMap<String, Family> 
     families.into_iter().filter_map(|(name, v)| serde_json::from_value(v).ok().map(|f| (name, f))).collect()
 }
 
-/// The doors and windows a new project starts with, in `language`: a single door, a double door, a fixed window and
-/// a casement window, each with several sizes. Their forms stand in the opening's axes (x along the wall from the
-/// middle of the opening, y across it, 0 in the middle of the wall and + toward its exterior, z up from the sill),
-/// and they take the thickness of the wall they're in, `Wall Thickness`, as theirs.
+/// The doors and windows a new project starts with, in `language`: a single door, a double door, a sliding door, a
+/// fixed window, a casement window and a sliding window, each with several sizes and saying how it opens. Their forms
+/// stand in the opening's axes (x along the wall from the middle of the opening, y across it, 0 in the middle of the
+/// wall and + toward its exterior, z up from the sill), and they take the thickness of the wall they're in,
+/// `Wall Thickness`, as theirs.
 fn hosted_library(language: crate::language::Language) -> Vec<(String, Value)> {
     use serde_json::json;
     let w = |s: &str| language.word(s).to_string();
@@ -1497,6 +1501,7 @@ fn hosted_library(language: crate::language::Language) -> Vec<(String, Value)> {
         w(msg!("Single Door")),
         json!({
             "category": "door",
+            "operation": "swing",
             "parameters": [size(width, 900.0), size(height, 2100.0), size(&frame, 50.0), size(&leaf, 40.0), material(&frame_mat, &timber), material(&leaf_mat, &timber)],
             "types": sizes(&[("900 x 2100", 900.0, 2100.0), ("800 x 2100", 800.0, 2100.0), ("1000 x 2100", 1000.0, 2100.0)]),
             "forms": forms,
@@ -1518,6 +1523,7 @@ fn hosted_library(language: crate::language::Language) -> Vec<(String, Value)> {
         w(msg!("Double Door")),
         json!({
             "category": "door",
+            "operation": "double-swing",
             "parameters": [size(width, 1500.0), size(height, 2100.0), size(&frame, 50.0), size(&leaf, 40.0), material(&frame_mat, &timber), material(&leaf_mat, &timber)],
             "types": sizes(&[("1500 x 2100", 1500.0, 2100.0), ("1200 x 2100", 1200.0, 2100.0), ("1800 x 2100", 1800.0, 2100.0)]),
             "forms": forms,
@@ -1526,6 +1532,31 @@ fn hosted_library(language: crate::language::Language) -> Vec<(String, Value)> {
                 {"arc": {"centre": [&left, &half_t], "radius": &each, "from": 0, "to": 90}},
                 {"line": [[&right, &half_t], [&right, &format!("{wall} / 2 + {each}")]]},
                 {"arc": {"centre": [&right, &half_t], "radius": &each, "from": 90, "to": 180}}
+            ]
+        }),
+    ));
+
+    // A sliding door (porta de correr): two leaves on two tracks in the frame, overlapping 50 in the middle; the one
+    // toward the exterior slides past the other. The plan draws each leaf on its track.
+    let (past_l, past_r) = ("25", "-25");
+    let inner_track = [format!("-{leaf} - 5"), "-5".to_string()];
+    let outer_track = ["5".to_string(), format!("{leaf} + 5")];
+    let (inner_y, outer_y) = (format!("-{leaf} / 2 - 5"), format!("{leaf} / 2 + 5"));
+    let mut forms = door_frame(&block);
+    forms.push(block([&left, past_l], [&inner_track[0], &inner_track[1]], ["0", &under_head], &leaf_mat));
+    forms.push(block([past_r, &right], [&outer_track[0], &outer_track[1]], ["0", &under_head], &leaf_mat));
+    forms.push(block(["15", "55"], [&outer_track[1], &format!("{leaf} + 30")], ["1000", "1150"], &metal));
+    out.push((
+        w(msg!("Sliding Door")),
+        json!({
+            "category": "door",
+            "operation": "sliding",
+            "parameters": [size(width, 2000.0), size(height, 2100.0), size(&frame, 50.0), size(&leaf, 40.0), material(&frame_mat, &metal), material(&leaf_mat, &glass)],
+            "types": sizes(&[("2000 x 2100", 2000.0, 2100.0), ("1500 x 2100", 1500.0, 2100.0), ("2400 x 2100", 2400.0, 2100.0)]),
+            "forms": forms,
+            "symbols": [
+                {"line": [[&left, &inner_y], [past_l, &inner_y]]},
+                {"line": [[past_r, &outer_y], [&right, &outer_y]]}
             ]
         }),
     ));
@@ -1560,6 +1591,7 @@ fn hosted_library(language: crate::language::Language) -> Vec<(String, Value)> {
         w(msg!("Fixed Window")),
         json!({
             "category": "window",
+            "operation": "fixed",
             "parameters": [size(width, 1200.0), size(height, 1500.0), size(sill, 900.0), size(&frame, 50.0), size(&depth, 90.0), material(&frame_mat, &timber)],
             "types": types.clone(),
             "forms": forms
@@ -1582,9 +1614,45 @@ fn hosted_library(language: crate::language::Language) -> Vec<(String, Value)> {
         w(msg!("Casement Window")),
         json!({
             "category": "window",
+            "operation": "double-swing",
             "parameters": [size(width, 1200.0), size(height, 1500.0), size(sill, 900.0), size(&frame, 50.0), size(&depth, 90.0), material(&frame_mat, &timber)],
-            "types": types,
+            "types": types.clone(),
             "forms": forms
+        }),
+    ));
+
+    // A sliding window (janela de correr): two sashes on two tracks, each a frame of bars 40 wide round its pane,
+    // overlapping 40 in the middle; the one toward the exterior slides past the other.
+    let mut forms = window_frame(&block);
+    let (low, high) = (format!("{inner_b} + 40"), format!("{inner_t} - 40"));
+    let sliding_sash = |x: [&str; 2], y: [&str; 2]| -> Vec<Value> {
+        let (stile_l, stile_r) = (format!("({}) + 40", x[0]), format!("({}) - 40", x[1]));
+        let middle = format!("(({}) + ({})) / 2", y[0], y[1]);
+        let pane_y = [format!("{middle} - 3"), format!("{middle} + 3")];
+        vec![
+            block([x[0], &stile_l], y, [&inner_b, &inner_t], &frame_mat),
+            block([&stile_r, x[1]], y, [&inner_b, &inner_t], &frame_mat),
+            block([&stile_l, &stile_r], y, [&inner_b, &low], &frame_mat),
+            block([&stile_l, &stile_r], y, [&high, &inner_t], &frame_mat),
+            block([&stile_l, &stile_r], [&pane_y[0], &pane_y[1]], [&low, &high], &glass),
+        ]
+    };
+    let (track_in, track_out) = ([format!("-{deep} / 2 + 5"), "-2".to_string()], ["2".to_string(), format!("{deep} / 2 - 5")]);
+    forms.extend(sliding_sash([&inner_l, "20"], [&track_in[0], &track_in[1]]));
+    forms.extend(sliding_sash(["-20", &inner_r], [&track_out[0], &track_out[1]]));
+    let (in_y, out_y) = (format!("-{deep} / 4"), format!("{deep} / 4"));
+    out.push((
+        w(msg!("Sliding Window")),
+        json!({
+            "category": "window",
+            "operation": "sliding",
+            "parameters": [size(width, 1200.0), size(height, 1500.0), size(sill, 900.0), size(&frame, 50.0), size(&depth, 90.0), material(&frame_mat, &metal)],
+            "types": types,
+            "forms": forms,
+            "symbols": [
+                {"line": [[&inner_l, &in_y], ["20", &in_y]]},
+                {"line": [["-20", &out_y], [&inner_r, &out_y]]}
+            ]
         }),
     ));
     out

@@ -171,6 +171,8 @@ enum From {
     Flag(&'static str),
     /// A value among the element's parameters, under the field's own name (its phases, its design option).
     Param,
+    /// How a door or a window opens, in the project's language.
+    Operation,
 }
 
 type Own = (&'static str, Kind, From);
@@ -188,6 +190,7 @@ const DEPTH: Own = ("Depth", Kind::Length, From::Key("depth"));
 const SYSTEM: Own = (ui_msg!("System"), Kind::Text, From::Key("system"));
 const OFFSET: Own = (msg!("Offset"), Kind::Length, From::Key("offset"));
 const MARK: Own = ("Mark", Kind::Text, From::Key("mark"));
+const OPERATION: Own = (msg!("Operation"), Kind::Text, From::Operation);
 const NAME: Own = ("Name", Kind::Text, From::Key("name"));
 const HOST: Own = ("Wall", Kind::Number, From::Ref("host"));
 const COUNT: Own = (msg!("Count"), Kind::Number, From::Count);
@@ -214,7 +217,7 @@ const OWN: &[(&str, usize, &[Own])] = &[
             DESIGN_OPTION,
         ],
     ),
-    ("door", 6, &[MARK, TYPE, WIDTH, HEIGHT, LEVEL, HOST, FAMILY, COUNT, PHASE_CREATED, PHASE_DEMOLISHED, DESIGN_OPTION]),
+    ("door", 6, &[MARK, TYPE, WIDTH, HEIGHT, LEVEL, HOST, FAMILY, OPERATION, COUNT, PHASE_CREATED, PHASE_DEMOLISHED, DESIGN_OPTION]),
     (
         "window",
         7,
@@ -227,6 +230,7 @@ const OWN: &[(&str, usize, &[Own])] = &[
             LEVEL,
             HOST,
             FAMILY,
+            OPERATION,
             COUNT,
             PHASE_CREATED,
             PHASE_DEMOLISHED,
@@ -803,6 +807,11 @@ impl Row<'_> {
                 }
                 From::Count => serde_json::json!(1.0),
                 From::Flag(k) => Value::Bool(j.get(k).and_then(Value::as_bool).unwrap_or(false)),
+                From::Operation => j
+                    .get("operation")
+                    .and_then(Value::as_str)
+                    .and_then(crate::model::Operation::parse)
+                    .map_or(Value::Null, |op| Value::String(m.language.word(op.label()).to_string())),
                 // Its parameter of that name, or its wall's for a door or window with none; a phase it holds none of
                 // is the project's first.
                 From::Param => match phasing::value(m, self.e, name) {

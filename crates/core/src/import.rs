@@ -2363,13 +2363,27 @@ pub fn ifc(bytes: &[u8], name: &str) -> Result<Imported, String> {
         let sill = size((z0 - base).max(0.0));
         let fallback = format!("Imported {} x {}", num(width), num(height));
         let base_name = label(id).unwrap_or(fallback);
-        let same = |k: &OpeningType| (k.width - width).abs() < 0.05 && (k.height - height).abs() < 0.05;
-        let new = OpeningType { width, height, sill: if is_door { 0.0 } else { sill } };
+        // How a door opens: its own operation type (IFC4), else its type's (IfcDoorType, IFC4) or its style's
+        // (IfcDoorStyle, IFC2x3); which side its leaf is on comes along.
+        let typed = l.typed.get(&id).and_then(|t| e(*t));
+        let operated = enumeration(o.args.get(11))
+            .filter(|_| is_door)
+            .or_else(|| {
+                typed.filter(|_| is_door).and_then(|t| match t.name.as_str() {
+                    "IFCDOORTYPE" => enumeration(t.args.get(10)),
+                    "IFCDOORSTYLE" => enumeration(t.args.get(8)),
+                    _ => None,
+                })
+            })
+            .and_then(crate::model::Operation::from_ifc_door);
+        let operation = operated.map(|(op, _)| op);
+        let same = |k: &OpeningType| (k.width - width).abs() < 0.05 && (k.height - height).abs() < 0.05 && k.operation == operation;
+        let new = OpeningType { width, height, sill: if is_door { 0.0 } else { sill }, operation };
         let types = if is_door { &mut m.types.door } else { &mut m.types.window };
         let type_name = kind(types, &base_name, same, new);
         let count = if is_door { &mut doors } else { &mut windows };
         *count += 1;
-        let flip_hand = enumeration(o.args.get(11)).is_some_and(|op| op.contains("RIGHT"));
+        let flip_hand = operated.map_or_else(|| enumeration(o.args.get(11)).is_some_and(|op| op.contains("RIGHT")), |(_, right)| right);
         let op = Opening {
             params: Default::default(),
             family: None,

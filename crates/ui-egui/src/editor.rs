@@ -10,7 +10,7 @@ use std::sync::Arc;
 
 use bimcraft_core::engine::Session;
 use bimcraft_core::family::{Category, Circle, Curve, Expr, Family, Form, Kind as Holds, Parameter, Plane, Symbol};
-use bimcraft_core::model::Model;
+use bimcraft_core::model::{Model, Operation};
 use bimcraft_core::view3d::{AZIMUTH, ELEVATION, Scene};
 use egui::{
     Align, CollapsingHeader, Color32, ColorImage, ComboBox, Context, Grid, Id as UiId, Layout, Modal, PointerButton, Rect, RichText,
@@ -304,6 +304,8 @@ pub(crate) struct FamilyEditor {
     types: Vec<(String, BTreeMap<String, String>)>,
     forms: Vec<FormText>,
     symbols: Vec<SymbolText>,
+    /// How a door's or a window's leaves open; none, not said.
+    operation: Option<Operation>,
     tab: Tab,
     /// The type shown in Types and on the preview.
     picked: usize,
@@ -340,6 +342,7 @@ impl FamilyEditor {
             types,
             forms: f.forms.iter().map(FormText::of).collect(),
             symbols: f.symbols.iter().map(SymbolText::of).collect(),
+            operation: f.operation,
             tab: Tab::Parameters,
             picked: 0,
             look: (AZIMUTH, ELEVATION),
@@ -391,7 +394,8 @@ impl FamilyEditor {
         }
         let forms = self.forms.iter().map(FormText::form).collect::<Result<_, _>>()?;
         let symbols = self.symbols.iter().map(SymbolText::symbol).collect::<Result<_, _>>()?;
-        Ok(Family { category: self.category, parameters, types, forms, symbols })
+        let operation = self.operation.filter(|_| self.category.hosted());
+        Ok(Family { category: self.category, parameters, types, forms, symbols, operation })
     }
 
     /// The `family` command's parameters making the project's family what's typed: its name, its own and the type it drops.
@@ -401,6 +405,8 @@ impl FamilyEditor {
         }
         let family = self.family()?;
         let mut p = serde_json::to_value(&family).map_err(|e| e.to_string())?;
+        // Said or not, so one taken off goes from the family too.
+        p["operation"] = json!(family.operation.map_or("", Operation::name));
         match &self.original {
             Some(was) => {
                 p["name"] = json!(was);
@@ -926,6 +932,22 @@ impl BimApp {
                 });
                 c.response.labelled_by(l.id);
                 ui.end_row();
+                if ed.category.hosted() {
+                    let l = ui.label(t("Operation"));
+                    let shown = ed.operation.map_or(t("(none)"), |op| t(op.label()));
+                    let c = ComboBox::from_id_salt("fe-operation").selected_text(shown).width(220.0).show_ui(ui, |ui| {
+                        if ui.selectable_label(ed.operation.is_none(), t("(none)")).clicked() {
+                            ed.operation = None;
+                        }
+                        for op in Operation::ALL {
+                            if ui.selectable_label(ed.operation == Some(op), t(op.label())).clicked() {
+                                ed.operation = Some(op);
+                            }
+                        }
+                    });
+                    c.response.labelled_by(l.id);
+                    ui.end_row();
+                }
             });
             ui.add_space(6.0);
             // What the tabs leave of the screen, to the buttons below: a small one scrolls them.

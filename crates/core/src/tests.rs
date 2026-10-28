@@ -1354,14 +1354,14 @@ fn a_new_project_comes_with_a_library_of_families() {
         let names: Vec<&str> = m.families.keys().map(String::as_str).collect();
         assert_eq!(
             names.len(),
-            10 + 4 + crate::fixtures::library(language).len(),
-            "{names:?}: furniture, fittings, a door's and a window's of two kinds each, and the tabs' fixtures"
+            10 + 6 + crate::fixtures::library(language).len(),
+            "{names:?}: furniture, fittings, a door's and a window's of three kinds each, and the tabs' fixtures"
         );
         // Every type of every family places and builds: a component's as one, a door's or a window's in a wall's opening.
         let mut s = Session::new();
         s.reset(m.clone(), None);
-        run(&mut s, "wall", json!({"points": [[-20000, 5000], [20000, 5000]]}));
-        let mut along = -15000.0;
+        run(&mut s, "wall", json!({"points": [[-30000, 5000], [30000, 5000]]}));
+        let mut along = -27500.0;
         for (family, f) in &m.families {
             for t in f.types.keys().filter(|_| f.category.hosted()) {
                 let kind = if f.category == crate::family::Category::Door { "door" } else { "window" };
@@ -3652,8 +3652,10 @@ fn a_new_project_has_doors_and_windows_of_its_own_that_build_in_every_language()
         for (english, kind) in [
             ("Single Door", crate::family::Category::Door),
             ("Double Door", crate::family::Category::Door),
+            ("Sliding Door", crate::family::Category::Door),
             ("Fixed Window", crate::family::Category::Window),
             ("Casement Window", crate::family::Category::Window),
+            ("Sliding Window", crate::family::Category::Window),
         ] {
             assert!(hosted.contains(&(named(english).as_str(), kind)), "{l:?}: {english} in {hosted:?}");
         }
@@ -3797,6 +3799,82 @@ fn a_family_door_flipped_either_way_keeps_its_forms_turned_out_and_the_same_size
             assert!((a - b).abs() < 1e-6 * a, "facing {facing}, hand {hand}: {a} against {b}");
         }
     }
+}
+
+#[test]
+fn sliding_doors_and_windows_say_how_they_open_in_ifc_and_in_schedules() {
+    let mut s = Session::new();
+    s.script(
+        r#"wall {"points": [[0,0],[8000,0],[8000,6000],[0,6000]], "closed": true}
+           door {"at": [2000, 0], "family": "Sliding Door", "type": "2000 x 2100"}
+           door {"at": [5500, 0], "family": "Double Door"}
+           window {"at": [8000, 3000], "family": "Sliding Window"}
+           window {"at": [4000, 6000], "family": "Casement Window"}"#,
+    )
+    .unwrap();
+    let doors: Vec<u64> = run(&mut s, "elements", json!({"category": "door"}))["elements"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|d| d["id"].as_u64().unwrap())
+        .collect();
+    assert_eq!(element(&mut s, doors[0])["operation"], "sliding");
+    // Out to IFC: a sliding door slides toward its hand, a double door is a double door, a window of two leaves two panels.
+    let file = crate::ifc::export(&s.model);
+    assert!(file.contains(".SLIDING_TO_LEFT.") && file.contains(".DOUBLE_DOOR_SINGLE_SWING."), "door operations");
+    assert_eq!(file.matches(".DOUBLE_PANEL_VERTICAL.").count(), 2, "both windows have two leaves");
+    run(&mut s, "modify", json!({"id": doors[0], "flip_hand": true}));
+    let file = crate::ifc::export(&s.model);
+    assert!(file.contains(".SLIDING_TO_RIGHT."));
+    // Back in, a door keeps how it opens and to which side, on a type of its own.
+    let back = crate::import::ifc(file.as_bytes(), "t").unwrap();
+    let mut t = Session::new();
+    t.reset(back.model, None);
+    let ops: Vec<(Option<crate::model::Operation>, bool)> = t
+        .model
+        .elements
+        .values()
+        .filter_map(|e| match e {
+            crate::model::Element::Door(o) => Some((t.model.opening_type(e).and_then(|k| k.operation), o.flip_hand)),
+            _ => None,
+        })
+        .collect();
+    use crate::model::Operation::{DoubleSwing, Sliding};
+    assert!(ops.contains(&(Some(Sliding), true)) && ops.contains(&(Some(DoubleSwing), false)), "{ops:?}");
+    // Where the door says nothing, its type does: an IfcDoorType's (IFC4) operation, as Revit writes it.
+    let door = file.lines().find(|l| l.contains("=IFCDOOR(") && l.contains(".SLIDING_TO_RIGHT.")).unwrap();
+    let door_ref = door.split('=').next().unwrap();
+    let typed = file.replacen(".SLIDING_TO_RIGHT.,$)", "$,$)", 1).replacen(
+        "ENDSEC;\nEND-ISO",
+        &format!(
+            "#999990=IFCDOORTYPE('0000000000000000000T01',$,'Patio',$,$,$,$,$,$,.DOOR.,.SLIDING_TO_LEFT.,.F.,$);\n\
+             #999991=IFCRELDEFINESBYTYPE('0000000000000000000T02',$,$,$,({door_ref}),#999990);\nENDSEC;\nEND-ISO"
+        ),
+        1,
+    );
+    assert!(!typed.contains(".SLIDING_TO_RIGHT.") && typed.contains("IFCDOORTYPE"));
+    let back = crate::import::ifc(typed.as_bytes(), "t").unwrap();
+    let patio = back.model.types.door.get("Patio").copied();
+    assert_eq!(patio.and_then(|k| k.operation), Some(Sliding), "{:?}", back.model.types.door);
+    // A schedule says it in the project's language.
+    let r =
+        run(&mut s, "schedule", json!({"name": "Esquadrias", "category": "doors", "fields": ["Family", "Operation"], "sort": ["Family"]}));
+    assert_eq!(r["rows"], json!([["Double Door", "Double Swing"], ["Sliding Door", "Sliding"]]));
+    let mut pt = Session::new();
+    pt.reset(Model::new_in("x", crate::language::Language::Portuguese), None);
+    pt.script(
+        r#"wall {"points": [[0,0],[8000,0]]}
+           door {"at": [2000, 0], "family": "Porta de correr"}"#,
+    )
+    .unwrap();
+    let r = run(&mut pt, "schedule", json!({"name": "Esquadrias", "category": "doors", "fields": ["Operation"]}));
+    assert_eq!(r["rows"], json!([["De correr"]]));
+    // A project's own type says it too; a name that isn't one is refused.
+    let made = run(&mut s, "type", json!({"category": "door", "name": "Correr 900", "width": 900, "height": 2100, "operation": "sliding"}));
+    assert_eq!(made["type"]["operation"], "sliding");
+    let e =
+        s.execute("type", &json!({"category": "door", "name": "Odd", "width": 900, "height": 2100, "operation": "spinning"})).unwrap_err();
+    assert!(e.contains("spinning") && e.contains("double-sliding"), "{e}");
 }
 
 #[test]
