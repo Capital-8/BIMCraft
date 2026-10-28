@@ -1,8 +1,8 @@
 //! Storm drains sized as NBR 10844 (Instalações prediais de águas pluviais, 1989) asks. Pure functions of their input: the
 //! `storm_size` command is their caller, so none of this needs a pipe network in the model.
 //!
-//! - The design flow is `Q = I * A / 60` (L/min): `I` the rainfall intensity in mm/h (the standard's table by place and return
-//!   period; 150 mm/h is what it allows for up to 100 m² of roof in plan) and `A` the area that drains, in m², as the standard
+//! - The design flow is `Q = I * A / 60` (L/min, item 5.3.1): `I` the rainfall intensity in mm/h (item 5.1: by place and return
+//!   period; item 5.1.4: "para construção até 100 m² de área de projeção horizontal, salvo casos especiais, pode-se adotar I = 150 mm/h") and `A` the area that drains, in m², as the standard
 //!   counts it.
 //! - A downpipe ("condutor vertical") takes the inner diameter its Figure 3 abacuses give: (a) a gutter with a sharp-edged
 //!   outlet, (b) with a funnel outlet, by `Q`, the water depth in the gutter `H` (mm) and the downpipe's length `L` (m): the
