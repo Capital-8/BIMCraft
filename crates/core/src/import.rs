@@ -644,6 +644,11 @@ impl<'a> Reader<'a> {
             // as if solid.
             "IFCSWEPTDISKSOLID" => {
                 let (Some(line), Some(r)) = (self.curve(reference(a(0)), depth + 1), self.len(a(1))) else { return };
+                // A tube is 26 faces a segment, so a curve of millions of points would fill the memory: past MAX_POINTS segments'
+                // worth of faces in the item, the disk is left out.
+                if out.len() + 26 * line.len().saturating_sub(1) > 26 * MAX_POINTS {
+                    return;
+                }
                 for w in line.windows(2) {
                     let &[p, q] = w else { continue };
                     let along = sub(q, p);
@@ -3101,6 +3106,42 @@ ENDSEC;END-ISO-10303-21;";
         let t = &i.model.types.runs["wire"][&w.type_name];
         assert_eq!((w.start, w.end, w.offset, w.end_offset), (P2(1000.0, 2000.0), P2(4000.0, 2000.0), 2900.0, None));
         assert!(t.round && (t.width - 7.4).abs() < 0.05, "{} x {}", t.width, t.depth);
+    }
+
+    #[test]
+    fn a_swept_disk_along_a_curve_of_too_many_segments_is_left_out_not_built() {
+        // The cable above with a centre line of `n` points, a millimetre apart: each segment is 26 faces.
+        let cable = |n: usize| {
+            let points: Vec<String> = (0..n).map(|i| format!("({i}.,0.,0.)")).collect();
+            let index: Vec<String> = (1..=n).map(|i| i.to_string()).collect();
+            format!(
+                "ISO-10303-21;HEADER;FILE_SCHEMA(('IFC4'));ENDSEC;DATA;
+#1=IFCSIUNIT(*,.LENGTHUNIT.,.MILLI.,.METRE.);
+#2=IFCUNITASSIGNMENT((#1));
+#3=IFCPROJECT('p',$,'Cables',$,$,$,$,$,#2);
+#4=IFCCARTESIANPOINT((0.,0.,0.));
+#5=IFCAXIS2PLACEMENT3D(#4,$,$);
+#6=IFCLOCALPLACEMENT($,#5);
+#7=IFCBUILDINGSTOREY('s',$,'Level 0',$,$,#6,$,$,.ELEMENT.,0.);
+#10=IFCCARTESIANPOINTLIST3D(({}));
+#11=IFCINDEXEDPOLYCURVE(#10,(IFCLINEINDEX(({}))),$);
+#12=IFCSWEPTDISKSOLID(#11,3.7,$,$,$);
+#13=IFCSHAPEREPRESENTATION($,'Body','AdvancedSweptSolid',(#12));
+#18=IFCPRODUCTDEFINITIONSHAPE($,$,(#13));
+#22=IFCCABLESEGMENT('k',$,'Cable',$,$,#6,#18,$,.CABLESEGMENT.);
+#30=IFCRELCONTAINEDINSPATIALSTRUCTURE('r',$,$,$,(#22),#7);
+ENDSEC;END-ISO-10303-21;",
+                points.join(","),
+                index.join(",")
+            )
+        };
+        // MAX_POINTS segments are read; one more is a body BIMCraft will not build, and the cable is left out.
+        let within = ifc(cable(MAX_POINTS + 1).as_bytes(), "x").unwrap();
+        assert_eq!((only(&within.model, "wire").len(), within.skipped.len()), (1, 0), "{:?}", within.skipped);
+        let past = ifc(cable(MAX_POINTS + 2).as_bytes(), "x").unwrap();
+        assert!(only(&past.model, "wire").is_empty());
+        assert_eq!(past.skipped.len(), 1);
+        assert!(past.skipped[0].contains("no body BIMCraft can read"), "{:?}", past.skipped);
     }
 
     /// An IFC4 file in mm with a 6 x 4 m slab 200 mm thick, its profile round two holes, an
