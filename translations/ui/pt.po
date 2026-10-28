@@ -1819,7 +1819,7 @@ msgstr "Demolir (DW): clique num elemento para demoli-lo na fase da vista; cliqu
 msgid "Demolished"
 msgstr "Demolido"
 
-#: crates/core/src/commands.rs:5746
+#: crates/core/src/commands.rs:5747
 msgid "Dependent"
 msgstr "Dependente"
 
@@ -2476,7 +2476,7 @@ msgstr "Encontra {}; nada tem estes: {}"
 msgid "Fine"
 msgstr "Fino"
 
-#: crates/core/src/import.rs:1017
+#: crates/core/src/import.rs:1022
 #: crates/ui-egui/src/notes.rs:449
 msgid "Finish"
 msgstr "Acabamento"
@@ -3028,7 +3028,7 @@ msgstr "Instalando o BIMCraft {}…"
 msgid "Instance"
 msgstr "Instância"
 
-#: crates/core/src/import.rs:1016
+#: crates/core/src/import.rs:1021
 #: crates/ui-egui/src/draw.rs:645
 msgid "Insulation"
 msgstr "Isolamento"
@@ -3530,7 +3530,7 @@ msgstr "Médio"
 msgid "Medium Lines"
 msgstr "Linhas médias"
 
-#: crates/core/src/import.rs:1019
+#: crates/core/src/import.rs:1024
 msgid "Membrane"
 msgstr "Membrana"
 
@@ -5744,7 +5744,7 @@ msgstr "Estilo"
 msgid "Styles"
 msgstr "Estilos"
 
-#: crates/core/src/import.rs:1018
+#: crates/core/src/import.rs:1023
 msgid "Substrate"
 msgstr "Substrato"
 
@@ -6378,7 +6378,7 @@ msgstr "Reexibir elementos"
 msgid "Units"
 msgstr "Unidades"
 
-#: crates/core/src/commands.rs:5887
+#: crates/core/src/commands.rs:5888
 msgid "Unnamed"
 msgstr "Sem nome"
 

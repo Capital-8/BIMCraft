@@ -103,7 +103,7 @@ msgstr "Traço e ponto"
 msgid "Data Outlet"
 msgstr "Ponto de dados"
 
-#: crates/core/src/commands.rs:5746
+#: crates/core/src/commands.rs:5747
 msgid "Dependent"
 msgstr "Dependente"
 
@@ -167,8 +167,8 @@ msgstr "Leste"
 msgid "Elbow 90"
 msgstr "Joelho 90"
 
-#: crates/core/src/commands.rs:5530
-#: crates/core/src/commands.rs:7184
+#: crates/core/src/commands.rs:5531
+#: crates/core/src/commands.rs:7185
 msgid "Elevation"
 msgstr "Elevação"
 
@@ -260,7 +260,7 @@ msgstr "Horizontal"
 msgid "Inspection Box"
 msgstr "Caixa de inspeção"
 
-#: crates/core/src/import.rs:1016
+#: crates/core/src/import.rs:1021
 msgid "Insulation"
 msgstr "Isolamento"
 
@@ -284,7 +284,7 @@ msgstr "Largura da perna"
 msgid "Length"
 msgstr "Comprimento"
 
-#: crates/core/src/commands.rs:3495
+#: crates/core/src/commands.rs:3496
 #: crates/core/src/model.rs:2209
 msgid "Level"
 msgstr "Nível"
@@ -305,7 +305,7 @@ msgstr "Marca"
 msgid "Masking"
 msgstr "Máscara"
 
-#: crates/core/src/commands.rs:4339
+#: crates/core/src/commands.rs:4340
 msgid "Mass"
 msgstr "Massa"
 
@@ -313,7 +313,7 @@ msgstr "Massa"
 msgid "Medium Lines"
 msgstr "Linhas médias"
 
-#: crates/core/src/import.rs:1019
+#: crates/core/src/import.rs:1024
 msgid "Membrane"
 msgstr "Manta impermeável"
 
@@ -389,7 +389,7 @@ msgstr "Reboco"
 msgid "Porcelain"
 msgstr "Porcelana"
 
-#: crates/core/src/commands.rs:1975
+#: crates/core/src/commands.rs:1976
 msgid "Project"
 msgstr "Projeto"
 
@@ -413,7 +413,7 @@ msgstr "Espelhos"
 msgid "Roof tiles"
 msgstr "Telhas"
 
-#: crates/core/src/commands.rs:4564
+#: crates/core/src/commands.rs:4565
 msgid "Room"
 msgstr "Ambiente"
 
@@ -441,8 +441,8 @@ msgstr "Contrapiso"
 msgid "Seat Height"
 msgstr "Altura do assento"
 
-#: crates/core/src/commands.rs:5507
-#: crates/core/src/commands.rs:7183
+#: crates/core/src/commands.rs:5508
+#: crates/core/src/commands.rs:7184
 msgid "Section"
 msgstr "Corte"
 
@@ -558,7 +558,7 @@ msgstr "Tipo"
 msgid "UP"
 msgstr "SOBE"
 
-#: crates/core/src/commands.rs:5887
+#: crates/core/src/commands.rs:5888
 msgid "Unnamed"
 msgstr "Sem nome"
 

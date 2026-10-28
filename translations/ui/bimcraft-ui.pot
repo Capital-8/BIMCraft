@@ -1819,7 +1819,7 @@ msgstr ""
 msgid "Demolished"
 msgstr ""
 
-#: crates/core/src/commands.rs:5746
+#: crates/core/src/commands.rs:5747
 msgid "Dependent"
 msgstr ""
 
@@ -2476,7 +2476,7 @@ msgstr ""
 msgid "Fine"
 msgstr ""
 
-#: crates/core/src/import.rs:1017
+#: crates/core/src/import.rs:1022
 #: crates/ui-egui/src/notes.rs:449
 msgid "Finish"
 msgstr ""
@@ -3028,7 +3028,7 @@ msgstr ""
 msgid "Instance"
 msgstr ""
 
-#: crates/core/src/import.rs:1016
+#: crates/core/src/import.rs:1021
 #: crates/ui-egui/src/draw.rs:645
 msgid "Insulation"
 msgstr ""
@@ -3530,7 +3530,7 @@ msgstr ""
 msgid "Medium Lines"
 msgstr ""
 
-#: crates/core/src/import.rs:1019
+#: crates/core/src/import.rs:1024
 msgid "Membrane"
 msgstr ""
 
@@ -5744,7 +5744,7 @@ msgstr ""
 msgid "Styles"
 msgstr ""
 
-#: crates/core/src/import.rs:1018
+#: crates/core/src/import.rs:1023
 msgid "Substrate"
 msgstr ""
 
@@ -6378,7 +6378,7 @@ msgstr ""
 msgid "Units"
 msgstr ""
 
-#: crates/core/src/commands.rs:5887
+#: crates/core/src/commands.rs:5888
 msgid "Unnamed"
 msgstr ""
 
