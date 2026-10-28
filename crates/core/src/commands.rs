@@ -988,7 +988,7 @@ pub static ALL: &[Command] = &[
          tee_through, tee_side, gate, globe, check: count}, pressure?, rise?} a cold water pipe of PVC soldável as NBR 5626 asks. The \
          flow is `flow` (L/s), or the design flow of the `fixtures` by the `method` the project chooses: weights (the empirical \
          method, Q = 0.3 √ΣP, never more than the fixtures' own flows; the default) or sum (every fixture at once). The fixture \
-         flows and weights are those of NBR 5626:1998 Annex A, Table A.1; `wc` is the WC with a flush tank only (a flush-valve WC \
+         flows and weights are Tigre's (Manual Técnico, page 198), not the standard's; `wc` is the WC with a flush tank only (a flush-valve WC \
          is not in the table here). Without `dn` it replies the smallest DN chosen by speed alone (3 m/s at most; the pressure is \
          not used to choose it); with `dn`, whether that pipe keeps the speed. The head loss is Darcy-Weisbach (Colebrook, PVC at \
          20 °C) over `length` (mm) plus the equivalent length of the `fittings`; with `pressure` (kPa, dynamic, upstream) and `rise` \
