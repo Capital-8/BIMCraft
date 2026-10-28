@@ -431,6 +431,42 @@ impl Model {
         }
     }
 
+    /// Entry `from` of `kind` held as `to` now, for a rename: a type of a category or a family's (`family: type`). Whether there
+    /// was one to move; what names it is left to the caller.
+    pub fn move_entry(&mut self, kind: &Kind, from: &str, to: &str) -> bool {
+        use crate::model::RUN_CATEGORIES;
+        fn mv<T>(map: &mut BTreeMap<String, T>, from: &str, to: &str) -> bool {
+            match map.remove(from) {
+                Some(t) => {
+                    map.insert(to.to_string(), t);
+                    true
+                }
+                None => false,
+            }
+        }
+        match kind {
+            Kind::Type(category) => match category.as_str() {
+                "wall" => mv(&mut self.types.wall, from, to),
+                "floor" => mv(&mut self.types.floor, from, to),
+                "door" => mv(&mut self.types.door, from, to),
+                "window" => mv(&mut self.types.window, from, to),
+                "column" => mv(&mut self.types.column, from, to),
+                "roof" => mv(&mut self.types.roof, from, to),
+                "ceiling" => mv(&mut self.types.ceiling, from, to),
+                "railing" => mv(&mut self.types.railing, from, to),
+                "structuralcolumn" => mv(&mut self.types.structural_column, from, to),
+                "footing" => mv(&mut self.types.footing, from, to),
+                run if RUN_CATEGORIES.contains(&run) => self.types.runs.get_mut(run).is_some_and(|t| mv(t, from, to)),
+                _ => false,
+            },
+            Kind::FamilyType => match (from.split_once(": "), to.split_once(": ")) {
+                (Some((f, old)), Some((g, new))) if f == g => self.families.get_mut(f).is_some_and(|fam| mv(&mut fam.types, old, new)),
+                _ => false,
+            },
+            _ => false,
+        }
+    }
+
     /// The entries of `kinds` (see [`PURGE_KINDS`]) nothing names, as one pass of Purge Unused would take them out. Each
     /// category keeps a type (its default's, else its first) and each family a type, so that a tool still has one to place; a
     /// family that goes takes its types with it. What a pass takes out may leave more unused, which the next pass finds.

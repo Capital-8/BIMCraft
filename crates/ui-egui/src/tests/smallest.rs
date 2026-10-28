@@ -229,7 +229,7 @@ fn fill_patterns_and_edit_type_with_forty_patterns_and_a_long_note_stay_inside_t
     h.state_mut().fill_patterns_dialog = Some(crate::fillpatterns::FillPatternsDialog::edit(&model, "Region 39", Vec::new()));
     h.run();
     dialog_fits(&h, "fill-patterns", &[&["Type Properties"][..], &buttons].concat(), "Edit Type");
-    press(&mut h, "Patterns");
+    press(&mut h, "Foreground Pattern: Edit Patterns");
     long_note(&mut h);
     dialog_fits(&h, "fill-patterns", &[&["Type Properties", "New Pattern", "Import..."][..], &buttons].concat(), "Edit Type's Patterns");
 }

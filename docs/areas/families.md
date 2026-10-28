@@ -42,7 +42,8 @@ a project only through the `favorite` command (`load` never overwrites without `
 preview is a scratch `Session` of its own, and it says what's wrong inside the window (the status box, over the view's corner, would lie on its
 buttons).
 
-A type or a family goes with `delete_type` (one entry, refused while an element uses it, and for the last type of a category or of a family: a
+A type of a category or of a family is renamed with `rename_type` (`Model::move_entry` moves it in its map, and `rename_entry` the
+library entry and every reference `Model::lib_refs_mut` visits, so it keeps its GUID). A type or a family goes with `delete_type` (one entry, refused while an element uses it, and for the last type of a category or of a family: a
 tool needs one to place) and `purge` (every entry of the kinds asked that nothing uses). Use is what `Model::lib_refs_mut` visits, the one place
 that names every reference to a library entry: `Model::library_uses` counts them on a copy of the model, `Model::unused_entries` is one pass of
 what purge takes out (each category keeps its default's type, else its first; a family that goes takes its types), the command repeats it

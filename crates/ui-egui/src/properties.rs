@@ -25,6 +25,7 @@ use serde_json::{Value, json};
 use crate::icons::{self, Icon};
 use crate::lang::{self, t, tf};
 use crate::style::pal;
+use crate::typeprops::{self, Head, Naming};
 use crate::{BimApp, Sheet, Status, Tool};
 
 #[derive(Clone, Copy, PartialEq)]
@@ -402,18 +403,20 @@ fn type_json<'a>(types: &'a Value, category: &str, name: &str) -> &'a Value {
     &of[name]
 }
 
-/// A type's parameters, as its Type Properties list them: its field, its label.
-fn type_rows(category: &str) -> &'static [(&'static str, &'static str)] {
+/// A type's parameters, as its Type Properties list them: the group it's under, its field, its label.
+fn type_rows(category: &str) -> &'static [(&'static str, &'static str, &'static str)] {
+    const C: &str = "Construction";
+    const D: &str = "Dimensions";
     match category {
-        "wall" => &[("thickness", "Width")],
-        "floor" => &[("thickness", msg!("Default Thickness"))],
-        "door" => &[("width", "Width"), ("height", "Height")],
-        "window" => &[("width", "Width"), ("height", "Height"), ("sill", msg!("Default Sill Height"))],
-        "column" | "structuralcolumn" | "footing" => &[("width", "Width"), ("depth", "Depth")],
-        run if bimcraft_core::model::RUN_CATEGORIES.contains(&run) => &[("width", "Width"), ("depth", "Depth")],
-        "roof" => &[("thickness", "Thickness")],
-        "ceiling" => &[("thickness", "Thickness"), ("grid", msg!("Tile Size"))],
-        "railing" => &[("height", "Height"), ("spacing", msg!("Baluster Spacing"))],
+        "wall" => &[(C, "thickness", "Width")],
+        "floor" => &[(C, "thickness", msg!("Default Thickness"))],
+        "door" => &[(D, "width", "Width"), (D, "height", "Height")],
+        "window" => &[(D, "width", "Width"), (D, "height", "Height"), (C, "sill", msg!("Default Sill Height"))],
+        "column" | "structuralcolumn" | "footing" => &[(D, "width", "Width"), (D, "depth", "Depth")],
+        run if bimcraft_core::model::RUN_CATEGORIES.contains(&run) => &[(D, "width", "Width"), (D, "depth", "Depth")],
+        "roof" => &[(C, "thickness", "Thickness")],
+        "ceiling" => &[(C, "thickness", "Thickness"), (C, "grid", msg!("Tile Size"))],
+        "railing" => &[(C, "height", "Height"), (C, "spacing", msg!("Baluster Spacing"))],
         _ => &[],
     }
 }
@@ -652,6 +655,9 @@ fn function_name(f: Function) -> &'static str {
     FUNCTIONS.iter().find(|(g, _)| *g == f).map_or("Structure", |(_, n)| n)
 }
 
+/// A type's parameter as typed: its group, its field, its label, the text.
+type TypeField = (&'static str, &'static str, &'static str, String);
+
 /// The Type Properties dialog: a type of a category, and its parameters as typed; a layered
 /// type's layers, too.
 pub(crate) struct TypeDialog {
@@ -659,9 +665,11 @@ pub(crate) struct TypeDialog {
     name: String,
     /// The elements that were on the type when the dialog opened; OK puts them on the type shown.
     elements: Vec<Id>,
-    fields: Vec<(&'static str, &'static str, String)>,
-    /// The name being typed for a duplicate.
-    duplicate: Option<String>,
+    fields: Vec<TypeField>,
+    /// A new name being typed, for a duplicate or a rename.
+    naming: Naming,
+    /// What stopped OK, Apply, Duplicate or Rename.
+    error: Option<String>,
     /// A layered type's layers, exterior or top first, as typed, and as they were: changed, they
     /// make it.
     layers: Vec<LayerRow>,
@@ -677,7 +685,7 @@ impl TypeDialog {
             let t = m.types.runs.get(category).and_then(|t| t.get(&name));
             (t.is_some_and(|t| t.round), t.map(|t| t.material.clone()).unwrap_or_default())
         });
-        TypeDialog { category, name, elements, fields, duplicate: None, layers_were: layers.clone(), layers, shape }
+        TypeDialog { category, name, elements, fields, naming: Naming::None, error: None, layers_were: layers.clone(), layers, shape }
     }
 
     /// The dialog showing type `name` as the model has it now.
@@ -686,9 +694,9 @@ impl TypeDialog {
     }
 
     /// A type's sizes, as typed: lengths in the project's units.
-    fn fields(m: &Model, category: &str, name: &str) -> Vec<(&'static str, &'static str, String)> {
+    fn fields(m: &Model, category: &str, name: &str) -> Vec<TypeField> {
         let types = serde_json::to_value(&m.types).unwrap_or_default();
-        type_rows(category).iter().map(|(k, l)| (*k, *l, shown(Length, &type_json(&types, category, name)[k], m.units))).collect()
+        type_rows(category).iter().map(|(g, k, l)| (*g, *k, *l, shown(Length, &type_json(&types, category, name)[k], m.units))).collect()
     }
 
     /// A layered type's layers, as typed: one structure layer as thick as it, without any.
@@ -714,7 +722,9 @@ impl TypeDialog {
             p["layers"] = Value::Array(layers.collect::<Result<_, String>>()?);
         }
         let round = self.shape.as_ref().is_some_and(|(round, _)| *round);
-        for (key, label, typed) in self.fields.iter().filter(|(key, ..)| !(layered && *key == "thickness") && !(round && *key == "depth")) {
+        for (_, key, label, typed) in
+            self.fields.iter().filter(|(_, key, ..)| !(layered && *key == "thickness") && !(round && *key == "depth"))
+        {
             p[*key] = json!(units.parse(typed).ok_or_else(|| tf("{}: `{}` is not a length", &[t(label), typed]))?);
         }
         if let Some((round, material)) = &self.shape {
@@ -1541,87 +1551,66 @@ impl BimApp {
         let Some(mut d) = self.type_dialog.take() else { return };
         let model = Arc::clone(&self.session.model);
         let names: Vec<String> = model.type_names(d.category).into_iter().map(String::from).collect();
-        let (mut ok, mut cancel, mut apply, mut create, mut switch) = (false, false, false, false, None);
+        let (mut ok, mut cancel, mut apply, mut asked) = (false, false, false, None);
         let r = Modal::new(UiId::new("type-properties")).show(ctx, |ui| {
-            // Wider for a type's layers.
-            ui.set_width(if LAYERED.contains(&d.category) { 560.0 } else { 400.0 });
-            ui.label(RichText::new(t("Type Properties")).heading());
-            ui.add_space(6.0);
-            Grid::new("type-head").num_columns(2).spacing(vec2(12.0, 6.0)).show(ui, |ui| {
-                ui.label(t("Family:"));
-                ui.label(lang::category(d.category, false));
-                ui.end_row();
-                let l = ui.label(t("Type:"));
-                ui.horizontal(|ui| {
-                    let c = ComboBox::from_id_salt("type-name").selected_text(&d.name).width(200.0).show_ui(ui, |ui| {
-                        for n in &names {
-                            if ui.selectable_label(*n == d.name, n).clicked() {
-                                switch = Some(n.clone());
-                            }
-                        }
-                    });
-                    c.response.labelled_by(l.id);
-                    if d.duplicate.is_none() && ui.button(t("Duplicate…")).clicked() {
-                        d.duplicate = Some(format!("{} 2", d.name));
-                    }
-                });
-                ui.end_row();
-                if let Some(new) = &mut d.duplicate {
-                    let l = ui.label(t("New type"));
-                    ui.horizontal(|ui| {
-                        ui.add(TextEdit::singleline(new).desired_width(200.0)).labelled_by(l.id);
-                        create = ui.button(t("Create")).clicked();
-                    });
-                    ui.end_row();
+            typeprops::title(ui);
+            let family = tf("System Family: {}", &[&lang::category(d.category, true)]);
+            asked = typeprops::head(ui, "type", &family, &names, &d.name, &mut d.naming, true);
+            let below = typeprops::foot_height(ui, d.error.is_some());
+            let materials: Vec<String> = model.materials.keys().cloned().collect();
+            let layered = LAYERED.contains(&d.category);
+            let round = d.shape.as_ref().is_some_and(|(round, _)| *round);
+            // The groups in the order their first row comes; a run's roundness is a dimension, its material its own group.
+            let mut groups: Vec<&str> = Vec::new();
+            let extra = [(layered, "Construction"), (d.shape.is_some(), "Dimensions"), (d.shape.is_some(), msg!("Materials and Finishes"))];
+            for g in d.fields.iter().map(|f| f.0).chain(extra.iter().filter(|(on, _)| *on).map(|(_, g)| *g)) {
+                if !groups.contains(&g) {
+                    groups.push(g);
                 }
-            });
-            ui.add_space(6.0);
-            ui.label(RichText::new(t("Type Parameters")).strong());
-            Grid::new("type-parameters").num_columns(2).striped(true).min_col_width(150.0).show(ui, |ui| {
-                ui.label(RichText::new(t("Parameter")).color(pal().muted));
-                ui.label(RichText::new(t("Value")).color(pal().muted));
-                ui.end_row();
-                let round = d.shape.as_ref().is_some_and(|(round, _)| *round);
-                for (key, label, typed) in &mut d.fields {
-                    // A round section has a diameter and no depth.
-                    if round && *key == "depth" {
-                        continue;
-                    }
-                    let l = ui.label(t(if round && *key == "width" { "Diameter" } else { label }));
-                    ui.add(TextEdit::singleline(typed).desired_width(160.0)).labelled_by(l.id);
-                    ui.end_row();
-                }
-                if let Some((round, material)) = &mut d.shape {
-                    ui.label("");
-                    ui.checkbox(round, t("Round"));
-                    ui.end_row();
-                    let l = ui.label(t("Material"));
-                    let names: Vec<String> = model.materials.keys().cloned().collect();
-                    if let Some(n) = combo(ui, (0, "type-material"), l.id, material, &names) {
-                        *material = n;
-                    }
-                    ui.end_row();
-                }
-            });
-            if LAYERED.contains(&d.category) {
-                ui.add_space(6.0);
-                let materials: Vec<String> = model.materials.keys().cloned().collect();
-                let (out, inward) = if d.category == "wall" { (msg!("Out"), msg!("In")) } else { ("Up", "Down") };
-                layer_editor(ui, &mut d.layers, model.units, &materials, (out, inward));
             }
-            ui.add_space(8.0);
-            ui.with_layout(Layout::right_to_left(Align::Min), |ui| {
-                apply = ui.button(t("Apply")).clicked();
-                cancel = ui.button(t("Cancel")).clicked();
-                ok = ui.button(t("OK")).clicked();
+            typeprops::table(ui, "type", below, |tb| {
+                for g in groups {
+                    tb.group(g);
+                    for (_, key, label, typed) in d.fields.iter_mut().filter(|f| f.0 == g) {
+                        // A round section has a diameter and no depth.
+                        if round && *key == "depth" {
+                            continue;
+                        }
+                        tb.text(t(if round && *key == "width" { "Diameter" } else { label }), typed, model.units.name());
+                    }
+                    match (g, &mut d.shape) {
+                        ("Dimensions", Some((round, _))) => tb.check(t("Round"), round),
+                        ("Materials and Finishes", Some((_, material))) => tb.pick(t("Material"), material, &materials),
+                        _ => {}
+                    }
+                    if g == "Construction" && layered {
+                        let (out, inward) = if d.category == "wall" { (msg!("Out"), msg!("In")) } else { ("Up", "Down") };
+                        tb.full(|ui| layer_editor(ui, &mut d.layers, model.units, &materials, (out, inward)));
+                    }
+                }
             });
+            (ok, cancel, apply) = typeprops::foot(ui, d.error.as_deref());
         });
+        let switch = match &asked {
+            Some(Head::Switch(n)) => Some(n.clone()),
+            _ => None,
+        };
+        let create = matches!(asked, Some(Head::Duplicate(_)));
+        if let Some(Head::Rename(to)) = &asked {
+            let p = json!({"category": d.category, "type": d.name, "name": to});
+            if self.run_for_type("rename_type", p, &mut d.error) {
+                if self.types.get(d.category) == Some(&d.name) {
+                    self.types.insert(d.category, to.clone());
+                }
+                d.show(&Arc::clone(&self.session.model), to.clone());
+            }
+        }
         if let Some(n) = switch {
             d.show(&model, n);
         }
-        if create && let Some(new) = d.duplicate.clone() {
+        if create && let Some(Head::Duplicate(new)) = asked.clone() {
             let layered = !model.type_layers(d.category, &d.name).is_empty();
-            let made = match d.params(new.trim(), model.units, layered) {
+            let made = match d.params(&new, model.units, layered) {
                 Ok(mut p) => {
                     // A duplicate is round, and made of a material, as the type it copies is.
                     let types = serde_json::to_value(&model.types).unwrap_or_default();
@@ -1633,22 +1622,22 @@ impl BimApp {
                             }
                         }
                     }
-                    self.run("type", p).is_some()
+                    self.run_for_type("type", p, &mut d.error)
                 }
                 Err(e) => {
-                    self.status = Status { text: e, error: true };
+                    d.error = Some(e);
                     false
                 }
             };
             if made {
-                d.show(&self.session.model, new.trim().to_string());
+                d.show(&self.session.model, new);
             }
         }
         if apply || ok {
             let applied = match d.params(&d.name, model.units, false) {
-                Ok(p) => self.run("type", p).is_some(),
+                Ok(p) => self.run_for_type("type", p, &mut d.error),
                 Err(e) => {
-                    self.status = Status { text: e, error: true };
+                    d.error = Some(e);
                     false
                 }
             };
@@ -1945,8 +1934,10 @@ pub(crate) struct FamilyDialog {
     elements: Vec<Id>,
     /// Each type parameter: its name, what it holds, as typed, and whether a formula works it out.
     fields: Vec<(String, Holds, String, bool)>,
-    /// The name being typed for a duplicate.
-    duplicate: Option<String>,
+    /// A new name being typed, for a duplicate or a rename.
+    naming: Naming,
+    /// What stopped OK, Apply, Duplicate or Rename.
+    error: Option<String>,
 }
 
 impl FamilyDialog {
@@ -1966,7 +1957,7 @@ impl FamilyDialog {
                 f.parameters.iter().filter(|p| !p.instance).map(|p| (p.name.clone(), p.kind, typed(p), p.formula.is_some())).collect()
             })
             .unwrap_or_default();
-        FamilyDialog { family, name, elements, fields, duplicate: None }
+        FamilyDialog { family, name, elements, fields, naming: Naming::None, error: None }
     }
 
     /// The dialog showing type `name` as the model has it now.
@@ -1998,98 +1989,76 @@ impl BimApp {
         let model = Arc::clone(&self.session.model);
         let names: Vec<String> = model.families.get(&d.family).map(|f| f.types.keys().cloned().collect()).unwrap_or_default();
         let materials: Vec<String> = model.materials.keys().cloned().collect();
-        let (mut ok, mut cancel, mut apply, mut create, mut switch) = (false, false, false, false, None);
+        let (mut ok, mut cancel, mut apply, mut asked) = (false, false, false, None);
         let r = Modal::new(UiId::new("family-type-properties")).show(ctx, |ui| {
-            ui.set_width(420.0);
-            ui.label(RichText::new(t("Type Properties")).heading());
-            ui.add_space(6.0);
-            Grid::new("family-type-head").num_columns(2).spacing(vec2(12.0, 6.0)).show(ui, |ui| {
-                ui.label(t("Family:"));
-                ui.label(&d.family);
-                ui.end_row();
-                let l = ui.label(t("Type:"));
-                ui.horizontal(|ui| {
-                    let c = ComboBox::from_id_salt("family-type-name").selected_text(&d.name).width(200.0).show_ui(ui, |ui| {
-                        for n in &names {
-                            if ui.selectable_label(*n == d.name, n).clicked() {
-                                switch = Some(n.clone());
-                            }
-                        }
-                    });
-                    c.response.labelled_by(l.id);
-                    if d.duplicate.is_none() && ui.button(t("Duplicate…")).clicked() {
-                        d.duplicate = Some(format!("{} 2", d.name));
-                    }
-                });
-                ui.end_row();
-                if let Some(new) = &mut d.duplicate {
-                    let l = ui.label(t("New type"));
-                    ui.horizontal(|ui| {
-                        ui.add(TextEdit::singleline(new).desired_width(200.0)).labelled_by(l.id);
-                        create = ui.button(t("Create")).clicked();
-                    });
-                    ui.end_row();
+            typeprops::title(ui);
+            asked = typeprops::head(ui, "family-type", &d.family, &names, &d.name, &mut d.naming, true);
+            let below = typeprops::foot_height(ui, d.error.is_some());
+            // Each parameter under the group Revit gives what it holds: lengths and angles are dimensions.
+            let group = |kind: &Holds| match kind {
+                Holds::Length | Holds::Angle => "Dimensions",
+                Holds::Material => msg!("Materials and Finishes"),
+                Holds::Number | Holds::YesNo => "Other",
+            };
+            let mut groups: Vec<&str> = Vec::new();
+            for (_, kind, ..) in &d.fields {
+                if !groups.contains(&group(kind)) {
+                    groups.push(group(kind));
                 }
-            });
-            ui.add_space(6.0);
-            ui.label(RichText::new(t("Type Parameters")).strong());
-            Grid::new("family-type-parameters").num_columns(2).striped(true).min_col_width(150.0).show(ui, |ui| {
-                ui.label(RichText::new(t("Parameter")).color(pal().muted));
-                ui.label(RichText::new(t("Value")).color(pal().muted));
-                ui.end_row();
-                for (key, kind, typed, computed) in &mut d.fields {
-                    let l = ui.label(key.as_str());
-                    match kind {
-                        _ if *computed => {
-                            ui.label(RichText::new(typed.as_str()).color(pal().muted));
-                        }
-                        Holds::YesNo => {
-                            let mut on = typed == "1";
-                            let r = ui.checkbox(&mut on, "");
-                            r.widget_info(|| WidgetInfo::selected(WidgetType::Checkbox, true, on, key.as_str()));
-                            if r.labelled_by(l.id).changed() {
+            }
+            groups.sort_by_key(|g| ["Materials and Finishes", "Dimensions", "Other"].iter().position(|x| x == g));
+            typeprops::table(ui, "family-type", below, |tb| {
+                for g in groups {
+                    tb.group(g);
+                    for (key, kind, typed, computed) in d.fields.iter_mut().filter(|f| group(&f.1) == g) {
+                        match kind {
+                            // What a formula works out, shown as Revit greys it.
+                            _ if *computed => tb.shown(key, typed),
+                            Holds::YesNo => {
+                                let mut on = typed == "1";
+                                tb.check(key, &mut on);
                                 *typed = (if on { "1" } else { "0" }).to_string();
                             }
-                        }
-                        Holds::Material => {
-                            if let Some(m) = combo(ui, (0, key.as_str()), l.id, typed, &materials) {
-                                *typed = m;
-                            }
-                        }
-                        _ => {
-                            ui.add(TextEdit::singleline(typed).desired_width(160.0)).labelled_by(l.id);
+                            Holds::Material => tb.pick(key, typed, &materials),
+                            Holds::Length => tb.text(key, typed, model.units.name()),
+                            Holds::Angle => tb.text(key, typed, "°"),
+                            Holds::Number => tb.text(key, typed, ""),
                         }
                     }
-                    ui.end_row();
                 }
             });
-            ui.add_space(8.0);
-            ui.with_layout(Layout::right_to_left(Align::Min), |ui| {
-                apply = ui.button(t("Apply")).clicked();
-                cancel = ui.button(t("Cancel")).clicked();
-                ok = ui.button(t("OK")).clicked();
-            });
+            (ok, cancel, apply) = typeprops::foot(ui, d.error.as_deref());
         });
-        if let Some(n) = switch {
-            d.show(&model, n);
-        }
-        if create && let Some(new) = d.duplicate.clone() {
-            let made = match d.params(new.trim(), model.units) {
-                Ok(p) => self.run("family", p).is_some(),
-                Err(e) => {
-                    self.status = Status { text: e, error: true };
-                    false
+        match asked {
+            Some(Head::Switch(n)) => d.show(&model, n),
+            Some(Head::Duplicate(new)) => {
+                let made = match d.params(&new, model.units) {
+                    Ok(p) => self.run_for_type("family", p, &mut d.error),
+                    Err(e) => {
+                        d.error = Some(e);
+                        false
+                    }
+                };
+                if made {
+                    d.show(&self.session.model, new);
                 }
-            };
-            if made {
-                d.show(&self.session.model, new.trim().to_string());
             }
+            Some(Head::Rename(to))
+                if self.run_for_type("rename_type", json!({"family": d.family, "type": d.name, "name": to}), &mut d.error) =>
+            {
+                if self.component.as_ref() == Some(&(d.family.clone(), d.name.clone())) {
+                    self.component = Some((d.family.clone(), to.clone()));
+                }
+                d.show(&Arc::clone(&self.session.model), to);
+            }
+            Some(Head::Rename(_)) => {}
+            None => {}
         }
         if apply || ok {
             let applied = match d.params(&d.name, model.units) {
-                Ok(p) => self.run("family", p).is_some(),
+                Ok(p) => self.run_for_type("family", p, &mut d.error),
                 Err(e) => {
-                    self.status = Status { text: e, error: true };
+                    d.error = Some(e);
                     false
                 }
             };

@@ -5206,6 +5206,7 @@ mod start;
 mod titlebar;
 mod tools;
 mod trim;
+mod typeprops;
 mod window;
 
 #[test]

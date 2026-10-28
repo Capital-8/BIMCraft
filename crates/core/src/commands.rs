@@ -1093,6 +1093,16 @@ pub static ALL: &[Command] = &[
         delete_type,
     ),
     edit(
+        "rename_type",
+        "Rename Type",
+        &[],
+        "{category?: wall|floor|door|window|column|roof|ceiling|railing|…, family?, type, name} renames a type of a category \
+         (`category` and `type`) or one of a family's types (`family` and `type`) to `name`, as Rename in Type Properties does: \
+         the elements of it, and what else names it, follow, and it keeps its GUID; refused for a name another type of it has. \
+         Text types and filled region types rename with `rename` on `text_type` and `filled_region_type`",
+        rename_type,
+    ),
+    edit(
         "purge",
         "Purge Unused",
         &["PU"],
@@ -7780,6 +7790,32 @@ fn delete_type(s: &mut Session, p: &Value) -> R {
     }
     s.model_mut().remove_entry(&kind, &name);
     Ok(json!({"deleted": {"kind": label, "name": name}}))
+}
+
+fn rename_type(s: &mut Session, p: &Value) -> R {
+    let c = "rename_type";
+    only(c, p, &["category", "family", "type", "name"])?;
+    let to = name_param(c, p, "name")?.ok_or_else(|| bad(c, "`name` is required: the type's new name"))?;
+    let (kind, from) = entry_of(c, &s.model, p)?;
+    let label = kind.label();
+    // A family's type is `family: type` in the library.
+    let (to_entry, to) = match (&kind, from.split_once(": ")) {
+        (LibKind::FamilyType, Some((f, _))) => (format!("{f}: {to}"), to),
+        _ => (to.clone(), to),
+    };
+    if to_entry == from {
+        return Ok(json!({"renamed": {"kind": label, "from": from, "to": to}}));
+    }
+    let m = s.model_mut();
+    if m.library_names().iter().any(|(k, n)| *k == kind && *n == to_entry) {
+        return Err(bad(c, format!("there's already a {label} `{to}`")));
+    }
+    if !m.move_entry(&kind, &from, &to_entry) {
+        return Err(bad(c, format!("there is no {label} `{from}`")));
+    }
+    rename_entry(m, &kind, &from, &to_entry);
+    let shown = |n: &str| n.split_once(": ").filter(|_| kind == LibKind::FamilyType).map_or(n, |(_, t)| t).to_string();
+    Ok(json!({"renamed": {"kind": label, "from": shown(&from), "to": to}}))
 }
 
 /// How many passes Purge Unused makes at most: what a pass takes out may leave more unused (a family's material), a few deep.
