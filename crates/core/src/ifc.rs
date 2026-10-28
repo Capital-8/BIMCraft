@@ -65,6 +65,9 @@ pub const RUN: &str = "BIMCraft_Run";
 /// a closed face set that doesn't say): `Loft`, JSON `{bottom, top}`.
 pub const LOFT: &str = "BIMCraft_Mass";
 
+/// The object type a room separation line's virtual element carries, which the import reads it back by.
+pub const SEPARATION: &str = "RoomSeparation";
+
 /// The property set an element's phase and design option go in; on the project, its phases and design option sets.
 pub const PHASING: &str = "BIMCraft_Phasing";
 
@@ -817,6 +820,21 @@ pub fn export(m: &Model) -> String {
                 wholes.insert(id, (ent, at, base, parts));
             }
             // On a stair or a ramp, it's one of its parts; see below.
+            // A room separation line: a virtual element along its line, which bounds spaces and is nothing else.
+            Element::RoomSeparator(rs) => {
+                let Some(&(_, storey)) = storeys.get(&rs.level) else { continue };
+                let at = w.place(Some(storey), (0.0, 0.0, 0.0), None);
+                let (a, b) = (w.point(rs.start), w.point(rs.end));
+                let line = w.add(format!("IFCPOLYLINE((#{a},#{b}))"));
+                let rep = w.add(format!("IFCSHAPEREPRESENTATION(#{axis},'Axis','Curve2D',(#{line}))"));
+                let shape = w.add(format!("IFCPRODUCTDEFINITIONSHAPE($,$,(#{rep}))"));
+                let ent = w.add(format!(
+                    "IFCVIRTUALELEMENT({},$,'Room Separation Line',$,'{SEPARATION}',#{at},#{shape},'{id}')",
+                    w.guid(ELEMENT, id)
+                ));
+                contained.entry(rs.level).or_default().push(ent);
+                products.insert(id, ent);
+            }
             Element::Railing(rl) if rl.host.is_none() => {
                 let Some(&(_, storey)) = storeys.get(&rl.level) else { continue };
                 let ent = w.railing(m, id, rl, storey, m.elevation(rl.level), axis);

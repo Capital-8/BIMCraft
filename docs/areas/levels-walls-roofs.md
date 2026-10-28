@@ -22,7 +22,10 @@ layers over, by the way its layer set's usage stacks them). A layer's material i
 paper, where the layer is `PATTERN_ROOM` px wide), its surface pattern a model pattern (`MODULE` mm, its real size). A curved wall turns `arc` degrees, counter-clockwise positive (`walls::Axis`). Where walls meet,
 their faces meet in mitred caps at any angle, and a wall ending on another stops at its face (`walls::cap`); plans, 3D,
 sections and IFC all draw that outline (`walls::outline`, `walls::prisms`). Room areas are measured at the walls' centre
-lines, run on or back to meet at joins (`walls::centre_line`). An attached top or base follows the roof's or floor's plane
+lines, run on or back to meet at joins (`walls::centre_line`). A room separator (`roomseparator`, made by `room_separator` a line per segment) bounds rooms as a wall's centre line
+would and nothing else: it is no edge of a floor, a ceiling or a roof (`Model::bounding_lines` takes it, `wall_lines` and
+`face_lines` don't), it is drawn in plan only, and it goes to IFC as an `IfcVirtualElement` of `ObjectType` `RoomSeparation`
+with an `Axis` polyline on its storey, which the import reads back. An attached top or base follows the roof's or floor's plane
 over each part of the wall (a roof's slopes each over its own part of the plan); a mirrored wall runs back the other way.
 A roof by footprint is the straight skeleton of its outline and its `courtyards` (`skeleton::faces`: the outline
 counter-clockwise, the courtyards clockwise, the roof to the left of every edge): each edge moves in at speed 1, a gable's at

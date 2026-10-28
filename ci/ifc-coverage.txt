@@ -13,6 +13,11 @@ pipe {"points": [[0,6000],[6000,6000]], "offset": 500, "end_offset": 300, "syste
 pipe {"points": [[1000,6500],[1000,6500]], "offset": 0, "end_offset": 3000}
 conduit {"points": [[0,7000],[6000,7000]], "offset": 2500, "justify": "top", "system": "Circuit 1"}
 cable_tray {"points": [[0,7500],[6000,7500]], "offset": 2700, "justify": "bottom"}
+# An open plan split by a room separator, a room either side.
+wall {"points": [[0,20000],[8000,20000],[8000,26000],[0,26000]], "closed": true}
+room_separator {"points": [[5000,20000],[5000,26000]]}
+room {"point": [2000,23000], "name": "Living"}
+room {"point": [7000,23000], "name": "Kitchen"}
 # A straight mass, a lofted one, and phases with a design option.
 mass {"boundary": [[10000,0],[16000,0],[16000,5000],[10000,5000]], "height": 9000}
 mass {"boundary": [[20000,0],[26000,0],[26000,5000],[20000,5000]], "height": 9000, "lean": [1500, 0]}

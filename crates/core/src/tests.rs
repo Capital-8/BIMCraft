@@ -5101,3 +5101,51 @@ fn each_undo_step_says_what_it_made_or_took_away_and_undo_and_redo_go_back_sever
     assert_eq!(s.model, before);
     assert_eq!(s.steps(false).len(), 2);
 }
+
+#[test]
+fn room_separators_split_rooms_without_walls_and_survive_ifc() {
+    let mut s = Session::new();
+    house(&mut s);
+    let r = run(&mut s, "room", json!({"point": [2000, 3000], "name": "Living"}));
+    assert_eq!(r["area_m2"], 48.0);
+    // An open plan split into a living room and a kitchen by a line, not a wall.
+    let made = run(&mut s, "room_separator", json!({"points": [[5000, 0], [5000, 6000]]}));
+    assert_eq!(made["ids"].as_array().map(Vec::len), Some(1));
+    let rooms = run(&mut s, "elements", json!({"category": "room"}));
+    assert_eq!(rooms["elements"][0]["area_m2"], 30.0);
+    assert_eq!(run(&mut s, "room", json!({"point": [7000, 3000], "name": "Kitchen"}))["area_m2"], 18.0);
+    let lines = run(&mut s, "elements", json!({"category": "roomseparator"}));
+    assert_eq!((lines["count"].as_u64(), lines["elements"][0]["length"].as_f64()), (Some(1), Some(6000.0)));
+    // Floors still follow the walls: a separator is no edge of a slab.
+    assert_eq!(run(&mut s, "floor", json!({}))["area_m2"], 48.0);
+    // A chain makes one line per segment; a point repeated or too few points is an error.
+    let chain = run(&mut s, "room_separator", json!({"points": [[0, 3000], [2000, 3000], [2000, 6000]]}));
+    assert_eq!(chain["ids"].as_array().map(Vec::len), Some(2));
+    run(&mut s, "undo", json!({}));
+    for p in [json!({"points": [[0, 0]]}), json!({"points": [[0, 0], [0, 0]]}), json!({"points": [[0, 0], [1000, 0]], "level": "Nowhere"})]
+    {
+        assert!(s.execute("room_separator", &p).is_err(), "{p}");
+    }
+
+    // IFC: an IfcVirtualElement with its axis on the storey, read back as the same line.
+    let file = crate::ifc::export(&s.model);
+    assert!(file.contains("IFCVIRTUALELEMENT(") && file.contains("'RoomSeparation'"), "{file}");
+    let back = crate::import::ifc(file.as_bytes(), "t").unwrap();
+    assert_eq!(back.skipped, Vec::<String>::new());
+    let lines: Vec<_> = back
+        .model
+        .elements
+        .values()
+        .filter_map(|e| match e {
+            crate::model::Element::RoomSeparator(rs) => Some((rs.start, rs.end)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(lines, vec![(P2(5000.0, 0.0), P2(5000.0, 6000.0))]);
+    let mut t = Session::new();
+    t.reset(back.model, None);
+    let rooms = run(&mut t, "elements", json!({"category": "room"}));
+    let mut areas: Vec<f64> = rooms["elements"].as_array().unwrap().iter().filter_map(|r| r["area_m2"].as_f64()).collect();
+    areas.sort_by(f64::total_cmp);
+    assert_eq!(areas, vec![18.0, 30.0]);
+}
