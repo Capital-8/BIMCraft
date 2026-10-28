@@ -8,6 +8,7 @@ import sys
 
 import ifcopenshell
 import ifcopenshell.geom
+import ifcopenshell.ifcopenshell_wrapper
 import ifcopenshell.validate
 
 
@@ -18,12 +19,16 @@ def check(path):
     ifcopenshell.validate.validate(f, logger, express_rules=True)
     problems += [f"rule: {s.get('message', s)}" for s in logger.statements]
     settings = ifcopenshell.geom.settings()
+    # A product drawn only as a curve (a room separation line's Axis) is built as that curve.
+    curves = ifcopenshell.geom.settings()
+    curves.set("dimensionality", ifcopenshell.ifcopenshell_wrapper.CURVES_SURFACES_AND_SOLIDS)
     shapes = 0
     for product in f.by_type("IfcProduct"):
         if product.Representation is None:
             continue
         try:
-            ifcopenshell.geom.create_shape(settings, product)
+            bodied = any(r.RepresentationIdentifier == "Body" for r in product.Representation.Representations)
+            ifcopenshell.geom.create_shape(settings if bodied else curves, product)
             shapes += 1
         except Exception as e:  # IfcOpenShell raises its own RuntimeError subclasses
             problems.append(f"shape of #{product.id()} {product.is_a()} {product.Name!r}: {e}")

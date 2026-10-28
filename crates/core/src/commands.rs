@@ -22,8 +22,8 @@ use crate::model::{
     CEILING_HEIGHT, Ceiling, CeilingType, Column, ColumnType, Component, DEFAULT_HEIGHT, DimKind, Dimension, Element, Extrusion, Face,
     Facing, Floor, FloorType, Grid, Guid, Id, Key, Landing, Layer, Level, Line, Location, MAX_COORD, MAX_POINTS, MAX_SLOPE, MAX_TEXT, Mass,
     Model, NOTE_SIZE, Note, Opening, OpeningType, PARAMETER_CATEGORIES, ParameterKind, Pattern, PlanView, PointCloud, ProjectParameter,
-    RAMP_SLOPE, RAMP_WIDTH, RISER, Railing, RailingType, Ramp, Reference, Roof, RoofType, Room, STAIR_WIDTH, Schedule, Section, SectionBox,
-    Shaft, Sheet, Side, Spot, Stair, TOL, TREAD, Tag, View3D, Viewport, Wall, WallType, heading, paper,
+    RAMP_SLOPE, RAMP_WIDTH, RISER, Railing, RailingType, Ramp, Reference, Roof, RoofType, Room, RoomSeparator, STAIR_WIDTH, Schedule,
+    Section, SectionBox, Shaft, Sheet, Side, Spot, Stair, TOL, TREAD, Tag, View3D, Viewport, Wall, WallType, heading, paper,
 };
 use crate::paint;
 use crate::phasing;
@@ -286,7 +286,22 @@ pub static ALL: &[Command] = &[
          the view hides. Revit's Show Mass has no default shortcut; MH is BIMCraft's",
         show_mass,
     ),
-    edit("room", "Room", &["RM"], "{point: [x,y], level?, name?, number?} bounded by the walls around the point", room),
+    edit(
+        "room",
+        "Room",
+        &["RM"],
+        "{point: [x,y], level?, name?, number?} bounded by the walls and the room separation lines around the point",
+        room,
+    ),
+    edit(
+        "room_separator",
+        "Room Separator",
+        &[],
+        "{points: [[x,y],…], level?, closed?} room separation lines along `points`, one per segment (`closed` joins the last \
+         to the first): they bound rooms as walls do, to split an open space (a living room and its corridor) into rooms, \
+         and are nothing else, with no solid, no cut and no area. Returns their ids",
+        room_separator,
+    ),
     edit(
         "column",
         "Column",
@@ -1484,7 +1499,7 @@ fn wall_at(m: &Model, level: impl Key, at: P2) -> Option<(Guid, f64)> {
 pub fn floor_outline(m: &Model, level: impl Key) -> Option<(Vec<P2>, Vec<Vec<P2>>)> {
     let level = m.guid(level);
     // Each piece's outline, clockwise, the largest first.
-    let mut pieces: Vec<Vec<P2>> = geom::faces(&m.bounding_lines(level), TOL).into_iter().filter(|f| geom::area(f) < -TOL * TOL).collect();
+    let mut pieces: Vec<Vec<P2>> = geom::faces(&m.wall_lines(level), TOL).into_iter().filter(|f| geom::area(f) < -TOL * TOL).collect();
     pieces.sort_by(|a, b| geom::area(a).total_cmp(&geom::area(b)));
     let (outer, inner) = pieces.split_first()?;
     // The loops standing free inside the outline: the other pieces, inside it. Whether loop `a`
@@ -1561,6 +1576,9 @@ pub fn element_json(m: &Model, id: Id) -> Value {
         }
     });
     match e {
+        Element::RoomSeparator(rs) => {
+            extra.insert("length".into(), json!(hundredth(rs.start.dist(rs.end))));
+        }
         Element::PointCloud(pc) => {
             if let Some(cloud) = m.clouds.get(&pc.cloud) {
                 extra.insert("points".into(), json!(cloud.len()));
@@ -3383,6 +3401,29 @@ fn grid(s: &mut Session, p: &Value) -> R {
     };
     let id = s.model_mut().insert(Element::Grid(Grid { name: name.clone(), start, end }));
     Ok(json!({"id": id, "name": name}))
+}
+
+fn room_separator(s: &mut Session, p: &Value) -> R {
+    let c = "room_separator";
+    let mut pts = points(c, p, "points")?;
+    if pts.len() < 2 {
+        return Err(bad(c, "`points` needs at least 2 points"));
+    }
+    if flag(c, p, "closed")?
+        && let Some(&first) = pts.first()
+    {
+        pts.push(first);
+    }
+    let level = level_param(c, &s.model, p, "level")?;
+    let m = s.model_mut();
+    let ids: Vec<Id> = pts
+        .windows(2)
+        .filter_map(|seg| match seg {
+            [a, b] => Some(m.insert(Element::RoomSeparator(RoomSeparator { level, start: *a, end: *b }))),
+            _ => None,
+        })
+        .collect();
+    Ok(json!({"ids": ids}))
 }
 
 fn wall(s: &mut Session, p: &Value) -> R {
@@ -6156,6 +6197,7 @@ pub(crate) fn transform(c: &str, m: &Model, mut e: Element, id: Id, mo: &Motion,
         // A mirror image runs back the other way, so its exterior side is the mirror image of the old one.
         Element::Wall(w) => (w.start, w.end) = if mo.mirror { (f(w.end), f(w.start)) } else { (f(w.start), f(w.end)) },
         Element::Grid(g) => (g.start, g.end) = (f(g.start), f(g.end)),
+        Element::RoomSeparator(rs) => (rs.start, rs.end) = (f(rs.start), f(rs.end)),
         Element::Floor(fl) => {
             fl.boundary.iter_mut().chain(fl.openings.iter_mut().flatten()).for_each(|q| *q = f(*q));
             // A mirror turns the outline clockwise; floors keep theirs counter-clockwise.

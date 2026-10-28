@@ -771,6 +771,7 @@ pub(crate) fn plan_shows(m: &Model, plan: impl Key) -> Vec<P2> {
             Element::Mass(ms) if m.mass_cut_by(ms, r.cut) => extent.extend(m.mass_outline(ms, r.cut)),
             Element::Component(c) if c.level == level => extent.extend(m.component_pieces(c).into_iter().flat_map(|p| p.outline)),
             Element::Grid(g) => extent.extend([g.start, g.end]),
+            Element::RoomSeparator(rs) if rs.level == level => extent.extend([rs.start, rs.end]),
             Element::Dimension(dm) if m.annotation_in(e, key) => extent.push(dm.at),
             Element::Section(v) | Element::Elevation(v) => extent.extend([v.start, v.end]),
             Element::Tag(t) if m.annotation_in(e, key) => extent.extend(m.anchor(t.host).map(|a| a + t.offset)),
@@ -836,6 +837,7 @@ pub fn sketch(m: &Model, view: View, id: Id, e: &Element) -> Drawing {
         Element::Stair(st) => stair(&mut d, m, st, st.level),
         Element::Ramp(r) => ramp(&mut d, m, r, r.level),
         Element::Railing(rl) => d.line(&stairs::railing(m, rl).into_iter().map(|(p, _)| p).collect::<Vec<_>>(), Pen::MEDIUM, INK, false),
+        Element::RoomSeparator(rs) => d.line(&[rs.start, rs.end], Pen::PROJECTION, INK, false),
         Element::Roof(r) => roof(&mut d, m, r),
         Element::Mass(ms) => d.dashed(&ms.boundary, Pen::MEDIUM, MASS, true),
         _ => {}
@@ -1587,6 +1589,11 @@ fn draw_plan(m: &Model, plan: impl Key, view: View, up: bool, k: f32, n: f64, ti
             Element::Stair(st) => stair(&mut d, m, st, level),
             Element::Ramp(r) => ramp(&mut d, m, r, level),
             Element::Railing(rl) if m.level_of(e) == Some(level) => railing(&mut d, m, rl, range.cut),
+            // A room separation line: a thin line, on its own level's plan only.
+            Element::RoomSeparator(rs) if rs.level == level => {
+                let pts = vec![d.view.px(rs.start), d.view.px(rs.end)];
+                d.stroke(pts, BY_CATEGORY, INK, None, false);
+            }
             Element::Roof(r) if r.level == level => roof(&mut d, m, r),
             // Overhead, from below: its edges, round its courtyards too, dashed, while its eaves are under
             // the view range's top.

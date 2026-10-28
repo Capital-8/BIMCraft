@@ -197,6 +197,10 @@ pub fn category(category: &str, several: bool) -> String {
         "massfloor" => (["Mass Floor", "Piso de massa", "Piso de masa"], ["Mass Floors", "Pisos de massa", "Pisos de masa"]),
         "ramp" => (["Ramp", "Rampa", "Rampa"], ["Ramps", "Rampas", "Rampas"]),
         "railing" => (["Railing", "Guarda-corpo", "Barandal"], ["Railings", "Guarda-corpos", "Barandales"]),
+        "roomseparator" => (
+            ["Room Separator", "Separador de ambientes", "Separador de habitaciones"],
+            ["Room Separators", "Separadores de ambientes", "Separadores de habitaciones"],
+        ),
         "beam" => (["Beam", "Viga", "Viga"], ["Beams", "Vigas", "Vigas"]),
         "structuralcolumn" => (
             ["Structural Column", "Pilar estrutural", "Columna estructural"],

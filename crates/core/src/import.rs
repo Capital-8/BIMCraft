@@ -20,8 +20,8 @@ use crate::library::Kind;
 use crate::model::{
     Ceiling, CeilingType, Column, ColumnType, Component, Element, Extrusion, FIRST_ID, Floor, FloorType, Function, Grid, Guid, Id, Justify,
     Landing, Layer, Level, MAX_COORD, MAX_LAYERS, MAX_POINTS, MAX_PROJECT_PARAMETERS, MAX_TEXT, Mass, Model, Opening, OpeningType,
-    PARAMETER_CATEGORIES, ParameterKind, ProjectParameter, Railing, RailingType, Ramp, Roof, RoofType, Room, Run, RunType, Shaft, Side,
-    Stair, TOL, Wall, WallType, culprit, heading,
+    PARAMETER_CATEGORIES, ParameterKind, ProjectParameter, Railing, RailingType, Ramp, Roof, RoofType, Room, RoomSeparator, Run, RunType,
+    Shaft, Side, Stair, TOL, Wall, WallType, culprit, heading,
 };
 use crate::phasing;
 use crate::stairs;
@@ -2291,6 +2291,27 @@ pub fn ifc(bytes: &[u8], name: &str) -> Result<Imported, String> {
         from.insert(rid, who(id));
         origin.entry(id).or_insert(rid);
         elements_from.entry(id).or_default().push(rid);
+    }
+
+    // Room separation lines: virtual elements BIMCraft wrote, a line per segment of their axis.
+    for id in named(&["IFCVIRTUALELEMENT"]) {
+        let Some(x) = e(id).filter(|x| text(x.args.get(4)) == Some(crate::ifc::SEPARATION)) else { continue };
+        seen.insert(id);
+        let Some(axis) = r.axis(x).filter(|a| a.len() >= 2) else {
+            leave(&mut skipped, &mut seen, id, "its room separation line has no axis");
+            continue;
+        };
+        let level = level_for(id, axis.first().map_or(0.0, |p| p[2]));
+        for w in axis.windows(2) {
+            let (start, end) = (micron(r.flat(w[0])), micron(r.flat(w[1])));
+            if start.dist(end) <= TOL {
+                continue;
+            }
+            let sid = m.insert(Element::RoomSeparator(RoomSeparator { level, start, end }));
+            from.insert(sid, who(id));
+            origin.entry(id).or_insert(sid);
+            elements_from.entry(id).or_default().push(sid);
+        }
     }
 
     // Doors and windows: where their openings cut their walls.

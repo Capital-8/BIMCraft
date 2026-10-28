@@ -156,6 +156,17 @@ pub struct Grid {
     pub end: P2,
 }
 
+/// A room separation line, as Revit's: on `level`, from `start` to `end`. It bounds rooms as a wall
+/// does (two rooms in one open space, a living room and its corridor) and is nothing else: no
+/// solid, no cut, no area of its own.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RoomSeparator {
+    pub level: Guid,
+    pub start: P2,
+    pub end: P2,
+}
+
 /// A wall: its location line from `start` to `end`, straight or, turning `arc` degrees, an arc;
 /// which line of the wall that is (its `location`); its exterior side to the left of start to end,
 /// as Revit's, so walls drawn clockwise face out.
@@ -1272,6 +1283,7 @@ macro_rules! visit_refs {
                 if let Some(g) = & $($m)? s.host { f(g) }
             }
             Element::PointCloud(pc) => f(& $($m)? pc.level),
+            Element::RoomSeparator(rs) => f(& $($m)? rs.level),
         }
     }};
 }
@@ -1289,6 +1301,9 @@ pub enum Element {
     Door(Opening),
     Window(Opening),
     Room(Room),
+    /// A room separation line: it bounds rooms and builds nothing.
+    #[serde(rename = "roomseparator")]
+    RoomSeparator(RoomSeparator),
     Dimension(Dimension),
     Tag(Tag),
     Section(Section),
@@ -1515,6 +1530,7 @@ impl Element {
             Element::Door(_) => "door",
             Element::Window(_) => "window",
             Element::Room(_) => "room",
+            Element::RoomSeparator(_) => "roomseparator",
             Element::Dimension(_) => "dimension",
             Element::Tag(_) => "tag",
             Element::Section(_) => "section",
@@ -2856,6 +2872,7 @@ impl Model {
             Element::Shaft(sh) => Some(sh.level),
             Element::Mass(ms) => Some(ms.level),
             Element::Room(r) => Some(r.level),
+            Element::RoomSeparator(rs) => Some(rs.level),
             Element::Dimension(d) => Some(d.level),
             Element::Column(c) | Element::StructuralColumn(c) | Element::Footing(c) => Some(c.level),
             run_arm!(r) => Some(r.level),
@@ -3645,8 +3662,15 @@ impl Model {
         }
     }
 
-    /// Centre lines of the walls that bound the rooms of `level`, arcs as chords.
+    /// What bounds the rooms of `level`: the centre lines of its walls, arcs as chords, and its room separation lines.
     pub fn bounding_lines(&self, level: impl Key) -> Vec<(P2, P2)> {
+        let mut lines = self.wall_lines(level);
+        lines.extend(self.separators(level));
+        lines
+    }
+
+    /// Centre lines of the walls that bound the rooms of `level`, arcs as chords.
+    pub fn wall_lines(&self, level: impl Key) -> Vec<(P2, P2)> {
         self.elements
             .iter()
             .filter(|(_, e)| matches!(e, Element::Wall(w) if self.bounding(w, level)))
@@ -3657,12 +3681,24 @@ impl Model {
             .collect()
     }
 
-    /// The faces of the walls that bound the rooms of `level`: the edges of their outlines.
+    /// The faces of the walls that bound the rooms of `level`: the edges of their outlines. Room separation lines
+    /// aren't among them: a floor or a ceiling picked inside the walls runs past them.
     pub fn face_lines(&self, level: impl Key) -> Vec<(P2, P2)> {
         self.elements
             .iter()
             .filter(|(_, e)| matches!(e, Element::Wall(w) if self.bounding(w, level)))
             .flat_map(|(&id, _)| geom::ring_edges(&walls::outline(self, id)).collect::<Vec<_>>())
+            .collect()
+    }
+
+    /// The room separation lines on `level`.
+    pub fn separators(&self, level: impl Key) -> Vec<(P2, P2)> {
+        self.elements
+            .values()
+            .filter_map(|e| match e {
+                Element::RoomSeparator(rs) if self.same(rs.level, level) => Some((rs.start, rs.end)),
+                _ => None,
+            })
             .collect()
     }
 
@@ -3999,6 +4035,10 @@ impl Model {
                     if !grid_names.insert(g.name.as_str()) {
                         return Err(format!("{who}: another grid is already named `{}`", g.name));
                     }
+                }
+                Element::RoomSeparator(rs) => {
+                    level_ok(rs.level)?;
+                    line(&who, rs.start, rs.end)?;
                 }
                 Element::Wall(w) => {
                     known(&who, &w.type_name, &self.types.wall)?;
