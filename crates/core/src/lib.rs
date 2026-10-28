@@ -46,6 +46,7 @@ pub mod sample;
 pub mod schedule;
 #[cfg(test)]
 mod section_box_tests;
+pub mod selection;
 pub mod sheet;
 pub mod skeleton;
 pub mod sketch;

@@ -5178,6 +5178,7 @@ mod dialog;
 mod dock;
 mod draw;
 mod fills;
+mod filter;
 mod fonts;
 mod gpu;
 mod graphics;

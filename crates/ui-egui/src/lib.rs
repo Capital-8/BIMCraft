@@ -16,6 +16,7 @@ mod draw;
 mod editor;
 mod favorites;
 mod fillpatterns;
+mod filter;
 mod footer;
 mod gpu;
 mod graphics;
@@ -621,6 +622,7 @@ pub struct BimApp {
     /// Manage > Select by ID and IDs of Selection, while open.
     select_by_id: Option<inquiry::SelectById>,
     ids_of_selection: Option<inquiry::IdsOfSelection>,
+    selection_filter: Option<filter::SelectionFilter>,
     /// What was last put on the clipboard.
     pub copied: Option<String>,
     active_option: Option<String>,
@@ -1036,6 +1038,7 @@ impl BimApp {
             purge_dialog: None,
             select_by_id: None,
             ids_of_selection: None,
+            selection_filter: None,
             copied: None,
             active_option: None,
             new_schedule: None,
@@ -1447,6 +1450,7 @@ impl BimApp {
             || self.purge_dialog.is_some()
             || self.select_by_id.is_some()
             || self.ids_of_selection.is_some()
+            || self.selection_filter.is_some()
             || self.settings_page.is_some()
             || self.new_schedule.is_some()
             || self.show_shortcuts
@@ -2817,6 +2821,24 @@ impl BimApp {
     }
 
     /// Ribbon buttons that pick tools, under the panel's name.
+    /// The Select panel each tab starts with: Modify, and Revit's Filter while something is selected, to keep some of it by
+    /// category or by the values of a parameter they all have.
+    fn select_panel(&mut self, ui: &mut Ui) {
+        panel(ui, "Select", |ui| {
+            if big_button(ui, Icon::Modify, "Modify", structure::same_tool(&self.tool, &Tool::Modify), "Modify (MD): select elements")
+                .clicked()
+            {
+                self.set_tool(Tool::Modify);
+            }
+            if !self.selection.is_empty() {
+                let tip = "Filter: keep some of the selection, by category or by the values of a parameter they all have";
+                if big_button(ui, Icon::Filter, "Filter", self.selection_filter.is_some(), tip).clicked() {
+                    self.open_filter();
+                }
+            }
+        });
+    }
+
     fn tools(&mut self, ui: &mut Ui, name: &str, tools: Tools) {
         panel(ui, name, |ui| {
             for (icon, label, tip, tool) in tools {
@@ -2895,7 +2917,7 @@ impl BimApp {
     }
 
     fn architecture_tab(&mut self, ui: &mut Ui) {
-        self.tools(ui, "Select", &[(Icon::Modify, "Modify", "Modify (MD): select elements", Tool::Modify)]);
+        self.select_panel(ui);
         self.tools(
             ui,
             "Build",
@@ -2960,7 +2982,7 @@ impl BimApp {
     }
 
     fn annotate_tab(&mut self, ui: &mut Ui) {
-        self.tools(ui, "Select", &[(Icon::Modify, "Modify", "Modify (MD): select elements", Tool::Modify)]);
+        self.select_panel(ui);
         self.tools(
             ui,
             "Dimension",
@@ -3323,7 +3345,7 @@ impl BimApp {
     }
 
     fn modify_tab(&mut self, ui: &mut Ui) {
-        self.tools(ui, "Select", &[(Icon::Modify, "Modify", "Modify (MD): select elements", Tool::Modify)]);
+        self.select_panel(ui);
         if self.sketch.is_some() {
             self.sketch_draw(ui);
             self.mode_panel(ui);
@@ -3922,9 +3944,14 @@ impl BimApp {
             ui.label(RichText::new(t(self.prompt())).color(pal().muted));
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 // How many elements are selected, by the selection filter, as Revit shows it.
+                // A click on it filters the selection, as Revit's does.
                 ui.label(format!(":{}", self.selection.len()));
-                let (r, _) = ui.allocate_exact_size(vec2(16.0, 16.0), Sense::hover());
+                let (r, funnel) = ui.allocate_exact_size(vec2(16.0, 16.0), Sense::click());
                 icons::paint(ui.painter(), Icon::Filter, r, pal().icon);
+                funnel.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, t("Filter Selection")));
+                if funnel.on_hover_text(t("Filter Selection")).clicked() {
+                    self.open_filter();
+                }
                 if let Some(p) = self.canvas.cursor {
                     let u = self.session.model.units;
                     ui.monospace(format!("x {}  y {}", u.with_unit(p.0), u.with_unit(p.1)));
@@ -4157,6 +4184,7 @@ impl BimApp {
         self.point_cloud_window(ctx);
         self.select_by_id_window(ctx);
         self.ids_of_selection_window(ctx);
+        self.selection_filter_window(ctx);
         self.shortcuts_window(ctx);
         self.settings_window(ctx);
         self.installing_box(ctx);

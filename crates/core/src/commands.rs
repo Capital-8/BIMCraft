@@ -1238,6 +1238,16 @@ pub static ALL: &[Command] = &[
         ids_of,
     ),
     other(
+        "filter_selection",
+        "Filter",
+        "{ids: [id or GUID, …], by?, keep?: [value, …]} Revit's Filter on a selection: `groups` [{value, count, ids}, …], \
+         the values `by` takes among the elements (by default `Category`, whose values are categories' keys: wall, door, \
+         detail_line…; else a parameter as `fields` lists them, values as schedules show them, `\"\"` for none), and \
+         `fields`, the parameters every one of them has, to filter by. With `keep`, `ids`: those holding one of its values, \
+         the selection to keep; it selects nothing itself, a front end does",
+        filter_selection,
+    ),
+    other(
         "elements",
         "Elements",
         "{category?, level?, limit?, offset?} elements with their `id` (six digits, what commands take) and `guid` (made once, \
@@ -1897,6 +1907,40 @@ fn select_by_id(s: &mut Session, p: &Value) -> R {
         "plan": shown.map(|(level, _)| level),
         "extent": shown.map(|(_, [lo, hi])| [micron(lo), micron(hi)]),
     }))
+}
+
+fn filter_selection(s: &mut Session, p: &Value) -> R {
+    let c = "filter_selection";
+    let m = &s.model;
+    let ids = ids_param(c, m, p)?;
+    let fields = crate::selection::common(m, &ids);
+    let by = string(c, p, "by")?.unwrap_or_else(|| crate::selection::CATEGORY.into());
+    if !fields.iter().any(|(n, _)| *n == by) {
+        let names: Vec<&str> = fields.iter().map(|(n, _)| n.as_str()).collect();
+        return Err(bad(c, format!("`{by}` isn't a parameter every element has; they share: {}", names.join(", "))));
+    }
+    let groups = crate::selection::groups(m, &ids, &by);
+    let mut reply = json!({
+        "by": by,
+        "fields": fields.iter().map(|(n, _)| n).collect::<Vec<_>>(),
+        "groups": groups.iter().map(|g| json!({"value": g.value, "count": g.ids.len(), "ids": g.ids})).collect::<Vec<_>>(),
+    });
+    match p.get("keep") {
+        v if absent(v) => {}
+        Some(Value::Array(a)) if a.len() <= MAX_POINTS => {
+            let keep = a
+                .iter()
+                .map(|v| match v {
+                    Value::String(t) if t.chars().count() <= MAX_TEXT => Ok(t.clone()),
+                    v => Err(bad(c, format!("`keep` holds values as text of at most {MAX_TEXT} characters, got {v}"))),
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            reply["ids"] = json!(crate::selection::kept(m, &ids, &by, &keep));
+        }
+        Some(v) => return Err(bad(c, format!("`keep` must be a list of values, got {v}"))),
+        None => {}
+    }
+    Ok(reply)
 }
 
 fn library(s: &mut Session, p: &Value) -> R {

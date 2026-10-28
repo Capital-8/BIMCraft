@@ -2754,6 +2754,17 @@ const WORDS: &[[&str; 3]] = &[
     // Manage > Inquiry: Select by ID and IDs of Selection.
     ["Inquiry", "Consulta", "Consulta"],
     ["Select by ID", "Selecionar por ID", "Seleccionar por ID"],
+    ["Check All", "Marcar todos", "Seleccionar todo"],
+    ["Title", "Título", "Título"],
+    ["Filter Selection", "Filtrar seleção", "Filtrar selección"],
+    ["Check None", "Desmarcar todos", "No seleccionar ninguno"],
+    ["Count", "Contagem", "Recuento"],
+    ["Total selected items: {}", "Total de itens selecionados: {}", "Total de elementos seleccionados: {}"],
+    [
+        "Filter: keep some of the selection, by category or by the values of a parameter they all have",
+        "Filtro: manter parte da seleção, por categoria ou pelos valores de um parâmetro que todos têm",
+        "Filtro: conservar parte de la selección, por categoría o por los valores de un parámetro que todos tienen",
+    ],
     ["IDs of Selection", "IDs da seleção", "ID de la selección"],
     [
         "Select by ID: select elements by their IDs, GUIDs or IFC GlobalIds, as many as you paste, and show them",
