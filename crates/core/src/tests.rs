@@ -1517,6 +1517,9 @@ fn hostile_params_never_panic_or_break_the_model() {
         json!({"path": 5}),
         json!({"path": "/nonexistent/scan.las", "units": "furlong", "spacing": -1}),
         json!({"cloud": "nope", "origin": "file", "at": [1e300, 0]}),
+        json!({"path": "/nonexistent/plan.dxf", "units": "furlong", "scale": -1, "position": 3}),
+        json!({"cad": "nope", "layers": [1, null], "colors": {}, "view": "nowhere", "link": "yes"}),
+        json!({"id": 100002, "hide": "x", "show": [[]], "reach": -1}),
         json!({"id": 100002, "level": [], "start": "x"}),
         json!({"id": 100002, "top_level": 100002}),
         json!({"limit": -1, "offset": 1e30}),
@@ -4940,39 +4943,40 @@ fn a_file_from_before_guids_opens_with_guids_and_six_digit_ids() {
 fn a_project_is_saved_as_format_6_and_one_of_format_4_or_5_opens_as_it_is_and_one_of_format_7_is_refused() {
     use crate::model::Model;
     // 5 added the scans a project holds and the point clouds that place them; 6 added detailing (lines, regions, groups,
-    // repeating details, line and fill styles). Nothing in a file of 4 or 5 changes.
+    // repeating details, line and fill styles); 7 its CAD drawings and the imports that place them. Nothing in a file of 4, 5
+    // or 6 changes.
     let mut s = Session::new();
     let empty = serde_json::to_value(&*s.model).unwrap();
     house(&mut s);
     run(&mut s, "detail_line", json!({"start": [0, 0], "end": [1000, 0]}));
     let full = serde_json::to_value(&*s.model).unwrap();
     for v in [&empty, &full] {
-        assert_eq!(v["format"], 6, "a project is saved as format 6");
-        for old in [4, 5] {
+        assert_eq!(v["format"], 7, "a project is saved as format 7");
+        for old in [4, 5, 6] {
             let mut was = v.clone();
             was["format"] = json!(old);
             let (m, left_out) = Model::read(&was.to_string()).unwrap();
-            assert_eq!((m.format, left_out.len(), m.elements.len()), (6, 0, v["elements"].as_object().unwrap().len()));
+            assert_eq!((m.format, left_out.len(), m.elements.len()), (7, 0, v["elements"].as_object().unwrap().len()));
         }
     }
     assert!(full["elements"].as_object().unwrap().len() > 5);
     // A newer file says what it is and what to do, even when nothing else in it is wrong.
-    let mut seven = empty.clone();
-    seven["format"] = json!(7);
-    let e = Model::read(&seven.to_string()).unwrap_err();
+    let mut eight = empty.clone();
+    eight["format"] = json!(8);
+    let e = Model::read(&eight.to_string()).unwrap_err();
     assert!(
-        e.contains("newer BIMCraft") && e.contains("file format 7") && e.contains("reads up to 6") && e.contains("update BIMCraft"),
+        e.contains("newer BIMCraft") && e.contains("file format 8") && e.contains("reads up to 7") && e.contains("update BIMCraft"),
         "{e}"
     );
     // A file of this format with a field it doesn't know is read without it, and says which.
     let mut odd = full.clone();
     odd["something_new"] = json!(true);
     let (m, left_out) = Model::read(&odd.to_string()).unwrap();
-    assert_eq!((m.format, left_out), (6, vec!["/something_new".to_string()]));
+    assert_eq!((m.format, left_out), (7, vec!["/something_new".to_string()]));
 }
 
 #[test]
-fn a_format_5_file_that_holds_elements_and_scans_migrates_to_6_and_keeps_both() {
+fn a_format_5_file_that_holds_elements_and_scans_migrates_to_7_and_keeps_both() {
     use crate::model::Model;
     let mut s = Session::new();
     house(&mut s);
@@ -4984,9 +4988,13 @@ fn a_format_5_file_that_holds_elements_and_scans_migrates_to_6_and_keeps_both() 
     let mut file: serde_json::Value = serde_json::from_str(&s.model.to_json().unwrap()).unwrap();
     file["format"] = json!(5);
     let (m, left_out) = Model::read(&file.to_string()).unwrap();
-    assert_eq!((m.format, m.clouds.len(), left_out.len(), m.elements.len()), (6, 1, 0, s.model.elements.len()));
-    // Written again, it says 6.
-    assert_eq!(serde_json::from_str::<serde_json::Value>(&m.to_json().unwrap()).unwrap()["format"], 6);
+    assert_eq!((m.format, m.clouds.len(), left_out.len(), m.elements.len()), (7, 1, 0, s.model.elements.len()));
+    // Written again, it says 7.
+    assert_eq!(serde_json::from_str::<serde_json::Value>(&m.to_json().unwrap()).unwrap()["format"], 7);
+    // A file of 6 (detailing, no CAD drawings) opens as 7 likewise.
+    file["format"] = json!(6);
+    let (m, left_out) = Model::read(&file.to_string()).unwrap();
+    assert_eq!((m.format, left_out.len(), m.elements.len()), (7, 0, s.model.elements.len()));
 }
 
 #[test]
@@ -5182,4 +5190,18 @@ fn rooms_measure_at_the_wall_centre_lines_or_at_their_faces() {
     run(&mut s, "undo", json!({}));
     assert_eq!(area(&mut s), 48.0, "back at the centre lines");
     assert!(serde_json::to_value(&*s.model).unwrap().get("room_area").is_none(), "a project at the centre lines doesn't say so");
+}
+
+#[test]
+fn rooms_measured_at_the_faces_stop_at_room_separators_too() {
+    let mut s = Session::new();
+    house(&mut s);
+    let t = run(&mut s, "elements", json!({"category": "wall"}))["elements"][0]["thickness"].as_f64().unwrap();
+    run(&mut s, "room_area", json!({"at": "finish"}));
+    run(&mut s, "room_separator", json!({"points": [[5000, 0], [5000, 6000]]}));
+    let living = run(&mut s, "room", json!({"point": [2000, 3000], "name": "Living"}))["area_m2"].as_f64().unwrap();
+    let kitchen = run(&mut s, "room", json!({"point": [7000, 3000], "name": "Kitchen"}))["area_m2"].as_f64().unwrap();
+    // The line has no thickness: the two share the floor inside the walls between them.
+    let (left, right) = ((5000.0 - t / 2.0) * (6000.0 - t) / 1e6, (3000.0 - t / 2.0) * (6000.0 - t) / 1e6);
+    assert!((living - left).abs() < 1e-6 && (kitchen - right).abs() < 1e-6, "{living} {kitchen} vs {left} {right}");
 }

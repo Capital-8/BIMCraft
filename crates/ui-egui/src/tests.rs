@@ -225,6 +225,11 @@ fn find(h: &Harness<BimApp>, f: impl Fn(&Element) -> bool) -> Id {
 
 /// A click on the widget of `role` named `label`: of those named alike, the one that role picks out.
 fn pick(h: &mut Harness<BimApp>, role: Role, label: &str) {
+    // Alphabetical VG rows can start outside the table's viewport; scroll as a user would before clicking.
+    if h.state().vg_dialog.is_some() {
+        h.get_by_role_and_label(role, label).scroll_to_me();
+        h.run();
+    }
     h.get_by_role_and_label(role, label).click();
     h.run();
 }
@@ -2608,7 +2613,7 @@ mass {"boundary": [[1000, 1000], [3000, 1000], [3000, 2000], [1000, 2000]], "nam
         pick(&mut h, Role::Button, &over);
         missed.extend(english(&h, l));
         press(&mut h, tr("Cancel"));
-        for tab in ["Annotation Categories", "Filters", "Elements", "Design Options"] {
+        for tab in ["Annotation Categories", "Imported Categories", "Filters", "Elements", "Design Options"] {
             press(&mut h, tr(tab));
             missed.extend(english(&h, l));
         }
@@ -5166,6 +5171,7 @@ fn the_massing_tab_makes_floors_walls_a_floor_and_a_roof_from_the_selected_mass(
 
 mod autosave;
 mod browser;
+mod cad;
 mod chinese;
 mod clouds;
 mod control;
@@ -5173,8 +5179,10 @@ mod dialog;
 mod dock;
 mod draw;
 mod fills;
+mod filter;
 mod fonts;
 mod gpu;
+mod graphics;
 mod groups;
 mod light_canvas;
 mod lines;

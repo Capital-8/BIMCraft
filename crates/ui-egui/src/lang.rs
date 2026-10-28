@@ -230,6 +230,7 @@ pub fn category(category: &str, several: bool) -> String {
         "view3d" => (["3D View", "Vista 3D", "Vista 3D"], ["3D Views", "Vistas 3D", "Vistas 3D"]),
         "link" => (["Linked Model", "Modelo vinculado", "Modelo vinculado"], ["Linked Models", "Modelos vinculados", "Modelos vinculados"]),
         "pointcloud" => (["Point Cloud", "Nuvem de pontos", "Nube de puntos"], ["Point Clouds", "Nuvens de pontos", "Nubes de puntos"]),
+        "cadimport" => (["CAD Import", "Importação CAD", "Importación CAD"], ["CAD Imports", "Importações CAD", "Importaciones CAD"]),
         other => return other.to_string(),
     };
     get().project().of(if several { many } else { one }).to_string()
@@ -238,6 +239,31 @@ pub fn category(category: &str, several: bool) -> String {
 /// The interface's words in English, Brazilian Portuguese and Spanish; the core's words (schedule
 /// names and headings) besides.
 const WORDS: &[[&str; 3]] = &[
+    [
+        "Unchecked layers inherit; <None> hides a layer.",
+        "Camadas desmarcadas herdam o padrão; <Nenhum> oculta uma camada.",
+        "Las capas sin marcar heredan el patrón; <Ninguno> oculta una capa.",
+    ],
+    [
+        "Patterns appear in plans, ceiling plans, section cuts and filled regions.",
+        "Os padrões aparecem em plantas, plantas de forro, cortes e regiões preenchidas.",
+        "Los patrones aparecen en plantas, planos de techo, cortes de sección y regiones rellenas.",
+    ],
+    ["Foreground Pattern", "Padrão de primeiro plano", "Patrón de primer plano"],
+    ["Background Pattern", "Padrão de fundo", "Patrón de fondo"],
+    ["Foreground Color", "Cor de primeiro plano", "Color de primer plano"],
+    ["Background Color", "Cor de fundo", "Color de fondo"],
+    [
+        "Changes to a type affect every filled region of that type.",
+        "Alterações em um tipo afetam todas as regiões preenchidas desse tipo.",
+        "Los cambios en un tipo afectan a todas las regiones rellenas de ese tipo.",
+    ],
+    [
+        "Enter a name for every type and pattern.",
+        "Insira um nome para cada tipo e padrão.",
+        "Introduzca un nombre para cada tipo y patrón.",
+    ],
+    ["The name `{}` is already in use.", "O nome `{}` já está em uso.", "El nombre `{}` ya está en uso."],
     ["Autosave", "Salvamento automático", "Guardado automático"],
     [
         "An agent can work on this project: bimcraft-cli mcp --connect {}",
@@ -2232,6 +2258,54 @@ const WORDS: &[[&str; 3]] = &[
     ["Perpendicular", "Perpendicular", "Perpendicular"],
     ["Nearest", "Mais próximo", "Más cercano"],
     ["Point Cloud", "Nuvem de pontos", "Nube de puntos"],
+    ["Import CAD", "Importar CAD", "Importar CAD"],
+    ["Link CAD", "Vincular CAD", "Vincular CAD"],
+    ["Reload CAD", "Recarregar CAD", "Recargar CAD"],
+    ["Import", "Importar", "Importar"],
+    ["DXF drawings", "Desenhos DXF", "Dibujos DXF"],
+    ["Colors", "Cores", "Colores"],
+    ["Preserve", "Preservar", "Conservar"],
+    ["Black and White", "Preto e branco", "Blanco y negro"],
+    ["Visible", "Visíveis", "Visibles"],
+    ["Import units", "Unidades de importação", "Unidades de importación"],
+    ["Auto-Detect", "Detectar automaticamente", "Detección automática"],
+    ["Its middle on the project's origin", "Seu centro na origem do projeto", "Su centro en el origen del proyecto"],
+    [
+        "Its origin on the project's origin, where its file's coordinates put it",
+        "Sua origem na origem do projeto, onde as coordenadas do arquivo o colocam",
+        "Su origen en el origen del proyecto, donde lo sitúan las coordenadas de su archivo",
+    ],
+    ["Current view only", "Somente a vista atual", "Solo la vista actual"],
+    [
+        "In this plan only, not in every plan of its level",
+        "Somente nesta planta, não em todas as plantas do seu nível",
+        "Solo en esta planta, no en todas las plantas de su nivel",
+    ],
+    ["Drawing", "Desenho", "Dibujo"],
+    ["Linked File", "Arquivo vinculado", "Archivo vinculado"],
+    ["Entities", "Entidades", "Entidades"],
+    ["Position", "Posição", "Posición"],
+    ["Imported Categories", "Categorias importadas", "Categorías importadas"],
+    [
+        "The project has no CAD drawings: Insert > Import CAD brings one in.",
+        "O projeto não tem desenhos CAD: Inserir > Importar CAD traz um.",
+        "El proyecto no tiene dibujos CAD: Insertar > Importar CAD trae uno.",
+    ],
+    [
+        "Layers this view shows of each drawing",
+        "Camadas que esta vista mostra de cada desenho",
+        "Capas que esta vista muestra de cada dibujo",
+    ],
+    [
+        "Link CAD: a DXF drawing shown in the plans of a level, read again from its file on Reload and when the project opens",
+        "Vincular CAD: um desenho DXF mostrado nas plantas de um nível, lido de novo do seu arquivo ao Recarregar e quando o projeto abre",
+        "Vincular CAD: un dibujo DXF mostrado en las plantas de un nivel, leído de nuevo de su archivo al Recargar y cuando se abre el proyecto",
+    ],
+    [
+        "Import CAD: a DXF drawing brought into the project, drawn under the model in the plans of a level, its layers, colours and linetypes kept, and snapped to",
+        "Importar CAD: um desenho DXF trazido ao projeto, desenhado sob o modelo nas plantas de um nível, com suas camadas, cores e tipos de linha, e com snap",
+        "Importar CAD: un dibujo DXF traído al proyecto, dibujado bajo el modelo en las plantas de un nivel, con sus capas, colores y tipos de línea, y con referencias a objetos",
+    ],
     [
         "A scan's points where the plan's cut plane cuts it, to trace what was measured",
         "Os pontos de um escaneamento onde o plano de corte da planta o corta, para seguir o que foi medido",
@@ -2733,6 +2807,17 @@ const WORDS: &[[&str; 3]] = &[
     // Manage > Inquiry: Select by ID and IDs of Selection.
     ["Inquiry", "Consulta", "Consulta"],
     ["Select by ID", "Selecionar por ID", "Seleccionar por ID"],
+    ["Check All", "Marcar todos", "Seleccionar todo"],
+    ["Title", "Título", "Título"],
+    ["Filter Selection", "Filtrar seleção", "Filtrar selección"],
+    ["Check None", "Desmarcar todos", "No seleccionar ninguno"],
+    ["Count", "Contagem", "Recuento"],
+    ["Total selected items: {}", "Total de itens selecionados: {}", "Total de elementos seleccionados: {}"],
+    [
+        "Filter: keep some of the selection, by category or by the values of a parameter they all have",
+        "Filtro: manter parte da seleção, por categoria ou pelos valores de um parâmetro que todos têm",
+        "Filtro: conservar parte de la selección, por categoría o por los valores de un parámetro que todos tienen",
+    ],
     ["IDs of Selection", "IDs da seleção", "ID de la selección"],
     [
         "Select by ID: select elements by their IDs, GUIDs or IFC GlobalIds, as many as you paste, and show them",
