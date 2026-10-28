@@ -792,9 +792,10 @@ mod tests {
         assert!(shape(&sans(true), 'I').fill != shape(&sans(false), 'I').fill, "bold is Plex Sans's own weight");
         // A character of the last private-use plane: no font has it.
         assert_eq!(*shape(&sans(false), '\u{10FFFD}'), lettered(false, '?'));
-        // The lettering has no Ж: Plex Sans letters it.
+        // The lettering has no Σ: Plex Sans letters it.
         let lettering = Face::bundled(Source::Lettering, false, false);
-        assert_eq!(*shape(&lettering, 'Ж'), *shape(&sans(false), 'Ж'));
+        assert_eq!(*shape(&lettering, 'Σ'), *shape(&sans(false), 'Σ'));
+        assert!(*shape(&sans(false), 'Σ') != lettered(false, '?'), "Plex Sans has a Σ of its own");
         assert!(shape(&lettering, 'Ő').fill.is_empty());
         assert!(shape(&Face::bundled(Source::Mono, true, false), 'A').stroke > 0.0, "Plex Mono is made bold by a heavier outline");
     }
