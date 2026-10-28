@@ -569,6 +569,15 @@ pub(crate) fn sweep_payloads(s: &mut Session) -> (Payloads, Payloads) {
         ("offset", json!({"id": a, "distance": 100, "toward": [0, 1]})),
         ("split", json!({"id": a, "at": [1000, 0]})),
         ("join_polyline", json!({"ids": [a, tail]})),
+        (
+            "line_pattern",
+            json!({"name": "Graphic", "segments": [
+                {"offset": {"length": 4, "count": 9, "distance": 0.5}},
+                {"wave": {"length": 6, "frequency": 2, "amplitude": 1}},
+                {"zigzag": {"length": 6, "frequency": 3, "amplitude": 1}},
+                {"text": {"length": 12, "size": 2, "text": "Gas"}}, {"dot_length": 1}
+            ]}),
+        ),
         ("line_pattern", json!({"name": "Fence", "segments": [{"dash": 4}, {"space": 1}]})),
         ("line_style", json!({"name": "Fence Line", "pen": 3})),
         ("fill_pattern", json!({"name": "Hatch", "lines": [{"angle": 45, "spacing": 10}]})),

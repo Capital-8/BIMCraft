@@ -955,7 +955,16 @@ impl Look {
                     }
                 }
                 Prim::Fill { color, .. } => {
-                    if *part != Part::Pattern
+                    if *part == Part::LinePattern {
+                        if let Some([r, g, b]) = style.color {
+                            *color = Rgb(r, g, b);
+                        }
+                        if pen.is_some()
+                            && let Some(p) = style.weight
+                        {
+                            *pen = Some(p);
+                        }
+                    } else if *part != Part::Pattern
                         && let Some([r, g, b]) = style.fill
                     {
                         *color = Rgb(r, g, b);
