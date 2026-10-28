@@ -1660,12 +1660,12 @@ pub(crate) fn tidy(ring: &[P2]) -> Vec<P2> {
 /// A series is plain numbers ("1", "2") or numbers after a prefix ("P1", "P2", "J-01"); a prefix
 /// counts as a series once two marks share it and they outnumber the plain numbers, so a lone "D2"
 /// among numbered doors stays an exception. Zero padding is kept ("P09" → "P10"), and the result
-/// is never one already taken.
+/// is never one already taken. A mark longer than a name may be (`MAX_TEXT`) is no part of a series.
 pub(crate) fn next_number<'a>(taken: impl Iterator<Item = &'a str>) -> String {
     let taken: Vec<&str> = taken.map(str::trim).collect();
     // Each series by its prefix: how many marks it has, its largest number and the width its zero-padded ones keep.
     let mut series: BTreeMap<&str, (usize, u64, usize)> = BTreeMap::new();
-    for t in &taken {
+    for t in taken.iter().filter(|t| t.len() <= MAX_TEXT) {
         let digits = t.len() - t.trim_end_matches(|c: char| c.is_ascii_digit()).len();
         let (prefix, number) = t.split_at(t.len() - digits);
         let Ok(n) = number.parse::<u64>() else { continue };
@@ -1682,7 +1682,8 @@ pub(crate) fn next_number<'a>(taken: impl Iterator<Item = &'a str>) -> String {
         .filter(|(p, s)| p.is_empty() || (s.0 >= 2 && s.0 > plain))
         .max_by_key(|(p, s)| (s.0, s.1, std::cmp::Reverse(**p)))
         .map_or(("", (0, 0, 0)), |(p, s)| (*p, *s));
-    let width = if prefix.is_empty() { 0 } else { width };
+    // A mark longer than a name may be starts no series, so no width passes MAX_TEXT; this keeps it so.
+    let width = if prefix.is_empty() { 0 } else { width.min(MAX_TEXT) };
     let mut n = last;
     loop {
         n = n.saturating_add(1);

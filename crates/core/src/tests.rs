@@ -2676,6 +2676,18 @@ fn marks_number_on_in_the_series_they_are_in() {
 }
 
 #[test]
+fn a_tag_of_a_long_run_of_zeros_starts_no_series_and_pads_no_further_than_a_name_goes() {
+    use crate::commands::next_number;
+    use crate::model::MAX_TEXT;
+    // A hostile file's tags, `P`, zeros and a number, longer than any name: ignored, not padded to.
+    let hostile = [format!("P{}1", "0".repeat(MAX_TEXT)), format!("P{}2", "0".repeat(MAX_TEXT))];
+    assert_eq!(next_number(hostile.iter().map(String::as_str)), "1");
+    // One that fits is a series as ever, and its next is no longer than it.
+    let fits = [format!("P{}1", "0".repeat(MAX_TEXT - 3)), format!("P{}2", "0".repeat(MAX_TEXT - 3))];
+    assert_eq!(next_number(fits.iter().map(String::as_str)), format!("P{}3", "0".repeat(MAX_TEXT - 3)));
+}
+
+#[test]
 fn doors_and_windows_keep_their_marks_through_ifc_and_new_ones_follow_the_series() {
     let mut s = Session::new();
     house(&mut s);
