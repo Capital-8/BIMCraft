@@ -5303,6 +5303,39 @@ fn room_separators_split_rooms_without_walls_and_survive_ifc() {
 }
 
 #[test]
+fn a_separator_drawn_to_the_wall_faces_splits_rooms_measured_at_the_centre_lines_too() {
+    let mut s = Session::new();
+    house(&mut s);
+    let half = run(&mut s, "elements", json!({"category": "wall"}))["elements"][0]["thickness"].as_f64().unwrap() / 2.0;
+    // Drawn from face to face, as on a plan, and one more at a slant from a face to the first line.
+    run(&mut s, "room_separator", json!({"points": [[5000, half], [5000, 6000.0 - half]]}));
+    run(&mut s, "room_separator", json!({"points": [[8000.0 - half, 4000.0 - half / 3.0], [5000, 3000]]}));
+    for (point, name) in [([2000, 3000], "Living"), ([7000, 1000], "Kitchen"), ([7000, 5500], "Pantry")] {
+        run(&mut s, "room", json!({"point": point, "name": name}));
+    }
+    let areas = |s: &mut Session| -> Vec<f64> {
+        run(s, "elements", json!({"category": "room"}))["elements"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|r| r["area_m2"].as_f64())
+            .collect()
+    };
+    // At the centre lines: 5 m by 6 m, and the 3 m by 6 m rest cut by the slant from (8000, 4000) to (5000, 3000).
+    let centre = areas(&mut s);
+    let want = [30.0, 3.0 * 3.5, 3.0 * 2.5];
+    assert!(centre.iter().zip(want).all(|(a, w)| (a - w).abs() < 1e-6), "{centre:?}");
+    assert!((centre.iter().sum::<f64>() - 48.0).abs() < 1e-6);
+    // The lines themselves stay as drawn.
+    let lines = run(&mut s, "elements", json!({"category": "roomseparator"}));
+    assert_eq!(lines["elements"][0]["length"].as_f64(), Some(6000.0 - 2.0 * half));
+    // At the faces they split the same way, and the parts add up to the floor inside the walls.
+    run(&mut s, "room_area", json!({"at": "finish"}));
+    let inside = (8000.0 - 2.0 * half) * (6000.0 - 2.0 * half) / 1e6;
+    assert!((areas(&mut s).iter().sum::<f64>() - inside).abs() < 1e-6, "{:?}", areas(&mut s));
+}
+
+#[test]
 fn rooms_measure_at_the_wall_centre_lines_or_at_their_faces() {
     let mut s = Session::new();
     house(&mut s);
