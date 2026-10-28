@@ -750,6 +750,22 @@ mod tests {
     }
 
     #[test]
+    fn the_card_draws_a_glass_layer_as_the_processor_does() {
+        let Some(mut gpu) = headless() else {
+            eprintln!("no graphics adapter here: the card's glass is not compared");
+            return;
+        };
+        let mut s = sample();
+        s.script(
+            r#"type {"category": "wall", "name": "Curtain", "layers": [{"material": "Glass", "thickness": 50}, {"material": "Concrete block", "thickness": 100}]}
+               wall {"points": [[-6000,-6000],[6000,-6000]], "type": "Curtain"}
+               column {"at": [0, -7000]}"#,
+        )
+        .unwrap();
+        draws_as_the_processor(&mut gpu, &s, &[]);
+    }
+
+    #[test]
     fn a_model_with_nothing_to_draw_draws_the_ground() {
         let Some(mut gpu) = headless() else { return };
         let s = Session::new();

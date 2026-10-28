@@ -3051,6 +3051,13 @@ fn the_materials_window_edits_the_projects_library() {
     h.run();
     press(&mut h, "Diagonal");
     assert_eq!(h.state().session.model.materials["Material 1"].cut, Pattern::Diagonal);
+    // How see-through it is, on its slider (a click on the slider's track, then its arrow keys).
+    assert_eq!(h.state().session.model.materials["Material 1"].transparency, 0);
+    h.get_by_label("Transparency").focus();
+    h.run();
+    key(&mut h, Key::ArrowRight);
+    key(&mut h, Key::ArrowRight);
+    assert_eq!(h.state().session.model.materials["Material 1"].transparency, 2);
     type_into(&mut h, "Name", "Oak");
     key(&mut h, Key::Enter);
     let m = &h.state().session.model.materials;

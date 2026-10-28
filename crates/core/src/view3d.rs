@@ -85,9 +85,32 @@ struct Tri {
     p: [P3; 3],
     owner: Id,
     color: Rgb,
-    /// The texture over its colour: one more than where its material is in the library; 0, none.
+    /// The skin of its material ([`skin`]): in the low 24 bits the texture over its colour, one more than where the material
+    /// is in the library, 0 for none; in the high 8, how see-through the material is, percent.
     tex: u32,
     curve: Option<(Id, usize)>,
+}
+
+/// The bits of a skin that hold the texture.
+const TEXTURE: u32 = 0x00ff_ffff;
+
+impl Tri {
+    /// The texture over its colour, 0 for none.
+    fn texture(&self) -> u32 {
+        self.tex & TEXTURE
+    }
+
+    /// How see-through its material makes it, percent.
+    fn clearness(&self) -> u8 {
+        (self.tex >> 24).min(100) as u8
+    }
+
+    /// How see-through it is in `look`: as much as its material, or the view makes it, whichever is more. A view's own
+    /// override counts only where it changes the picture.
+    pub(crate) fn alpha(&self, look: &Look) -> u8 {
+        let view = if look.is_plain() { 0 } else { look.transparency(self.owner) };
+        self.clearness().max(view)
+    }
 }
 
 /// A wall's plan frame: its start, along it, and square to it.
@@ -600,12 +623,13 @@ fn solids_in(m: &Model, elements: &[(Id, &Element)], index: Option<&walls::Index
                     }
                 } else if let (Some(t), Some(w)) = (m.opening_type(e), m.wall(o.host)) {
                     let color = if matches!(e, Element::Door(_)) { DOOR } else { GLASS };
+                    let tex = if matches!(e, Element::Door(_)) { 0 } else { skin(m, m.language.word("Glass")) & !TEXTURE };
                     let z = m.own_base(w) + o.sill;
                     let axis = Axis::of(w);
                     let u = axis.tangent(o.offset);
                     let frame = Frame { o: axis.at(o.offset, walls::centre(m, w)), u, n: u.perp() };
                     let a = (-t.width / 2.0, t.width / 2.0);
-                    out.push(Solid::Box { owner: id, color, tex: 0, frame, a, c: (-25.0, 25.0), z: (z, z + t.height) });
+                    out.push(Solid::Box { owner: id, color, tex, frame, a, c: (-25.0, 25.0), z: (z, z + t.height) });
                 }
             }
             _ => {}
@@ -685,10 +709,17 @@ fn planes(tris: &[Tri]) -> Vec<usize> {
         .collect()
 }
 
-/// The texture id a library material gives what is made of it: one more than where it is in the library's order, 0
-/// for one with no texture, or none in the library.
+/// What a library material gives what is made of it: in the low 24 bits the texture id, one more than where it is in the
+/// library's order (0 for none), and in the high 8 how see-through it is, percent.
 fn skin(m: &Model, name: &str) -> u32 {
-    m.materials.iter().position(|(k, x)| k == name && x.texture.is_some()).map_or(0, |i| i as u32 + 1)
+    let Some((i, x)) = m.materials.iter().enumerate().find_map(|(i, (k, x))| (k == name).then_some((i, x))) else { return 0 };
+    let texture = if x.texture.is_some() { i as u32 + 1 } else { 0 };
+    texture | u32::from(x.transparency.min(100)) << 24
+}
+
+/// A layer's skin, or its element's where the layer has none.
+fn over(layer: u32, outer: u32) -> u32 {
+    if layer == 0 { outer } else { layer }
 }
 
 /// The model's solids as its pictures show them: an element of a compound type split into its
@@ -719,7 +750,7 @@ fn layered(m: &Model, s: Solid) -> Vec<Solid> {
                 if r > 1e-9 {
                     let lift = rise - above - r;
                     let face = face.iter().map(|p| [p[0], p[1], p[2] + lift]).collect();
-                    out.push(Solid::Slab { owner, color: colour(l, color), tex: skin(m, &l.material).max(tex), face, rise: r });
+                    out.push(Solid::Slab { owner, color: colour(l, color), tex: over(skin(m, &l.material), tex), face, rise: r });
                 }
                 above += r;
             }
@@ -747,7 +778,7 @@ fn layered(m: &Model, s: Solid) -> Vec<Solid> {
                     (part.len() >= 3 && geom::area(&part).abs() > 1e-6).then(|| Solid::Prism {
                         owner,
                         color: colour(l, color),
-                        tex: skin(m, &l.material).max(tex),
+                        tex: over(skin(m, &l.material), tex),
                         ring: part,
                         bottom,
                         top,
@@ -903,7 +934,7 @@ impl Scene {
         let faces: Vec<&'static str> = tris.iter().map(|t| rules.get(&t.owner).map_or("", |r| r.face(&t.p))).collect();
         painted(m, &mut tris, &faces);
         // The textures the scene uses, ready to look up, and what each textured triangle lies across.
-        let used: BTreeSet<u32> = tris.iter().map(|t| t.tex).filter(|t| *t > 0).collect();
+        let used: BTreeSet<u32> = tris.iter().map(Tri::texture).filter(|t| *t > 0).collect();
         let mut skins: Vec<Option<Sampler>> = vec![None; m.materials.len() + 1];
         for id in used {
             let found = m.materials.values().nth(id as usize - 1);
@@ -911,7 +942,7 @@ impl Scene {
                 *slot = x.texture.as_ref().and_then(|t| Sampler::new(t, x.color, &m.images));
             }
         }
-        let bases = tris.iter().map(|t| skins.get(t.tex as usize).is_some_and(Option::is_some).then(|| basis(t))).collect();
+        let bases = tris.iter().map(|t| skins.get(t.texture() as usize).is_some_and(Option::is_some).then(|| basis(t))).collect();
         let (planes, smooth) = (planes(&tris), corner_normals(&tris));
         let masses = m.elements.iter().filter(|(_, e)| matches!(e, Element::Mass(_))).map(|(id, _)| *id).collect();
         let default = std::cell::OnceCell::new();
@@ -1336,7 +1367,7 @@ impl Scene {
         };
         // What the view sees through is drawn over what lies behind it, after the opaque surfaces: the
         // nearest of them at each pixel, where nothing opaque is nearer. (Not in a section's hidden line.)
-        let see_through = |t: &Tri| !flat && !plain && look.transparency(t.owner) > 0;
+        let see_through = |t: &Tri| !flat && t.alpha(look) > 0;
         let shown = |t: &Tri| (plain || look.shows(t.owner)) && !(clip.is_some() && self.masses.contains(&t.owner));
         let mut depth = vec![f32::NEG_INFINITY; w * h];
         let mut hit = vec![u32::MAX; w * h];
@@ -1351,7 +1382,7 @@ impl Scene {
         let first = self.tris.len();
         let dots = self.dots((cam, clip, cut), (w, h), |s| plain || look.shows(s.owner), plain, look, (&mut depth, &mut hit));
         // Only a picture with something in it to see through needs the second pass, and its buffers.
-        let through_any = !plain && self.tris.iter().any(|t| shown(t) && see_through(t));
+        let through_any = self.tris.iter().any(|t| shown(t) && see_through(t));
         let (mut seen, mut seen_lit, mut near) = (Vec::new(), Vec::new(), Vec::new());
         if through_any {
             near = vec![f32::NEG_INFINITY; w * h];
@@ -1378,7 +1409,7 @@ impl Scene {
                 return None;
             }
             let tri = self.tris.get(t)?;
-            let sampler = self.skins.get(tri.tex as usize)?.as_ref()?;
+            let sampler = self.skins.get(tri.texture() as usize)?.as_ref()?;
             if !plain && colour(tri) != tri.color {
                 return None;
             }
@@ -1427,10 +1458,12 @@ impl Scene {
             };
             // Over it, the nearest surface seen through, as much of it as the view lets show (and a
             // tinted one always a little, or selecting it would show nothing).
-            let c = match through(k).and_then(|t| Some((shaded(t, k, &seen_lit, &near)?, self.tris.get(t)?.owner))) {
-                Some((s, owner)) => {
+            let c = match through(k)
+                .and_then(|t| Some((shaded(t, k, &seen_lit, &near)?, self.tris.get(t)?.owner, self.tris.get(t)?.alpha(look))))
+            {
+                Some((s, owner, alpha)) => {
                     let tint = tints.get(&owner);
-                    let weight = 1.0 - f64::from(look.transparency(owner)) / 100.0;
+                    let weight = 1.0 - f64::from(alpha) / 100.0;
                     blend(c, tint.map_or(s, |c| mix(s, *c)), if tint.is_some() { weight.max(0.35) } else { weight })
                 }
                 None => c,
@@ -2292,6 +2325,43 @@ mod tests {
         )
         .unwrap();
         s
+    }
+
+    #[test]
+    fn a_glass_layer_lets_what_is_behind_a_wall_show_through_in_a_plain_view() {
+        let build = |layer: &str, columns: bool| {
+            let mut s = Session::new();
+            s.script(&format!(
+                r#"type {{"category": "wall", "name": "Curtain", "layers": [{{"function": "structure", "material": "{layer}", "thickness": 100}}]}}
+                   wall {{"points": [[0,0],[8000,0]], "type": "Curtain"}}"#
+            ))
+            .unwrap();
+            if columns {
+                s.script("column {\"at\": [3500, -900]}\ncolumn {\"at\": [3500, 900]}").unwrap();
+            }
+            s
+        };
+        let (glass, plain_wall) = (build("Glass", true), build("Concrete block", true));
+        // One camera for all four, so the pictures line up.
+        let cam = Scene::new(&glass.model).fit(AZIMUTH, ELEVATION, 400, 300);
+        let render = |s: &Session| {
+            let img = Scene::new(&s.model).render(&cam, &[]);
+            let wall = s.model.elements.iter().find(|(_, e)| matches!(e, Element::Wall(_))).map(|(id, _)| *id);
+            (img, wall)
+        };
+        let (g, gw) = render(&glass);
+        let (o, ow) = render(&plain_wall);
+        let (g0, _) = render(&build("Glass", false));
+        let (o0, _) = render(&build("Concrete block", false));
+        let covered =
+            |img: &Image, wall| (0..400 * 300).filter(|i| img.pick((i % 400) as f64, (i / 400) as f64) == wall).collect::<Vec<_>>();
+        let differs =
+            |a: &Image, b: &Image, px: &[usize]| px.iter().filter(|i| a.rgba[**i * 4..**i * 4 + 3] != b.rgba[**i * 4..**i * 4 + 3]).count();
+        let (gc, oc) = (covered(&g, gw), covered(&o, ow));
+        assert!(gc.len() > 300 && oc.len() > 300);
+        assert!(differs(&g, &g0, &gc) > 50, "a column behind the glass shows through it");
+        let (seen, not) = (differs(&g, &g0, &gc), differs(&o, &o0, &oc));
+        assert!(not * 10 < seen, "and not through an opaque wall: {not} against {seen} pixels");
     }
 
     /// A height in the middle of a brick course (each 75 mm), up a wall.
