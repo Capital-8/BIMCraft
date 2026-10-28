@@ -3184,8 +3184,9 @@ ENDSEC;END-ISO-10303-21;",
             s.execute("modify", &json!({"id": id, "params": values})).unwrap();
         }
         let file = crate::ifc::export(&s.model);
-        // One property set for each element with values; the room's quantities are defined by properties too.
-        assert_eq!((file.matches("IFCPROPERTYSET(").count(), file.matches("IFCRELDEFINESBYPROPERTIES(").count()), (4, 5));
+        // One property set for each element with values; the elements' quantities are defined by properties too.
+        let (sets, quantities) = (file.matches("IFCPROPERTYSET(").count(), file.matches("IFCELEMENTQUANTITY(").count());
+        assert_eq!((sets, file.matches("IFCRELDEFINESBYPROPERTIES(").count()), (4, sets + quantities));
         assert!(file.contains("IFCPROPERTYSINGLEVALUE('Finish Height',$,IFCLENGTHMEASURE(2400.),$)"), "{file}");
         assert!(file.contains("IFCPROPERTYSINGLEVALUE('Accessible',$,IFCBOOLEAN(.T.),$)"));
         let i = ifc(file.as_bytes(), "x").unwrap();
