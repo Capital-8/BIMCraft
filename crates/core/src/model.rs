@@ -69,7 +69,9 @@ pub const CEILING_CUT: f64 = 2300.0;
 pub const CEILING_HEIGHT: f64 = 2600.0;
 /// The steepest slope a floor or a roof may have, degrees.
 pub const MAX_SLOPE: f64 = 75.0;
-/// The version of the project file this build writes, and the newest it reads. 7: a project holds CAD drawings (`cads`,
+/// The version of the project file this build writes, and the newest it reads. 8: text types (`text_types`, library
+/// entries of kind `text-type`); a note names its type, which holds its size, and may override parts of its formatting
+/// (`override_format`, `runs`): a note of 7 has a `size`, which reading it gives a type of. 7: a project holds CAD drawings (`cads`,
 /// library entries of kind `Cad`) and imports place them; nothing in a file of 6 changes, but a build that reads up to 6 would
 /// answer one of 7 with a serde error, not "saved by a newer BIMCraft". 6: a project holds detailing (library kinds
 /// `line-pattern`, `line-style`, `fill-pattern`, `filled-region-type` and `detail-group`; the elements `line`, `region`,
@@ -83,7 +85,7 @@ pub const MAX_SLOPE: f64 = 75.0;
 /// 2: the library has ids and GUIDs too
 /// (`library`), and what names a library entry holds its GUID. 1: elements have GUIDs, ids six digits, and what points at
 /// an element holds its GUID. None (0): a file from before.
-pub const FORMAT: u32 = 7;
+pub const FORMAT: u32 = 8;
 /// How far past the model a level reaches without an extent of its own, mm.
 pub const LEVEL_PAST: f64 = 1000.0;
 
@@ -646,24 +648,28 @@ pub enum DimKind {
 }
 
 /// A text note in a view: a level's plan, a section, an elevation or a sheet. `at` is the top left
-/// of its first line, in the view's own terms; `size` its capitals' height on paper, mm; turned
-/// `angle` degrees counter-clockwise; with a leader to `leader`.
+/// of its first line, in the view's own terms; lettered as its text type says (`crate::text`); turned
+/// `angle` degrees counter-clockwise; with a leader to `leader`. With `override_format`, its `runs`
+/// make parts of it bold, italic or underlined, or not, whatever its type says; they stay when its type
+/// changes. `size` is a note's from before text types, which a file's reading gives a type of that size.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Note {
     pub view: Guid,
     pub at: P2,
     pub text: String,
-    #[serde(default = "note_size")]
-    pub size: f64,
+    #[serde(rename = "type", default)]
+    pub type_name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub size: Option<f64>,
     #[serde(default)]
     pub angle: f64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub leader: Option<P2>,
-}
-
-fn note_size() -> f64 {
-    NOTE_SIZE
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub override_format: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub runs: Vec<crate::text::Run>,
 }
 
 /// A scan placed: the project's `cloud`, its middle at `at` in plan and `offset` mm over `level`, turned `angle` degrees
@@ -2000,6 +2006,9 @@ pub struct Model {
     /// Its filled region types, by name: a foreground and a background pattern and their colours, masking or not.
     #[serde(default = "fills::default_region_types")]
     pub region_types: BTreeMap<String, FilledRegionType>,
+    /// Its text types, by name: the font, size and lettering of the notes of each.
+    #[serde(default = "crate::text::default_types")]
+    pub text_types: BTreeMap<String, crate::text::TextType>,
     /// Its detail group types, by name: the members each one placed draws.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub detail_groups: BTreeMap<String, crate::groups::GroupType>,
@@ -2057,6 +2066,7 @@ impl Model {
             line_styles: lines::styles(language),
             fill_patterns: fills::patterns(language),
             region_types: fills::region_types(language),
+            text_types: crate::text::types(language),
             detail_groups: BTreeMap::new(),
             elements: Elements::new(),
             library: crate::library::Library::default(),
@@ -2500,7 +2510,32 @@ impl Model {
         // 5 to 6 (detailing: lines, regions, groups, repeating details, line and fill styles) has none either: a file of 5 holds
         // none of it, so reading it as 6 changes nothing.
         // 6 to 7 (CAD drawings, and the imports that place them) has none either.
+        // 7 to 8: a note's size is its text type's. A note of a size gets a type of it.
+        self.typed_notes();
         self.format = FORMAT;
+    }
+
+    /// Each note from before text types (a `size`, or no type) given a text type of its size.
+    fn typed_notes(&mut self) {
+        let mut types = std::mem::take(&mut self.text_types);
+        let mut type_one = |n: &mut Note| {
+            if n.size.is_some() || n.type_name.is_empty() {
+                n.type_name = crate::text::type_for_size(&mut types, n.size.take().unwrap_or(NOTE_SIZE));
+            }
+        };
+        for e in self.elements.values_mut() {
+            if let Element::Text(n) = e {
+                type_one(n);
+            }
+        }
+        for g in self.detail_groups.values_mut() {
+            for member in &mut g.members {
+                if let Element::Text(n) = &mut member.element {
+                    type_one(n);
+                }
+            }
+        }
+        self.text_types = types;
     }
 
     /// What points at an element by its id (as a command gives a reference, or a file from before GUIDs held it) points at
@@ -2931,6 +2966,7 @@ impl Model {
         }
         match crate::commands::category(category).as_str() {
             "region" => names(&self.region_types),
+            "text" => names(&self.text_types),
             "wall" => names(&self.types.wall),
             "floor" => names(&self.types.floor),
             "door" => names(&self.types.door),
@@ -2951,6 +2987,7 @@ impl Model {
     pub fn default_type(&self, category: &str) -> Option<&str> {
         let preferred = match crate::commands::category(category).as_str() {
             "region" => return fills::default_region_type(&self.region_types, self.language).map(String::as_str),
+            "text" => return crate::text::default_type(&self.text_types).map(String::as_str),
             "wall" | "floor" => "Generic - 200mm",
             "door" => "Single 900 x 2100",
             "column" => "Rectangular 400 x 400",
@@ -3964,13 +4001,21 @@ impl Model {
         match e {
             Element::Text(n) => {
                 point(who, n.at)?;
-                text(who, "text", &n.text)?;
+                let len = n.text.chars().count();
+                if len > crate::text::MAX_NOTE {
+                    return Err(format!("{who}: its text is {len} characters long; a note holds up to {}", crate::text::MAX_NOTE));
+                }
                 if n.text.trim().is_empty() {
                     return Err(format!("{who}: a text note needs text"));
                 }
-                if !(n.size > 0.0 && n.size <= 100.0) {
-                    return Err(format!("{who}: size {} mm isn't above 0 and at most 100", n.size));
+                if n.size.is_some() {
+                    return Err(format!("{who}: a note's size is its text type's; give it a `type` of that size (text_type makes one)"));
                 }
+                if !self.text_types.contains_key(&n.type_name) {
+                    let there: Vec<&str> = self.text_types.keys().map(String::as_str).collect();
+                    return Err(format!("{who}: there's no text type `{}` (there are: {})", n.type_name, there.join(", ")));
+                }
+                crate::text::check_runs(who, &n.runs, len)?;
                 coord(&format!("{who} angle"), n.angle)?;
                 if let Some(l) = n.leader {
                     point(&format!("{who} leader"), l)?;
@@ -4041,6 +4086,9 @@ impl Model {
         }
         for (n, t) in &self.region_types {
             t.check(n, &self.fill_patterns)?;
+        }
+        for (n, t) in &self.text_types {
+            t.check(n)?;
         }
         for (n, x) in &self.materials {
             for p in [&x.cut_pattern, &x.surface_pattern].into_iter().flatten() {

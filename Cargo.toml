@@ -39,6 +39,8 @@ ring = "0.17"
 # The Revit reader's: Revit's files are Compound Files (OLE), and a byte search that scans the partitions fast.
 cfb = "0.15"
 memchr = "2"
+# Text notes' fonts: IBM Plex's outlines, its weights too, read from the files the packages carry.
+ttf-parser = { version = "0.25", features = ["gvar-alloc"] }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

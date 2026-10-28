@@ -78,7 +78,7 @@ fn element_lines(m: &Model, e: &Element) -> Vec<Line> {
         Element::Railing(r) => path(&crate::stairs::railing(m, r).iter().map(|(p, _)| *p).collect::<Vec<_>>(), false),
         Element::RoomSeparator(r) => vec![(r.start, r.end)],
         Element::Section(s) | Element::Elevation(s) => vec![(s.start, s.end)],
-        Element::Text(n) => axes(n.at, n.angle, n.size),
+        Element::Text(n) => axes(n.at, n.angle, m.text_types.get(&n.type_name).map_or(crate::model::NOTE_SIZE, |t| t.size)),
         Element::PointCloud(p) => axes(p.at, p.angle, 100.0),
         Element::Link(l) => axes(l.at, l.angle, 100.0),
         Element::CadImport(ci) => {

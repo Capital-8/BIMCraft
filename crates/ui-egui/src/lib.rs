@@ -31,6 +31,7 @@ mod linestyles;
 mod lineweights;
 mod links;
 mod mep;
+mod notes;
 mod objectstyles;
 mod orbit;
 mod paper;
@@ -516,6 +517,10 @@ pub struct BimApp {
     tag_label: String,
     /// What the Text tool writes.
     note_text: String,
+    /// The note being written on the canvas.
+    note_edit: Option<notes::NoteEdit>,
+    /// Text Type Properties, while it's open.
+    text_type_dialog: Option<notes::TextTypeDialog>,
     /// The line style the Detail Line tool draws in; blank for the project's Thin Lines.
     line_style: String,
     /// The Linework tool's line style: a style's name, or `<Invisible lines>` or `<By Category>` (in English).
@@ -981,6 +986,8 @@ impl BimApp {
             tag_leader: false,
             tag_label: String::new(),
             note_text: String::new(),
+            note_edit: None,
+            text_type_dialog: None,
             line_style: String::new(),
             linework_style: String::new(),
             group_type: String::new(),
@@ -1439,8 +1446,18 @@ impl BimApp {
     }
 
     fn keys(&mut self, ctx: &Context) {
+        // A note being written takes the keys, but for a field's that has them; another tool finishes it.
+        if self.note_edit.is_some() {
+            if !matches!(self.tool, Tool::Text | Tool::Modify) {
+                self.finish_note();
+            } else if !ctx.egui_wants_keyboard_input() && self.text_type_dialog.is_none() {
+                self.note_keys(ctx);
+                return;
+            }
+        }
         // A dialog takes the keys while it's open.
         if self.type_dialog.is_some()
+            || self.text_type_dialog.is_some()
             || self.materials_dialog.is_some()
             || self.family_dialog.is_some()
             || self.favorites_dialog.is_some()
@@ -3667,7 +3684,7 @@ impl BimApp {
     /// The Options Bar, while there's something on it (a contextual tab's name, a tool's options): a card floating over the
     /// view's top left, so the view never moves when it comes and goes, and taking the clicks that land on it.
     fn options_bar(&mut self, ctx: &Context) {
-        if self.context().is_none() && matches!(self.tool, Tool::Modify) {
+        if self.context().is_none() && matches!(self.tool, Tool::Modify) && self.note_edit.is_none() {
             self.options_rect = Rect::NOTHING;
             return;
         }
@@ -3703,6 +3720,10 @@ impl BimApp {
                 let (r, _) = ui.allocate_exact_size(size, Sense::hover());
                 ui.painter().text(r.left_center(), Align2::LEFT_CENTER, name, font, pal().text);
                 ui.separator();
+            }
+            if self.note_edit.is_some() {
+                self.note_options(ui);
+                return;
             }
             if self.sketch.is_some() {
                 self.sketch_options(ui);
@@ -4272,6 +4293,7 @@ impl BimApp {
         self.object_styles_window(ctx);
         self.line_styles_window(ctx);
         self.fill_patterns_window(ctx);
+        self.text_type_window(ctx);
         self.options_window(ctx);
         self.purge_window(ctx);
         if std::mem::take(&mut self.link_dialog) {

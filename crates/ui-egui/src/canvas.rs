@@ -10,7 +10,7 @@ use std::sync::{Arc, Weak};
 use bimcraft_core::geom::{self, P2};
 use bimcraft_core::model::{
     Clearance, Column, Component, DEFAULT_HEIGHT, DimKind, Dimension, Element, Extrusion, Face, Id, Landing, Line, MAX_COORD, Mass, Model,
-    NOTE_SIZE, Note, RISER, Ramp, Reference, Roof, Section, Spot, Stair, TOL, TREAD, Tag, Wall,
+    RISER, Ramp, Reference, Roof, Section, Spot, Stair, TOL, TREAD, Tag, Wall,
 };
 use bimcraft_core::render::{self, Drawing, Prim, Rgb, View};
 use bimcraft_core::snap::{self, Found, Kind, Reach};
@@ -343,11 +343,13 @@ pub(crate) struct Place {
     pub origin: Pos2,
     pub k: f32,
     pub paper: bool,
+    /// What of the drawing is left out: a note being written, which its editor draws.
+    pub hide: Option<Id>,
 }
 
 impl Place {
     pub(crate) fn at(origin: Pos2) -> Place {
-        Place { origin, k: 1.0, paper: false }
+        Place { origin, k: 1.0, paper: false, hide: None }
     }
     pub(crate) fn pos(self, (x, y): (f32, f32)) -> Pos2 {
         self.origin + vec2(x, y) * self.k
@@ -360,12 +362,15 @@ pub(crate) fn on_screen(width: f32, k: f32, thin: bool) -> f32 {
     if thin { 1.0 } else { (width * k).max(1.0) }
 }
 
-/// The display list, with the selected and hovered elements in the accent colours; with `thin`,
-/// every line one pixel wide. Its pictures are `pictures`, in order.
+/// The display list, with the selected and hovered elements in the accent colours, but for what `at` leaves out; with
+/// `thin`, every line one pixel wide. Its pictures are `pictures`, in order.
 pub(crate) fn paint(p: &Painter, at: Place, d: &Drawing, selected: &[Id], hovered: Option<Id>, thin: bool, pictures: &[TextureId]) {
     let mut pictures = pictures.iter();
     let color = |c: Rgb| if at.paper { Color32::from_rgb(c.0, c.1, c.2) } else { color(c) };
-    for (prim, owner) in d.prims.iter().zip(&d.owners) {
+    for ((prim, owner), part) in d.prims.iter().zip(&d.owners).zip(&d.parts) {
+        if owner.is_some() && *owner == at.hide {
+            continue;
+        }
         let accent = match *owner {
             Some(id) if selected.contains(&id) => Some((canvas_pal().accent, canvas_pal().select_fill)),
             Some(id) if Some(id) == hovered => Some((canvas_pal().hover, canvas_pal().hover_fill)),
@@ -374,6 +379,22 @@ pub(crate) fn paint(p: &Painter, at: Place, d: &Drawing, selected: &[Id], hovere
         match prim {
             // A convex ring alone, smooth-edged; else (a curved wall's outline, walls' union) cut into
             // triangles, which meet without a seam. No holes: no fill has one.
+            // A letter: its holes too, filled by the non-zero rule, its edges smoothed by its outline.
+            Prim::Fill { rings, color: c } if *part == render::Part::Text => {
+                let fill = accent.map_or(color(*c), |a| a.0);
+                let mut mesh = Mesh::default();
+                for tri in letter(rings).iter() {
+                    let first = mesh.vertices.len() as u32;
+                    for q in tri {
+                        mesh.colored_vertex(at.pos(*q), fill);
+                    }
+                    mesh.add_triangle(first, first + 1, first + 2);
+                }
+                p.add(Shape::mesh(mesh));
+                for r in rings {
+                    p.add(Shape::closed_line(r.iter().map(|q| at.pos(*q)).collect(), Stroke::new(0.5, fill)));
+                }
+            }
             Prim::Fill { rings, color: c } => {
                 let fill = accent.map_or(color(*c), |a| a.1);
                 match rings.as_slice() {
@@ -431,6 +452,36 @@ pub(crate) fn paint(p: &Painter, at: Place, d: &Drawing, selected: &[Id], hovere
             }
         }
     }
+}
+
+type Triangles = std::sync::Arc<Vec<[(f32, f32); 3]>>;
+
+/// The triangles that fill a letter's rings, kept for the frames that draw it again (hover, selection, the caret).
+fn letter(rings: &[Vec<(f32, f32)>]) -> Triangles {
+    use std::hash::{Hash, Hasher};
+    thread_local! {
+        static KEPT: std::cell::RefCell<std::collections::HashMap<u64, Triangles>> = Default::default();
+    }
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    for r in rings {
+        r.len().hash(&mut h);
+        for q in r {
+            (q.0.to_bits(), q.1.to_bits()).hash(&mut h);
+        }
+    }
+    let key = h.finish();
+    if let Some(t) = KEPT.with(|k| k.borrow().get(&key).cloned()) {
+        return t;
+    }
+    let t: Triangles = std::sync::Arc::new(bimcraft_core::text::triangles(rings));
+    KEPT.with(|k| {
+        let mut k = k.borrow_mut();
+        if k.len() > 50_000 {
+            k.clear();
+        }
+        k.insert(key, t.clone());
+    });
+    t
 }
 
 /// The selected elements' outlines taken by `f` (on screen): where a move, a turn or a mirror
@@ -1025,6 +1076,8 @@ impl BimApp {
             _ => None,
         };
 
+        // While a note is written here, the pointer is its editor's.
+        let writing = self.writing_in(key);
         let crop = self.crop_grips(ui, &response, rect, &view, key);
         let dragged = self.sketch_drag(ui, &response, rect, &view, level);
         self.canvas.found.set(None);
@@ -1034,6 +1087,7 @@ impl BimApp {
         if response.drag_started_by(PointerButton::Primary)
             && self.tool == Tool::Modify
             && !sketching
+            && !writing
             && self.canvas.crop_drag.is_none()
             && self.canvas.grip.is_none()
             && self.drawing.grip.is_none()
@@ -1064,14 +1118,21 @@ impl BimApp {
                 Drag::Box(from) => self.pick_up(d.in_box(from, q, q.0 < from.0), click_modifiers(ui)),
             }
         }
-        // A double click on a section's or an elevation's mark opens its view, as in Revit.
+        // A double click on a section's or an elevation's mark opens its view, as in Revit; on a note, writes in it.
         if response.double_clicked()
             && let Some(id) = hovered.filter(|id| model.section(*id).is_some())
         {
             self.open_sheet(Sheet::Section(id));
             return;
         }
-        if let Some(at) = self.clicked_at(&response).filter(|_| !dragged) {
+        if response.double_clicked()
+            && !writing
+            && let Some(id) = hovered.filter(|id| crate::notes::is_note(&model, *id))
+        {
+            self.edit_note(id);
+            return;
+        }
+        if let Some(at) = self.clicked_at(&response).filter(|_| !dragged && !writing) {
             let q = (at.x - rect.min.x, at.y - rect.min.y);
             // What lay under the press, which the hand may have left by the time the button came up.
             let found = if Some(q) == local { hovered } else { under_at(q) };
@@ -1080,7 +1141,7 @@ impl BimApp {
             self.snap_once = None;
         }
         // A double click ends a spline or a polyline at the point clicked, as Enter does.
-        if response.double_clicked() && !dragged && self.finishable() {
+        if response.double_clicked() && !dragged && !writing && self.finishable() {
             self.finish_open_shape();
         }
 
@@ -1098,7 +1159,10 @@ impl BimApp {
         }));
         let sketch_trim = self.sketch.is_some() && matches!(self.tool, Tool::Trim(_) | Tool::TrimTo { .. });
         let painted_hover = if matches!(self.tool, Tool::Align(_)) || sketch_trim { None } else { hovered };
-        paint(&p, Place::at(rect.min), &d, &marked, painted_hover, self.thin, &pictures);
+        paint(&p, Place { hide: self.writing(), ..Place::at(rect.min) }, &d, &marked, painted_hover, self.thin, &pictures);
+        if writing {
+            self.note_canvas(ui, &response, &p, Place::at(rect.min), &d);
+        }
         if let Some(sk) = &self.sketch {
             let over = local
                 .filter(|_| matches!(self.tool, Tool::Modify | Tool::Trim(_) | Tool::TrimTo { .. }) && sk.drag.is_none())
@@ -2060,8 +2124,9 @@ impl BimApp {
     /// The Text tool's click: a note saying what the Options Bar says, its top left at `at` in
     /// view `view` (a plan's level, a section, an elevation or a sheet).
     pub(crate) fn write_note(&mut self, view: Id, at: P2) {
+        // Typed in the Options Bar, it goes straight there; else it is written on the canvas.
         if self.note_text.trim().is_empty() {
-            self.status = Status { text: t("text: type what the note says in the Options Bar first").into(), error: true };
+            self.start_note(view, at);
             return;
         }
         // `\n` typed in the bar breaks the line.
@@ -2891,7 +2956,9 @@ impl BimApp {
             }
             Tool::Text if !self.note_text.trim().is_empty() => {
                 let text = self.note_text.replace("\\n", "\n");
-                sketched(&Element::Text(Note { view: m.guid(key), at: round(v.mm(q)), text, size: NOTE_SIZE, angle: 0.0, leader: None }));
+                let mut n = crate::notes::NoteEdit::new(m, key, round(v.mm(q)), self.note_type()).note;
+                n.text = text;
+                sketched(&Element::Text(n));
                 return;
             }
             Tool::Spot => {
