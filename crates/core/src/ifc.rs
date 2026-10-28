@@ -191,6 +191,8 @@ struct Step {
     body: u64,
     /// Each material written: it, and the surface style its colour shades with.
     materials: BTreeMap<String, (u64, Option<u64>)>,
+    /// What goes in each element's `Pset_*Common`: its entity, the set's name and its properties, written once at the end.
+    common: BTreeMap<Id, (u64, &'static str, Vec<u64>)>,
 }
 
 impl Step {
@@ -351,9 +353,9 @@ impl Step {
     }
 
     /// `Pset_*Common` of something structural: it carries load.
-    fn load_bearing(&mut self, ent: u64, pset: &str, id: Id) {
+    fn load_bearing(&mut self, ent: u64, pset: &'static str, id: Id) {
         let load = self.add("IFCPROPERTYSINGLEVALUE('LoadBearing',$,IFCBOOLEAN(.T.),$)");
-        self.define(ent, pset, &[load], (COMMON, COMMON_DEFINES), id);
+        self.common.entry(id).or_insert((ent, pset, Vec::new())).2.push(load);
     }
 
     /// A body: `profile` swept `depth` up from `bottom`, plus any extra representations.
@@ -461,9 +463,52 @@ impl Step {
     }
 }
 
+/// The `Pset_*Common` an element's IFC entity carries; none for what has none BIMCraft writes.
+fn common_pset(e: &Element) -> Option<&'static str> {
+    Some(match e {
+        Element::Wall(_) => "Pset_WallCommon",
+        Element::Floor(_) => "Pset_SlabCommon",
+        Element::Roof(_) => "Pset_RoofCommon",
+        Element::Ceiling(_) => "Pset_CoveringCommon",
+        Element::Door(_) => "Pset_DoorCommon",
+        Element::Window(_) => "Pset_WindowCommon",
+        Element::Column(_) | Element::StructuralColumn(_) => "Pset_ColumnCommon",
+        Element::Beam(_) => "Pset_BeamCommon",
+        Element::Footing(_) | Element::StripFooting(_) => "Pset_FootingCommon",
+        Element::Stair(_) => "Pset_StairCommon",
+        Element::Ramp(_) => "Pset_RampCommon",
+        Element::Railing(_) => "Pset_RailingCommon",
+        _ => return None,
+    })
+}
+
+/// What the work does to an element, in IFC's words for `Pset_*Common.Status`.
+fn ifc_status(m: &Model, e: &Element) -> Option<&'static str> {
+    e.params()?;
+    let at = |key| phasing::value(m, e, key).and_then(|n| phasing::index(m, n));
+    let created = at(phasing::CREATED).unwrap_or(0);
+    Some(match at(phasing::DEMOLISHED) {
+        Some(d) if d == created => "TEMPORARY",
+        Some(_) => "DEMOLISH",
+        None if created == 0 => "EXISTING",
+        None => "NEW",
+    })
+}
+
 pub fn export(m: &Model) -> String {
     let own = m.elements.with_guids().map(|(id, g, _)| (id, g)).collect();
-    let mut w = Step { out: String::new(), next: 0, uid: m.uid, own, world: 0, z: 0, context: 0, body: 0, materials: BTreeMap::new() };
+    let mut w = Step {
+        out: String::new(),
+        next: 0,
+        uid: m.uid,
+        own,
+        world: 0,
+        z: 0,
+        context: 0,
+        body: 0,
+        materials: BTreeMap::new(),
+        common: BTreeMap::new(),
+    };
     let origin = w.add("IFCCARTESIANPOINT((0.,0.,0.))");
     w.z = w.add("IFCDIRECTION((0.,0.,1.))");
     w.world = w.add(format!("IFCAXIS2PLACEMENT3D(#{origin},$,$)"));
@@ -1100,6 +1145,21 @@ pub fn export(m: &Model) -> String {
             w.define(ent, PARAMETERS, &props, (PROPERTIES, DEFINES), id);
         }
     }
+    // A phased project's elements say what the work does to them, as IFC's `Status` (PEnum_ElementStatus) in their `Pset_*Common`: taken down in
+    // any phase, DEMOLISH (TEMPORARY when made in that phase too); made in the first phase, EXISTING; else NEW. A door or a
+    // window with no phase of its own follows its wall. A project with no phases says nothing: all of it is new work.
+    if phasing::any(m) {
+        for (&id, &ent) in &products {
+            let Some(e) = m.elements.get(id) else { continue };
+            let Some(pset) = common_pset(e) else { continue };
+            let Some(status) = ifc_status(m, e) else { continue };
+            let p = w.add(format!("IFCPROPERTYENUMERATEDVALUE('Status',$,(IFCLABEL('{status}')),$)"));
+            w.common.entry(id).or_insert((ent, pset, Vec::new())).2.push(p);
+        }
+    }
+    for (id, (ent, pset, props)) in std::mem::take(&mut w.common) {
+        w.define(ent, pset, &props, (COMMON, COMMON_DEFINES), id);
+    }
     // Each element's phase and design option, in a property set of its own. The first phase is no value in a
     // model; here an element holding another value names it as its `Phase Created` (said to be implied), for
     // another tool to read. A door or a window holds only what it says: one with no phase follows its wall.
@@ -1340,6 +1400,11 @@ mod tests {
 
     /// The properties of the `BIMCraft_Phasing` set of entity `#ent`, as written, in the set's order; none when it has no such set.
     fn phasing_of(f: &str, ent: u64) -> Vec<String> {
+        set_of(f, ent, PHASING)
+    }
+
+    /// The properties of set `name` of entity `#ent`, as written, in the set's order; none when it has no such set.
+    fn set_of(f: &str, ent: u64, name: &str) -> Vec<String> {
         let body = |n: &str| -> String {
             let line = f.lines().find(|l| l.starts_with(&format!("#{n}="))).unwrap_or_else(|| panic!("no #{n}"));
             line.split_once('=').unwrap().1.trim_end_matches(';').to_string()
@@ -1351,7 +1416,7 @@ mod tests {
                 continue;
             }
             let set = body(set.trim_end_matches(");").trim_end_matches(';').trim_end_matches(')'));
-            if !set.contains(&format!("'{PHASING}'")) {
+            if !set.contains(&format!("'{name}'")) {
                 continue;
             }
             let props = set.rsplit_once(",(").unwrap().1.trim_end_matches(')');
@@ -1410,6 +1475,68 @@ mod tests {
         );
         assert_eq!(f.matches(&format!("'{PHASING}'")).count(), 3 + 1 + 1, "three walls and the door hold a value; and the project");
         dangling(&f);
+    }
+
+    #[test]
+    fn a_phased_projects_elements_say_what_the_work_does_to_them_in_their_common_set() {
+        use crate::graphics::testing::{house, run};
+        let status = |v: &str| format!("IFCPROPERTYENUMERATEDVALUE('Status',$,(IFCLABEL('{v}')),$)");
+        let mut s = Session::new();
+        let walls = house(&mut s);
+        run(&mut s, "door", json!({"at": [2000, 0]}));
+        let window = run(&mut s, "window", json!({"at": [0, 3000]}))["id"].as_u64().unwrap();
+        run(&mut s, "phase", json!({"name": "Demolition", "before": "New Construction"}));
+        for (id, held) in [
+            (walls[0], json!({"Phase Demolished": "Demolition"})),
+            (walls[1], json!({"Phase Created": "New Construction"})),
+            (walls[2], json!({"Phase Created": "Demolition", "Phase Demolished": "Demolition"})),
+            (window, json!({"Phase Created": "New Construction"})),
+        ] {
+            run(&mut s, "modify", json!({"id": id, "params": held}));
+        }
+        let f = export(&s.model);
+        let wall = of_kind(&f, "IFCWALL");
+        let common = |ent| set_of(&f, ent, "Pset_WallCommon");
+        assert_eq!(common(wall[0]), [status("DEMOLISH")]);
+        assert_eq!(common(wall[1]), [status("NEW")]);
+        assert_eq!(common(wall[2]), [status("TEMPORARY")], "made and taken down in the same phase");
+        assert_eq!(common(wall[3]), [status("EXISTING")], "no value is the first phase");
+        // A door with no phase of its own follows its wall; a window holding one says its own.
+        assert_eq!(set_of(&f, of_kind(&f, "IFCDOOR")[0], "Pset_DoorCommon"), [status("DEMOLISH")]);
+        assert_eq!(set_of(&f, of_kind(&f, "IFCWINDOW")[0], "Pset_WindowCommon"), [status("NEW")]);
+        dangling(&f);
+    }
+
+    #[test]
+    fn a_structural_elements_common_set_holds_both_what_it_carries_and_its_status() {
+        use crate::graphics::testing::run;
+        let mut s = Session::new();
+        let col = run(&mut s, "structural_column", json!({"at": [0, 0]}))["id"].as_u64().unwrap();
+        run(&mut s, "modify", json!({"id": col, "params": {"Phase Created": "New Construction"}}));
+        let f = export(&s.model);
+        let ent = of_kind(&f, "IFCCOLUMN")[0];
+        assert_eq!(
+            set_of(&f, ent, "Pset_ColumnCommon"),
+            ["IFCPROPERTYSINGLEVALUE('LoadBearing',$,IFCBOOLEAN(.T.),$)", "IFCPROPERTYENUMERATEDVALUE('Status',$,(IFCLABEL('NEW')),$)"],
+            "one set, not two of the same name"
+        );
+        assert_eq!(f.matches("'Pset_ColumnCommon'").count(), 1);
+        dangling(&f);
+    }
+
+    #[test]
+    fn a_project_with_no_phasing_gives_no_status() {
+        use crate::graphics::testing::{house, run};
+        let mut s = Session::new();
+        house(&mut s);
+        run(&mut s, "structural_column", json!({"at": [0, 0]}));
+        let f = export(&s.model);
+        assert!(!f.contains("'Status'"), "all of it is new work: nothing to say");
+        assert!(!f.contains("'Pset_WallCommon'"));
+        assert_eq!(
+            set_of(&f, of_kind(&f, "IFCCOLUMN")[0], "Pset_ColumnCommon"),
+            ["IFCPROPERTYSINGLEVALUE('LoadBearing',$,IFCBOOLEAN(.T.),$)"]
+        );
     }
 
     #[test]
