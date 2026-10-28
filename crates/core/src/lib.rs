@@ -73,6 +73,8 @@ pub use commands::{command_of, element_json, floor_outline, opening_of, roof_foo
 #[cfg(test)]
 mod detail_tests;
 #[cfg(test)]
+mod dimension_tests;
+#[cfg(test)]
 mod line_tests;
 #[cfg(test)]
 mod mep_tests;

@@ -1053,10 +1053,9 @@ impl BimApp {
                 .pick_all(q, PICK)
                 .into_iter()
                 .find(|id| reference_for(&model, DimKind::Angular, refs.first(), *id, view.mm(q), near).is_some()),
-            Tool::Radial(None) => d
-                .pick_all(q, PICK)
-                .into_iter()
-                .find(|id| model.reference_arc(&Reference { id: model.guid(*id), face: Face::Centre }).is_ok()),
+            Tool::Radial(None) => {
+                d.pick_all(q, PICK).into_iter().find(|id| model.reference_arc(&Reference::line(model.guid(*id), Face::Centre)).is_ok())
+            }
             // What a spot elevation would read.
             Tool::Spot => model.spot_host(level, view.mm(q)),
             Tool::Tag => d.pick(q, PICK).filter(|id| model.anchor(*id).is_some()),
@@ -1654,7 +1653,7 @@ impl BimApp {
                 }
             }
             &Tool::Radial(picked) => match (picked, hovered) {
-                (None, Some(id)) => self.tool = Tool::Radial(Some(Reference { id: m.guid(id), face: Face::Centre })),
+                (None, Some(id)) => self.tool = Tool::Radial(Some(Reference::line(m.guid(id), Face::Centre))),
                 (Some(r), _) => {
                     if self.run("dimension", json!({"kind": "radial", "refs": [r], "at": point(round(v.mm(at))), "level": key})).is_some() {
                         self.tool = Tool::Radial(None);
@@ -2905,6 +2904,7 @@ impl BimApp {
                         level: m.guid(level),
                         view: in_view(),
                         kind: DimKind::Aligned,
+                        orient: None,
                         refs: refs.clone(),
                         at: round(v.mm(q)),
                     }));
@@ -2938,6 +2938,7 @@ impl BimApp {
                         level: m.guid(level),
                         view: in_view(),
                         kind: DimKind::Angular,
+                        orient: None,
                         refs: refs.clone(),
                         at: round(v.mm(q)),
                     }));
@@ -2949,6 +2950,7 @@ impl BimApp {
                     level: m.guid(level),
                     view: in_view(),
                     kind: DimKind::Radial,
+                    orient: None,
                     refs: vec![r],
                     at: round(v.mm(q)),
                 }));

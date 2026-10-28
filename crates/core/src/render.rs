@@ -2429,7 +2429,7 @@ fn arc(center: P2, from: P2, to: P2, n: u32) -> Vec<P2> {
 /// A dimension, of its kind.
 fn dimension(d: &mut Drawing, m: &Model, dim: &Dimension) {
     match dim.kind {
-        DimKind::Aligned => aligned(d, m, dim),
+        DimKind::Aligned | DimKind::Linear => aligned(d, m, dim),
         DimKind::Angular => angular(d, m, dim),
         DimKind::Radial => radial(d, m, dim),
     }

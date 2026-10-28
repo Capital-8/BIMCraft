@@ -22,11 +22,12 @@ use crate::library::Kind as LibKind;
 use crate::lines::{DetailLine, LineStyle};
 use crate::massing;
 use crate::model::{
-    CEILING_HEIGHT, CadImport, Ceiling, CeilingType, Column, ColumnType, Component, DEFAULT_HEIGHT, DimKind, Dimension, Element, Extrusion,
-    Face, Facing, Floor, FloorType, Grid, Guid, Id, Key, Landing, Layer, Level, Line, Location, MAX_COORD, MAX_POINTS, MAX_SLOPE, MAX_TEXT,
-    Mass, Model, Note, Opening, OpeningType, PARAMETER_CATEGORIES, ParameterKind, Pattern, PlanView, PointCloud, ProjectParameter,
-    RAMP_SLOPE, RAMP_WIDTH, RISER, Railing, RailingType, Ramp, Reference, Roof, RoofType, Room, RoomArea, RoomSeparator, STAIR_WIDTH,
-    Schedule, Section, SectionBox, Shaft, Sheet, Side, Spot, Stair, TOL, TREAD, Tag, View3D, Viewport, Wall, WallType, heading, paper,
+    CEILING_HEIGHT, CadImport, Ceiling, CeilingType, Column, ColumnType, Component, DEFAULT_HEIGHT, DimKind, Dimension, Element, End,
+    Extrusion, Face, Facing, Floor, FloorType, Grid, Guid, Id, Key, Landing, Layer, Level, Line, Location, MAX_COORD, MAX_POINTS,
+    MAX_SLOPE, MAX_TEXT, Mass, Model, Note, Opening, OpeningType, Orient, PARAMETER_CATEGORIES, ParameterKind, Pattern, PlanView,
+    PointCloud, ProjectParameter, RAMP_SLOPE, RAMP_WIDTH, RISER, Railing, RailingType, Ramp, Reference, Roof, RoofType, Room, RoomArea,
+    RoomSeparator, STAIR_WIDTH, Schedule, Section, SectionBox, Shaft, Sheet, Side, Spot, Stair, TOL, TREAD, Tag, View3D, Viewport, Wall,
+    WallType, heading, paper,
 };
 use crate::paint;
 use crate::phasing;
@@ -517,12 +518,18 @@ pub static ALL: &[Command] = &[
         "dimension",
         ui_msg!("Aligned Dimension"),
         &["DI"],
-        "{refs: [ref, …], at: [x, y], level?, kind?: aligned|angular|radial} aligned (the default): the distances between \
-         parallel references, along a line through `at`; angular: the angle between two references that meet, on the side \
+        "{refs: [ref, …], at: [x, y], level?, kind?: aligned|linear|angular|radial, orient?: horizontal|vertical} aligned \
+         (the default): the distances between parallel references, along a line through `at` (between points, along the \
+         first two; points and lines, square to the lines); linear: the same with its line horizontal or vertical as `orient` \
+         says, or without one as `at` lies: east or west of the points, vertical, else horizontal (its lines must run square \
+         to it); angular: the angle between two references that meet, on the side \
          of `at`; radial: a round column's radius, toward `at`. A ref is {id, face?}: a wall's centre (the default), left or \
          right face (of its start-to-end direction), start or end; a door's or window's centre, or its jamb toward its wall's \
-         start or end; a grid's line; a straight detail line, or its start or end (radial: a circle or an arc of one). Or a \
-         point [x, y] on one of those (for radial, on a round column's edge). It follows what it measures",
+         start or end; a grid's line; a straight detail line, or its start or end (radial: a circle or an arc of one). With \
+         `point: start|end`, {id, face?, point} is the point at that end of the line: a wall's centre line's end, a face's \
+         corner, a grid's, a detail line's (of any shape) or a jamb's end. Or a point [x, y] on one of those lines (for \
+         radial, on a round column's edge), or {endpoint: [x, y]}, the end of one nearest it, within 100 mm. It follows what \
+         it measures",
         dimension,
     ),
     edit(
@@ -4109,10 +4116,13 @@ fn flip(s: &mut Session, p: &Value) -> R {
     for e in m.elements.values_mut() {
         if let Element::Dimension(d) = e {
             for r in &mut d.refs {
+                // A flipped wall runs the other way, and across it in to out is out to in: an end swaps too.
                 if lengths.contains_key(&r.id) {
                     r.face = r.face.flipped();
+                    r.point = r.point.map(End::other);
                 } else if hosts.get(&r.id).is_some_and(|h| lengths.contains_key(h)) {
                     r.face = r.face.mirrored();
+                    r.point = r.point.map(End::other);
                 }
             }
         }
@@ -4607,6 +4617,26 @@ fn reference_near(m: &Model, level: impl Key, p: P2, keep: impl Fn(Line) -> bool
         .map(|(r, _)| r)
 }
 
+/// Of the ends of the lines a plan of `level` (`view`, when not the level's own) shows (walls' centre lines and faces,
+/// doors' and windows' jambs, grids, its detail lines), the nearest `p`, within 100 mm.
+fn endpoint_near(m: &Model, level: Guid, view: Option<Guid>, p: P2) -> Option<Reference> {
+    let cut = |w: Option<&Wall>| w.is_some_and(|w| m.cut_by(w, level));
+    let plan = view.unwrap_or(level);
+    m.elements
+        .iter()
+        .filter(|(_, e)| match e {
+            Element::Wall(w) => cut(Some(w)),
+            Element::Door(o) | Element::Window(o) => cut(m.wall(o.host)),
+            Element::Grid(_) => true,
+            Element::DetailLine(l) => m.same(l.view, plan),
+            _ => false,
+        })
+        .filter_map(|(&id, _)| m.endpoint_at(id, p))
+        .filter(|(_, d)| *d <= 100.0)
+        .min_by(|a, b| a.1.total_cmp(&b.1))
+        .map(|(r, _)| r)
+}
+
 /// The round column on `level` whose edge passes nearest `p`, within 100 mm.
 fn arc_near(m: &Model, level: impl Key, p: P2) -> Option<Reference> {
     let level = m.guid(level);
@@ -4614,7 +4644,7 @@ fn arc_near(m: &Model, level: impl Key, p: P2) -> Option<Reference> {
         .with_guids()
         .filter(|(_, _, e)| e.column().is_some_and(|col| col.level == level))
         .filter_map(|(_, id, _)| {
-            let r = Reference { id, face: Face::Centre };
+            let r = Reference::line(id, Face::Centre);
             let (c, radius) = m.reference_arc(&r).ok()?;
             Some((r, (p.dist(c) - radius).abs()))
         })
@@ -4630,7 +4660,13 @@ fn dimension(s: &mut Session, p: &Value) -> R {
     let at = point_req(c, p, "at")?;
     let kind = match string(c, p, "kind")? {
         None => DimKind::Aligned,
-        Some(k) => serde_json::from_value(json!(k)).map_err(|_| bad(c, format!("`kind` is aligned, angular or radial, not `{k}`")))?,
+        Some(k) => {
+            serde_json::from_value(json!(k)).map_err(|_| bad(c, format!("`kind` is aligned, linear, angular or radial, not `{k}`")))?
+        }
+    };
+    let mut orient: Option<Orient> = match string(c, p, "orient")? {
+        None => None,
+        Some(o) => Some(serde_json::from_value(json!(o)).map_err(|_| bad(c, format!("`orient` is horizontal or vertical, not `{o}`")))?),
     };
     let given = p.get("refs").and_then(Value::as_array).ok_or_else(|| bad(c, "`refs` [ref, …] is required"))?;
     if given.len() > MAX_POINTS {
@@ -4639,6 +4675,15 @@ fn dimension(s: &mut Session, p: &Value) -> R {
     let mut refs: Vec<Reference> = Vec::new();
     for v in given {
         let near = |q: P2, what: &str| bad(c, format!("no {what} at [{}, {}] on {}", q.0, q.1, level_name(m, level)));
+        let endpoint = v.get("endpoint").filter(|_| v.as_object().is_some_and(|o| o.len() == 1));
+        if let Some(e) = endpoint {
+            let q = point(e).ok_or_else(|| bad(c, format!("`endpoint` is a point [x, y], not {e}")))?;
+            refs.push(
+                endpoint_near(m, level, view, q)
+                    .ok_or_else(|| near(q, "end of a wall, a wall face, a door, a window, a grid or a detail line"))?,
+            );
+            continue;
+        }
         let r = match point(v) {
             Some(q) if kind == DimKind::Radial => arc_near(m, level, q).ok_or_else(|| near(q, "round column's edge"))?,
             Some(q) => {
@@ -4653,7 +4698,13 @@ fn dimension(s: &mut Session, p: &Value) -> R {
         };
         refs.push(r);
     }
-    let d = Dimension { level, view, kind, refs, at };
+    if kind == DimKind::Linear && orient.is_none() {
+        // East or west of everything it measures, vertical; else horizontal.
+        let xs: Vec<f64> = refs.iter().filter_map(|r| m.reference_geometry(r).ok()).flat_map(|(a, b)| [a.0, b.0]).collect();
+        let beside = xs.iter().all(|&x| x < at.0) || xs.iter().all(|&x| x > at.0);
+        orient = Some(if beside && !xs.is_empty() { Orient::Vertical } else { Orient::Horizontal });
+    }
+    let d = Dimension { level, view, kind, orient, refs, at };
     let values: Vec<f64> = m.dimension_values(&d).into_iter().map(hundredth).collect();
     let id = s.model_mut().insert(Element::Dimension(d));
     Ok(json!({"id": id, "values": values}))
@@ -7124,7 +7175,7 @@ fn relocate(c: &str, s: &mut Session, ids: &[Id], mo: &Motion, end: Option<bool>
         let turned = |id: &Guid| moving_guids.contains(id) || hosts.get(id).is_some_and(|h| moving_guids.contains(h));
         for e in m.elements.values_mut() {
             if let Element::Dimension(d) = e {
-                d.refs.iter_mut().filter(|r| turned(&r.id)).for_each(|r| r.face = r.face.mirrored());
+                d.refs.iter_mut().filter(|r| turned(&r.id)).for_each(|r| *r = r.mirrored(hosts.contains_key(&r.id)));
             }
         }
     }
@@ -7223,9 +7274,10 @@ fn duplicate(c: &str, s: &mut Session, ids: &[Id], mo: &Motion) -> R {
             Element::Dimension(d) => {
                 for r in &mut d.refs {
                     if let Some(&to) = hosts.get(&r.id) {
+                        let opening = matches!(m.elements.get(r.id), Some(Element::Door(_) | Element::Window(_)));
                         r.id = to;
                         if mo.mirror {
-                            r.face = r.face.mirrored();
+                            *r = r.mirrored(opening);
                         }
                     }
                 }

@@ -1,0 +1,172 @@
+//! Dimensions driven through commands as a front end drives them: to points as well as lines (the ends of walls, their
+//! faces' corners, detail lines and grids), aligned along the points or linear (horizontal or vertical), and following what
+//! they measure.
+
+use serde_json::{Value, json};
+
+use crate::engine::Session;
+use crate::model::{Id, Model};
+
+fn run(s: &mut Session, c: &str, p: Value) -> Value {
+    s.execute(c, &p).unwrap_or_else(|e| panic!("{c} {p}: {e}"))
+}
+
+fn err(s: &mut Session, c: &str, p: Value) -> String {
+    s.execute(c, &p).err().unwrap_or_else(|| panic!("{c} {p} was accepted"))
+}
+
+fn id_of(v: &Value) -> Id {
+    v["id"].as_u64().unwrap_or_else(|| panic!("no id in {v}"))
+}
+
+/// A box of four walls, 8000 by 6000 on their centre lines, 200 mm thick: south, east, north, west.
+fn house(s: &mut Session) -> Vec<Id> {
+    let r = run(s, "wall", json!({"points": [[0, 0], [8000, 0], [8000, 6000], [0, 6000]], "closed": true}));
+    r["ids"].as_array().map(|ids| ids.iter().filter_map(Value::as_u64).collect()).unwrap_or_default()
+}
+
+fn values(s: &mut Session, id: Id) -> Value {
+    crate::commands::element_json(&s.model, id)["values"].clone()
+}
+
+#[test]
+fn a_dimension_measures_between_two_endpoints_aligned_horizontal_or_vertical() {
+    let mut s = Session::new();
+    let w = house(&mut s);
+    // The south wall's start, its centre line's west end, to the east wall's end, at the north-east corner.
+    let (from, to) = (json!({"id": w[0], "point": "start"}), json!({"id": w[1], "point": "end"}));
+    let aligned = run(&mut s, "dimension", json!({"refs": [from, to], "at": [3000, 4000]}));
+    assert_eq!(aligned["values"], json!([10000.0]));
+    let across = run(&mut s, "dimension", json!({"kind": "linear", "orient": "horizontal", "refs": [from, to], "at": [0, 9000]}));
+    assert_eq!(across["values"], json!([8000.0]));
+    let up = run(&mut s, "dimension", json!({"kind": "linear", "orient": "vertical", "refs": [from, to], "at": [12000, 0]}));
+    assert_eq!(up["values"], json!([6000.0]));
+    // Without an orientation, a linear one runs as `at` says: past the points' east or west, vertical; else horizontal.
+    let auto = run(&mut s, "dimension", json!({"kind": "linear", "refs": [from, to], "at": [11000, 3000]}));
+    assert_eq!(auto["values"], json!([6000.0]));
+    assert_eq!(crate::commands::element_json(&s.model, id_of(&auto))["orient"], json!("vertical"));
+    let auto = run(&mut s, "dimension", json!({"kind": "linear", "refs": [from, to], "at": [4000, -2000]}));
+    assert_eq!(auto["values"], json!([8000.0]));
+    // The east wall moves east: all of them follow.
+    run(&mut s, "move", json!({"ids": [w[1]], "by": [1000, 0]}));
+    assert_eq!(values(&mut s, id_of(&across)), json!([9000.0]));
+    assert_eq!(values(&mut s, id_of(&up)), json!([6000.0]));
+    let v = values(&mut s, id_of(&aligned))[0].as_f64().unwrap_or_default();
+    assert!((v - 9000f64.hypot(6000.0)).abs() < 0.01, "{v}");
+}
+
+#[test]
+fn an_endpoint_is_found_near_a_point_a_wall_face_ending_at_its_corner() {
+    let mut s = Session::new();
+    let w = house(&mut s);
+    let a = id_of(&run(&mut s, "detail_line", json!({"start": [1000, 2000], "end": [3000, 4000]})));
+    // A detail line's end, and the south wall's outer face's east end, where the walls' outlines meet: [8100, -100].
+    let d = run(
+        &mut s,
+        "dimension",
+        json!({"refs": [{"endpoint": [3010, 3990]}, {"endpoint": [8090, -90]}], "kind": "linear", "orient": "horizontal", "at": [5000, -3000]}),
+    );
+    assert_eq!(d["values"], json!([5100.0]));
+    let refs = crate::commands::element_json(&s.model, id_of(&d))["refs"].clone();
+    assert_eq!(refs[0], json!({"id": s.model.guid(a), "face": "centre", "point": "end"}));
+    let corner = &refs[1];
+    assert!(corner["point"].is_string() && corner["face"] != json!("centre"), "a face's end: {corner}");
+    // The inner corner is the inner face's end.
+    let d = run(&mut s, "dimension", json!({"refs": [{"endpoint": [7900, 100]}, {"endpoint": [100, 100]}], "at": [4000, 1000]}));
+    assert_eq!(d["values"], json!([7800.0]));
+    let e = err(&mut s, "dimension", json!({"refs": [{"endpoint": [4000, 3000]}, {"endpoint": [100, 100]}], "at": [0, 0]}));
+    assert!(e.contains("no end"), "{e}");
+    let _ = w;
+}
+
+#[test]
+fn points_and_lines_dimension_together_and_lines_keep_square_to_a_linear_one() {
+    let mut s = Session::new();
+    let w = house(&mut s);
+    let grid = id_of(&run(&mut s, "grid", json!({"start": [3000, -2000], "end": [3000, 8000]})));
+    // A grid running north and a corner: square to the grid, so across it.
+    let d = run(&mut s, "dimension", json!({"refs": [{"id": grid}, {"id": w[1], "point": "end"}], "at": [0, 7000]}));
+    assert_eq!(d["values"], json!([5000.0]));
+    let d = run(
+        &mut s,
+        "dimension",
+        json!({"kind": "linear", "orient": "horizontal", "refs": [{"id": w[1], "point": "end"}, {"id": grid}], "at": [0, 7000]}),
+    );
+    assert_eq!(d["values"], json!([5000.0]));
+    // A horizontal dimension can't measure to a line running east.
+    let e = err(
+        &mut s,
+        "dimension",
+        json!({"kind": "linear", "orient": "vertical", "refs": [{"id": grid}, {"id": w[1], "point": "end"}], "at": [0, 7000]}),
+    );
+    assert!(e.contains("square"), "{e}");
+    // An orientation is a linear one's.
+    let e = err(&mut s, "dimension", json!({"orient": "vertical", "refs": [{"id": grid}, {"id": w[1], "point": "end"}], "at": [0, 7000]}));
+    assert!(e.contains("linear"), "{e}");
+    // Two points in one place have no way to run.
+    let e = err(&mut s, "dimension", json!({"refs": [{"id": w[0], "point": "end"}, {"id": w[1], "point": "start"}], "at": [0, 7000]}));
+    assert!(e.contains("one place"), "{e}");
+    // An angle measures between lines, not their ends.
+    let e = err(&mut s, "dimension", json!({"kind": "angular", "refs": [{"id": w[0], "point": "end"}, {"id": w[1]}], "at": [0, 7000]}));
+    assert!(e.contains("lines"), "{e}");
+}
+
+#[test]
+fn a_mirrored_or_flipped_wall_keeps_its_dimension_on_the_same_corner() {
+    let mut s = Session::new();
+    let w = house(&mut s);
+    let d = id_of(&run(
+        &mut s,
+        "dimension",
+        json!({"refs": [{"id": w[0], "point": "start"}, {"id": w[0], "point": "end"}], "at": [4000, -1000]}),
+    ));
+    run(&mut s, "mirror", json!({"ids": [w[0], w[1], w[2], w[3], d], "axis": [[10000, 0], [10000, 1000]]}));
+    assert_eq!(values(&mut s, d), json!([8000.0]));
+    let d = id_of(&run(
+        &mut s,
+        "dimension",
+        json!({"kind": "linear", "orient": "horizontal", "refs": [{"id": w[0], "face": "left", "point": "end"}, {"id": w[2], "face": "right", "point": "start"}], "at": [16000, 9000]}),
+    ));
+    let before = values(&mut s, d);
+    run(&mut s, "flip", json!({"ids": [w[0]]}));
+    assert_eq!(values(&mut s, d), before, "the same corner");
+}
+
+#[test]
+fn a_file_keeps_a_dimension_s_points_and_orientation() {
+    let mut s = Session::new();
+    let w = house(&mut s);
+    let d = id_of(&run(
+        &mut s,
+        "dimension",
+        json!({"kind": "linear", "orient": "vertical", "refs": [{"id": w[0], "point": "start"}, {"id": w[2], "point": "start"}], "at": [-2000, 0]}),
+    ));
+    let text = s.model.to_json().unwrap_or_else(|e| panic!("{e}"));
+    let (m, left_out) = Model::read(&text).unwrap_or_else(|e| panic!("{e}"));
+    assert!(left_out.is_empty(), "{left_out:?}");
+    assert_eq!(m.elements.get(d), s.model.elements.get(d));
+    assert!(text.contains("\"format\": 10"), "points need format 10");
+}
+
+#[test]
+fn a_dimension_to_points_draws_its_witness_lines_from_the_points() {
+    let mut s = Session::new();
+    let a = id_of(&run(&mut s, "detail_line", json!({"start": [-3000, 3000], "end": [-1000, 1000]})));
+    let b = id_of(&run(&mut s, "detail_line", json!({"start": [4000, 1000], "end": [6000, 3000]})));
+    run(
+        &mut s,
+        "dimension",
+        json!({"kind": "linear", "orient": "horizontal", "refs": [{"id": a, "point": "end"}, {"id": b, "point": "start"}], "at": [0, -2000]}),
+    );
+    let level = s.model.levels().first().map(|l| l.0).unwrap_or_default();
+    let d = crate::render::plan(&s.model, level, 800, 600);
+    let png = crate::render::png(&d).unwrap_or_default();
+    let pm = tiny_skia::Pixmap::decode_png(&png).unwrap_or_else(|e| panic!("{e}"));
+    let dark = |p: crate::geom::P2| {
+        let (x, y) = d.view.px(p);
+        pm.pixel(x as u32, y as u32).is_some_and(|c| c.red() < 200 && c.green() < 200 && c.blue() < 200)
+    };
+    assert!(dark(crate::geom::P2(1500.0, -2000.0)), "the dimension line, horizontal");
+    assert!(dark(crate::geom::P2(-1000.0, -500.0)), "a witness line down from the first point");
+    assert!(dark(crate::geom::P2(4000.0, -500.0)), "and from the second");
+}

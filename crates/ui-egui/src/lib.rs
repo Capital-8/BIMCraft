@@ -1880,7 +1880,7 @@ impl BimApp {
             Some(Element::Level(_)) => Tool::Level,
             Some(Element::Grid(_)) => Tool::Grid(None),
             Some(Element::Dimension(d)) => match d.kind {
-                DimKind::Aligned => Tool::Dimension(Vec::new()),
+                DimKind::Aligned | DimKind::Linear => Tool::Dimension(Vec::new()),
                 DimKind::Angular => Tool::Angular(Vec::new()),
                 DimKind::Radial => Tool::Radial(None),
             },
