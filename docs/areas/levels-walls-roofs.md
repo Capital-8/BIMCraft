@@ -28,7 +28,11 @@ would and nothing else: it is no edge of a floor, a ceiling or a roof (`Model::b
 with an `Axis` polyline on its storey, which the import reads back. With `room_area {at: "finish"}` (`Model::room_area`, Revit's Area and
 Volume Computations) room areas are measured at the walls' faces instead (`face_lines` and the separators), the floor inside them; the IFC space
 takes that outline, and its `Qto_SpaceBaseQuantities` give both whichever is set: `GrossFloorArea` and `GrossPerimeter` at
-the centre lines, `NetFloorArea` and `NetPerimeter` at the faces, and `Height` up to the level above. An attached top or base follows the roof's or floor's plane
+the centre lines, `NetFloorArea` and `NetPerimeter` at the faces, and `Height` up to the level above. Walls, slabs, doors and windows
+carry theirs too (`ifc::wall_quantities`): a wall its `Length` on its axis, `Width`, `Height` and side and volume, gross and less the
+doors and windows in it (each cut to its height; joins aside), or only `Length` and `Width` when attached, as its height then varies;
+a level slab its `Width` (depth), `Perimeter` and area and volume less its openings, a sloped one only its `Width`; a door or window
+its `Width`, `Height`, `Perimeter` and `Area`. An attached top or base follows the roof's or floor's plane
 over each part of the wall (a roof's slopes each over its own part of the plan); a mirrored wall runs back the other way.
 A roof by footprint is the straight skeleton of its outline and its `courtyards` (`skeleton::faces`: the outline
 counter-clockwise, the courtyards clockwise, the roof to the left of every edge): each edge moves in at speed 1, a gable's at

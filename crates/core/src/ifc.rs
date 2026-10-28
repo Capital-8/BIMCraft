@@ -230,7 +230,7 @@ impl Step {
         self.add(format!("IFCRELDEFINESBYPROPERTIES({},$,$,$,(#{ent}),#{set})", self.guid(relation, key)));
     }
 
-    /// Quantity set `name` of `(name, kind, value)` for `ent`: kind `AREA` in m², `LENGTH` in mm.
+    /// Quantity set `name` of `(name, kind, value)` for `ent`: kind `LENGTH` in mm, `AREA` in m², `VOLUME` in m³.
     fn quantities(&mut self, ent: u64, name: &str, values: &[(&str, &str, f64)], key: u64) {
         let qs: Vec<u64> = values.iter().map(|(n, kind, v)| self.add(format!("IFCQUANTITY{kind}({},$,$,{},$)", s(n), real(*v)))).collect();
         let set = self.add(format!("IFCELEMENTQUANTITY({},$,{},$,$,({}))", self.guid(QUANTITIES, key), s(name), refs(&qs)));
@@ -470,6 +470,34 @@ impl Step {
     }
 }
 
+/// The length round a closed ring, mm.
+fn perimeter(ring: &[P2]) -> f64 {
+    ring.iter().zip(ring.iter().cycle().skip(1)).map(|(a, b)| a.dist(*b)).sum()
+}
+
+/// What a wall measures, for its `Qto_WallBaseQuantities`: its length along its axis, its thickness and height, its side
+/// (length by height, m²) and that less the doors and windows in it (`holes`, as (width, height, sill), each cut to the
+/// wall's height), and both through its thickness (m³), its joins aside. A wall attached to a roof or a floor has no single
+/// height, so only its length and thickness.
+fn wall_quantities(m: &Model, wl: &crate::model::Wall, holes: &[(f64, f64, f64)]) -> Vec<(&'static str, &'static str, f64)> {
+    let (length, width) = (Axis::of(wl).length(), m.thickness(wl));
+    let mut values = vec![("Length", "LENGTH", length), ("Width", "LENGTH", width)];
+    if wl.attach_top.is_none() && wl.attach_base.is_none() {
+        let height = m.top_z(wl) - m.base_z(wl);
+        let gross = length * height;
+        let cut: f64 = holes.iter().map(|&(wd, h, sill)| wd.min(length) * h.min(height - sill).max(0.0)).sum();
+        let net = (gross - cut).max(0.0);
+        values.extend([
+            ("Height", "LENGTH", height),
+            ("GrossSideArea", "AREA", gross / 1e6),
+            ("NetSideArea", "AREA", net / 1e6),
+            ("GrossVolume", "VOLUME", gross * width / 1e9),
+            ("NetVolume", "VOLUME", net * width / 1e9),
+        ]);
+    }
+    values
+}
+
 pub fn export(m: &Model) -> String {
     let own = m.elements.with_guids().map(|(id, g, _)| (id, g)).collect();
     let mut w = Step { out: String::new(), next: 0, uid: m.uid, own, world: 0, z: 0, context: 0, body: 0, materials: BTreeMap::new() };
@@ -520,6 +548,15 @@ pub fn export(m: &Model) -> String {
     let mut wholes: BTreeMap<Id, (u64, u64, f64, Vec<u64>)> = BTreeMap::new();
     // The runs in each system, by its name, for the IfcSystem they are assigned to.
     let mut systems: BTreeMap<&str, Vec<u64>> = BTreeMap::new();
+    // The doors and windows in each wall as (width, height, sill), for what its sides measure less them.
+    let mut holes: BTreeMap<Id, Vec<(f64, f64, f64)>> = BTreeMap::new();
+    for e in m.elements.values() {
+        if let Element::Door(o) | Element::Window(o) = e
+            && let (Some(t), Some(host)) = (m.opening_type(e), m.elements.id(o.host))
+        {
+            holes.entry(host).or_default().push((t.width, t.height, o.sill));
+        }
+    }
     for (&id, e) in &m.elements {
         match e {
             Element::Wall(wl) => {
@@ -566,6 +603,8 @@ pub fn export(m: &Model) -> String {
                 contained.entry(wl.level).or_default().push(ent);
                 products.insert(id, ent);
                 placed.insert(id, (ent, at));
+                let values = wall_quantities(m, wl, holes.get(&id).map_or(&[][..], |h| h.as_slice()));
+                w.quantities(ent, "Qto_WallBaseQuantities", &values, id);
             }
             Element::Floor(f) => {
                 let Some(&(_, storey)) = storeys.get(&f.level) else { continue };
@@ -592,6 +631,22 @@ pub fn export(m: &Model) -> String {
                 if f.structural {
                     w.load_bearing(ent, "Pset_SlabCommon", id);
                 }
+                // A level slab measures as its outline less its openings, through its depth; a sloped one has no plan
+                // area to give, so only its depth.
+                let net = geom::area(&f.boundary).abs() - f.openings.iter().map(|o| geom::area(o).abs()).sum::<f64>();
+                let values = if m.floor_top(f).g == P2(0.0, 0.0) {
+                    vec![
+                        ("Width", "LENGTH", depth),
+                        ("Perimeter", "LENGTH", perimeter(&f.boundary)),
+                        ("GrossArea", "AREA", geom::area(&f.boundary).abs() / 1e6),
+                        ("NetArea", "AREA", net / 1e6),
+                        ("GrossVolume", "VOLUME", geom::area(&f.boundary).abs() * depth / 1e9),
+                        ("NetVolume", "VOLUME", net * depth / 1e9),
+                    ]
+                } else {
+                    vec![("Width", "LENGTH", depth)]
+                };
+                w.quantities(ent, "Qto_SlabBaseQuantities", &values, id);
             }
             Element::Ceiling(c) => {
                 let Some(&(_, storey)) = storeys.get(&c.level) else { continue };
@@ -991,6 +1046,14 @@ pub fn export(m: &Model) -> String {
             ))
         };
         w.add(format!("IFCRELFILLSELEMENT({},$,$,$,#{opening},#{ent})", w.guid(FILLS, id)));
+        let qto = if matches!(e, Element::Door(_)) { "Qto_DoorBaseQuantities" } else { "Qto_WindowBaseQuantities" };
+        let values = [
+            ("Width", "LENGTH", t.width),
+            ("Height", "LENGTH", t.height),
+            ("Perimeter", "LENGTH", 2.0 * (t.width + t.height)),
+            ("Area", "AREA", t.width * t.height / 1e6),
+        ];
+        w.quantities(ent, qto, &values, id);
         // What a family's door or window is made of: its material, or the set of them.
         let relating = match made_of.as_slice() {
             [] => None,
@@ -1520,5 +1583,84 @@ mod tests {
         // An option set does.
         run(&mut s, "option", json!({"set": "Facade", "options": ["Brick", "Glass"]}));
         assert_eq!(export(&s.model).matches(&format!("'{PHASING}'")).count(), 1);
+    }
+
+    /// The quantities of set `name` of entity `#ent`, by their names; none when it has no such set.
+    fn quantities_of(f: &str, ent: u64, name: &str) -> BTreeMap<String, f64> {
+        let body = |n: &str| -> String {
+            let line = f.lines().find(|l| l.starts_with(&format!("#{n}="))).unwrap_or_else(|| panic!("no #{n}"));
+            line.split_once('=').unwrap().1.trim_end_matches(';').to_string()
+        };
+        for rel in f.lines().filter(|l| l.contains("=IFCRELDEFINESBYPROPERTIES(")) {
+            let (related, set) = rel.split_once("$,$,$,(").unwrap().1.split_once("),#").unwrap();
+            if !related.split(',').any(|r| r == format!("#{ent}")) {
+                continue;
+            }
+            let set = body(set.trim_end_matches(';').trim_end_matches(')'));
+            if !set.starts_with("IFCELEMENTQUANTITY(") || !set.contains(&format!("'{name}'")) {
+                continue;
+            }
+            let qs = set.rsplit_once(",(").unwrap().1.trim_end_matches(')');
+            return qs
+                .split(',')
+                .map(|q| {
+                    // `IFCQUANTITYAREA('NetSideArea',$,$,12.5,$)`
+                    let q = body(q.trim_start_matches('#'));
+                    let fields: Vec<&str> = q.split_once('(').unwrap().1.split(',').collect();
+                    (fields[0].trim_matches('\'').to_string(), fields[3].parse().unwrap())
+                })
+                .collect();
+        }
+        BTreeMap::new()
+    }
+
+    #[test]
+    fn walls_slabs_doors_and_windows_carry_their_base_quantities() {
+        use crate::graphics::testing::{house, run};
+        let mut s = Session::new();
+        let walls = house(&mut s);
+        let door = run(&mut s, "door", json!({"at": [2000, 0]}))["id"].as_u64().unwrap();
+        let window = run(&mut s, "window", json!({"at": [4000, 0]}))["id"].as_u64().unwrap();
+        run(
+            &mut s,
+            "floor",
+            json!({"boundary": [[0, 0], [8000, 0], [8000, 6000], [0, 6000]], "openings": [[[1000, 1000], [2000, 1000], [2000, 2000], [1000, 2000]]]}),
+        );
+        let f = export(&s.model);
+        let near = |a: f64, b: f64| (a - b).abs() < 1e-6 * b.abs().max(1.0);
+        let (m, wall) = (&s.model, walls[0]);
+        let Some(Element::Wall(wl)) = m.elements.get(wall) else { panic!("no wall") };
+        let (height, thick) = (m.top_z(wl) - m.base_z(wl), m.thickness(wl));
+        let size = |id: u64| m.opening_type(m.elements.get(id).unwrap()).unwrap();
+        let (d, wn) = (size(door), size(window));
+        let sill = match m.elements.get(window) {
+            Some(Element::Window(o)) => o.sill,
+            _ => panic!("no window"),
+        };
+        let q = quantities_of(&f, of_kind(&f, "IFCWALL")[0], "Qto_WallBaseQuantities");
+        let gross = 8000.0 * height / 1e6;
+        let cut = (d.width * d.height + wn.width * wn.height.min(height - sill)) / 1e6;
+        assert!(near(q["Length"], 8000.0) && near(q["Width"], thick) && near(q["Height"], height), "{q:?}");
+        assert!(near(q["GrossSideArea"], gross), "{q:?}");
+        assert!(near(q["NetSideArea"], gross - cut), "less the door and the window: {q:?}");
+        assert!(near(q["NetVolume"], (gross - cut) * thick / 1e3), "{q:?}");
+        // A wall with nothing in it: net is gross.
+        let q = quantities_of(&f, of_kind(&f, "IFCWALL")[1], "Qto_WallBaseQuantities");
+        assert!(near(q["NetSideArea"], q["GrossSideArea"]), "{q:?}");
+        let q = quantities_of(&f, of_kind(&f, "IFCDOOR")[0], "Qto_DoorBaseQuantities");
+        assert!(near(q["Width"], d.width) && near(q["Height"], d.height) && near(q["Area"], d.width * d.height / 1e6), "{q:?}");
+        assert!(near(q["Perimeter"], 2.0 * (d.width + d.height)), "{q:?}");
+        let q = quantities_of(&f, of_kind(&f, "IFCWINDOW")[0], "Qto_WindowBaseQuantities");
+        assert!(near(q["Area"], wn.width * wn.height / 1e6), "{q:?}");
+        let slab = *of_kind(&f, "IFCSLAB").last().unwrap();
+        let q = quantities_of(&f, slab, "Qto_SlabBaseQuantities");
+        assert!(near(q["GrossArea"], 48.0) && near(q["NetArea"], 47.0) && near(q["Perimeter"], 28000.0), "{q:?}");
+        assert!(near(q["NetVolume"], 47.0 * q["Width"] / 1e3), "{q:?}");
+        dangling(&f);
+        // Attached to a roof or a floor, a wall has no single height: only its length and thickness.
+        let mut attached = wl.clone();
+        attached.attach_top = Some(m.guid(walls[1]));
+        let names: Vec<&str> = wall_quantities(m, &attached, &[]).iter().map(|(n, _, _)| *n).collect();
+        assert_eq!(names, ["Length", "Width"]);
     }
 }
