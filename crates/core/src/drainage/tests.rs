@@ -14,6 +14,10 @@ fn tabelas_5_6_and_7_are_as_printed() {
     );
     assert_eq!([0.005, 0.01, 0.02, 0.04].map(|s| capacity(150.0, s, Role::Main, 1)), [0.0, 700.0, 840.0, 1000.0]);
     assert_eq!([0.005, 0.01, 0.02, 0.04].map(|s| capacity(200.0, s, Role::Main, 1)), [1400.0, 1600.0, 1920.0, 2300.0]);
+    assert_eq!([0.005, 0.01, 0.02, 0.04].map(|s| capacity(250.0, s, Role::Main, 1)), [2500.0, 2900.0, 3500.0, 4200.0]);
+    assert_eq!([0.005, 0.01, 0.02, 0.04].map(|s| capacity(300.0, s, Role::Main, 1)), [3900.0, 4600.0, 5600.0, 6700.0]);
+    assert_eq!([0.005, 0.01, 0.02, 0.04].map(|s| capacity(400.0, s, Role::Main, 1)), [7000.0, 8300.0, 10000.0, 12000.0]);
+    assert_eq!(smallest(2400.0, 0.005, Role::Main, 1, 0.0), Some(250.0), "DN 200 carries 1400 at 0.5 %");
     // between two slopes: the smaller one, on the safe side
     assert_eq!(capacity(150.0, 0.015, Role::Main, 1), 700.0);
     assert_eq!(capacity(150.0, 0.001, Role::Main, 1), 0.0, "flatter than 0.5 %: none");

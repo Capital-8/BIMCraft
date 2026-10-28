@@ -2,9 +2,11 @@
 //! `water_size` command is their caller, so none of this needs a pipe network or connectors in the model.
 //!
 //! - The method that gives a pipe's design flow is the project's to choose and to justify in its report. Two are offered:
-//!   `weights`, the empirical method of NBR 5626:1998 Annex A (the fixture table below is that edition's Table A.1, and only the
-//!   flush-tank WC is in it), `Q = 0.3 √ΣP` (L/s), never more than the sum of the fixtures' own
-//!   design flows; and `sum`, every fixture at once.
+//!   `weights`, the empirical method of NBR 5626:1998 Annex A, `Q = 0.3 √ΣP` (L/s), never more than the sum of the fixtures' own
+//!   design flows; and `sum`, every fixture at once. The fixtures' design flows and relative weights are not the standard's: they
+//!   are Tigre's table "Vazões de projeto e pesos relativos nos pontos de utilização" (Manual Técnico Tigre, 2021_10, page 198 of
+//!   the PDF), the reference makers' table. Only the flush-tank WC, the lavatory, the sink, the shower and the tub (`laundry`,
+//!   "Tanque", 0.25 L/s, weight 0.7) are taken from it.
 //! - Head loss by the universal (Darcy-Weisbach) equation, the friction factor by Colebrook, water at 20 °C. A fitting counts as
 //!   the equivalent length of Tigre's table "Perdas de carga localizadas - Sua equivalência em metros de tubulação de PVC rígido"
 //!   (Manual Técnico Tigre, 2021_10, Apêndices, page 199 of the PDF; DE 20 to 110 mm). `LE` takes its columns Joelho 90°, Joelho 45°,
@@ -13,7 +15,7 @@
 //! - Speed 3 m/s at most (the standard lets a pipe go faster where water hammer and noise are shown not to matter); at least
 //!   10 kPa dynamic at a point of use.
 
-/// The design flow (L/s) and the weight of each fixture, NBR 5626:1998 Table A.1: (kind, Q, P).
+/// The design flow (L/s) and the weight of each fixture, from Tigre's Manual Técnico (page 198): (kind, Q, P).
 pub const FIXTURES: &[(&str, f64, f64)] =
     &[("wc", 0.15, 0.3), ("lav", 0.15, 0.3), ("sink", 0.25, 0.7), ("shower", 0.20, 0.4), ("laundry", 0.25, 0.7)];
 
