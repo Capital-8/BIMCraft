@@ -229,6 +229,7 @@ pub struct Drawing {
     paper: f32,
     /// How much of what the view cuts it draws.
     detail: Detail,
+    pattern_styles: std::collections::BTreeMap<Id, [crate::graphics::Style; 2]>,
 }
 
 impl Drawing {
@@ -248,6 +249,7 @@ impl Drawing {
             k: 1.0,
             paper: 1.0,
             detail: Detail::Fine,
+            pattern_styles: std::collections::BTreeMap::new(),
         }
     }
     /// Finish the model layer before view-specific regions and annotation are drawn.
@@ -826,7 +828,7 @@ pub fn sketch(m: &Model, view: View, id: Id, e: &Element) -> Drawing {
                 d.line(&g.footprint(), Pen::HEAVY, INK, true)
             }
         }
-        Element::Component(c) => component(&mut d, &m.component_pieces(c)),
+        Element::Component(c) => component(&mut d, m, &m.component_pieces(c)),
         // Drawn at its sill, where the cut plane would pass through it whatever the plan's cut is.
         Element::Door(o) | Element::Window(o) => {
             if let Some(w) = m.wall(o.host) {
@@ -1031,6 +1033,7 @@ fn section_in(m: &Model, id: impl Key, view: View, k: f32, n: f64, picture: Opti
     (d.k, d.paper, d.detail, d.weights) = (k, paper_of(n, view.scale), detail_of(m, id), m.line_weights().at(n));
     let Some(v) = m.section(id) else { return d };
     let look = Look::of(m, id);
+    d.pattern_styles = look.pattern_styles();
     let u = (v.end - v.start).unit();
     let (first, last) = span(m, v, &look);
     // Each element's cut pieces, filled as one so where they meet (a roof's slopes at its ridge)
@@ -1061,7 +1064,12 @@ fn section_in(m: &Model, id: impl Key, view: View, k: f32, n: f64, picture: Opti
     }
     for (owner, rings) in &cuts {
         d.owner = Some(*owner);
-        d.fill(rings, POCHE);
+        if pattern_style(&d, true).is_some() {
+            d.fill(rings, PAPER);
+            override_patterns(&mut d, m, rings, true, (P2(0.0, 0.0), 0.0));
+        } else {
+            d.fill(rings, POCHE);
+        }
     }
     let pieces: Vec<(Id, Vec<P2>)> = cuts.iter().flat_map(|(owner, rings)| rings.iter().map(|r| (*owner, r.clone()))).collect();
     for (owner, runs) in cut_edges(&pieces, 1.0 / d.view.scale) {
@@ -1399,6 +1407,7 @@ fn draw_plan(m: &Model, plan: impl Key, view: View, up: bool, k: f32, n: f64, ti
     (d.k, d.paper, d.detail, d.weights) = (k, paper_of(n, view.scale), detail_of(m, key), m.line_weights().at(n));
     let look = Look::of(m, key);
     let shown = |id: Id| look.shows(id);
+    d.pattern_styles = look.pattern_styles();
     // A ceiling plan looks up from its own cut, whatever box its floor plan follows.
     let mut range = if up { m.plan_range(key) } else { m.shown_range(key) };
     if up {
@@ -1419,18 +1428,16 @@ fn draw_plan(m: &Model, plan: impl Key, view: View, up: bool, k: f32, n: f64, ti
             continue;
         }
         d.owner = Some(id);
-        for ring in std::iter::once(&f.boundary).chain(&f.openings) {
-            d.line(ring, BY_CATEGORY, FAINT, true);
-        }
-        holes(&mut d, m, &m.floor_slabs(f));
-        // Its top layer's surface pattern, faint, in a fine view.
-        if let Some(x) =
-            m.type_layers("floor", &f.type_name).first().and_then(|l| m.materials.get(&l.material)).filter(|_| d.detail == Detail::Fine)
-        {
-            let fill = x.surface_pattern.as_ref().and_then(|n| m.fill_patterns.get(n));
-            for (face, rise) in m.floor_slabs(f) {
-                for piece in m.less_shafts(&face, rise).0 {
-                    match fill {
+        // Surface overrides also work on an unpatterned material and at coarse detail.
+        let material = m.type_layers("floor", &f.type_name).first().and_then(|l| m.materials.get(&l.material));
+        for (face, rise) in m.floor_slabs(f) {
+            for piece in m.less_shafts(&face, rise).0 {
+                let replaced = override_patterns(&mut d, m, std::slice::from_ref(&piece), false, (f.pattern_origin, f.pattern_angle));
+                if !replaced
+                    && d.detail == Detail::Fine
+                    && let Some(x) = material
+                {
+                    match x.surface_pattern.as_ref().and_then(|n| m.fill_patterns.get(n)) {
                         Some(p) => fill_pattern(
                             &mut d,
                             p,
@@ -1444,6 +1451,10 @@ fn draw_plan(m: &Model, plan: impl Key, view: View, up: bool, k: f32, n: f64, ti
                 }
             }
         }
+        for ring in std::iter::once(&f.boundary).chain(&f.openings) {
+            d.line(ring, BY_CATEGORY, FAINT, true);
+        }
+        holes(&mut d, m, &m.floor_slabs(f));
         if let Some([tail, head]) = f.arrow.filter(|_| f.slope != 0.0) {
             slope_arrow(&mut d, tail, head, f.slope);
         }
@@ -1456,12 +1467,13 @@ fn draw_plan(m: &Model, plan: impl Key, view: View, up: bool, k: f32, n: f64, ti
         let (bottom, top) = components.heights(c);
         if bottom < range.cut && top > range.depth {
             d.owner = Some(id);
-            component(&mut d, &components.pieces(c));
+            component(&mut d, m, &components.pieces(c));
         }
     }
     // Walls and columns below the cut plane, as seen from it; past the bottom, faint.
     for (id, o, top) in seen_below(m, &range, &look, &index).into_iter().filter(|_| !up) {
         d.owner = Some(id);
+        override_patterns(&mut d, m, std::slice::from_ref(&o), false, (P2(0.0, 0.0), 0.0));
         d.line(&o, BY_CATEGORY, if top > range.bottom - TOL { INK } else { FAINT }, true);
     }
     // A run's centre line, faint and dashed, where it is seen but not cut: Revit's mark of a beam, and where to pick it.
@@ -1492,7 +1504,13 @@ fn draw_plan(m: &Model, plan: impl Key, view: View, up: bool, k: f32, n: f64, ti
     // One fill per wall or column: in one even-odd fill, overlapping walls would cancel out.
     for (id, o) in &outlines {
         d.owner = Some(*id);
-        d.fill(std::slice::from_ref(o), POCHE);
+        let rings = std::slice::from_ref(o);
+        if pattern_style(&d, true).is_some() {
+            d.fill(rings, PAPER);
+            override_patterns(&mut d, m, rings, true, (P2(0.0, 0.0), 0.0));
+        } else {
+            d.fill(rings, POCHE);
+        }
     }
     for (id, runs) in cut_edges(&outlines, 1.0 / d.view.scale) {
         d.owner = Some(id);
@@ -1694,7 +1712,14 @@ fn draw_plan(m: &Model, plan: impl Key, view: View, up: bool, k: f32, n: f64, ti
 
 /// A component seen from above: each of its forms' outlines, but where a higher form covers it (a
 /// table's top over its legs).
-fn component(d: &mut Drawing, pieces: &[crate::family::Piece]) {
+fn component(d: &mut Drawing, m: &Model, pieces: &[crate::family::Piece]) {
+    if pattern_style(d, false).is_some() {
+        for p in pieces {
+            let visible =
+                pieces.iter().filter(|q| q.top > p.top + 1e-6).fold(vec![p.outline.clone()], |rings, q| walls::minus(&rings, &q.outline));
+            override_patterns(d, m, &visible, false, (P2(0.0, 0.0), 0.0));
+        }
+    }
     for (i, p) in pieces.iter().enumerate() {
         for (a, b) in geom::ring_edges(&p.outline) {
             let len = a.dist(b);
@@ -1771,18 +1796,26 @@ const PATTERN_ROOM: f64 = 10.0;
 /// pattern over the paper, its courses along unit `u`; else, unless it's its element's structure
 /// (which stays poché), lighter.
 fn cut_layer(d: &mut Drawing, m: &Model, layer: &Layer, ring: &[P2], u: P2, room: f64) {
+    let over = pattern_style(d, true);
+    if over.as_ref().is_some_and(|s| s.foreground.is_some()) {
+        return;
+    }
     let material = m.materials.get(&layer.material);
     let pattern = material.map_or(Pattern::None, |x| x.cut);
     let fill = material.and_then(|x| x.cut_pattern.as_ref()).and_then(|n| m.fill_patterns.get(n));
     if let Some(p) = fill.filter(|_| room >= PATTERN_ROOM && d.detail == Detail::Fine) {
         // A fill pattern of the project's, its courses along the layer.
-        d.fill(&[ring.to_vec()], PAPER);
+        if over.is_none() {
+            d.fill(&[ring.to_vec()], PAPER);
+        }
         fill_pattern(d, p, &[ring.to_vec()], &[ring.to_vec()], INK, (P2(0.0, 0.0), u.1.atan2(u.0).to_degrees()));
     } else if pattern != Pattern::None && room >= PATTERN_ROOM && d.detail == Detail::Fine {
-        d.fill(&[ring.to_vec()], PAPER);
+        if over.is_none() {
+            d.fill(&[ring.to_vec()], PAPER);
+        }
         let gap = GAP / d.view.scale;
         hatch(d, ring, pattern, u, INK, gap);
-    } else if layer.function != Function::Structure {
+    } else if layer.function != Function::Structure && over.is_none() {
         d.fill(&[ring.to_vec()], LIGHT_POCHE);
     }
 }
@@ -1922,22 +1955,26 @@ fn hatching(d: &mut Drawing, ring: &[P2], pattern: Pattern, u: P2, color: Rgb, g
 /// A ceiling in its reflected ceiling plan: its outline and its openings', the holes shafts cut in
 /// it, and with a grid, its tiles: lines through its middle, a tile apart, stopping at the holes.
 fn ceiling(d: &mut Drawing, m: &Model, c: &Ceiling) {
-    for ring in std::iter::once(&c.boundary).chain(&c.openings) {
-        d.line(ring, BY_CATEGORY, INK, true);
-    }
     let slabs = m.ceiling_slabs(c);
-    holes(d, m, &slabs);
-    // Its bottom layer's surface pattern.
-    if let Some(x) = m.type_layers("ceiling", &c.type_name).last().and_then(|l| m.materials.get(&l.material)) {
-        let fill = x.surface_pattern.as_ref().and_then(|n| m.fill_patterns.get(n));
-        for (face, rise) in &slabs {
-            for piece in m.less_shafts(face, *rise).0 {
-                match fill {
+    // Its bottom layer's surface pattern, or the view's foreground and background.
+    let material = m.type_layers("ceiling", &c.type_name).last().and_then(|l| m.materials.get(&l.material));
+    for (face, rise) in &slabs {
+        for piece in m.less_shafts(face, *rise).0 {
+            let replaced = override_patterns(d, m, std::slice::from_ref(&piece), false, (P2(0.0, 0.0), 0.0));
+            if !replaced && let Some(x) = material {
+                match x.surface_pattern.as_ref().and_then(|n| m.fill_patterns.get(n)) {
                     Some(p) => fill_pattern(d, p, std::slice::from_ref(&piece), std::slice::from_ref(&piece), INK, (P2(0.0, 0.0), 0.0)),
                     None => surface(d, &piece, x.surface, INK),
                 }
             }
         }
+    }
+    for ring in std::iter::once(&c.boundary).chain(&c.openings) {
+        d.line(ring, BY_CATEGORY, INK, true);
+    }
+    holes(d, m, &slabs);
+    if pattern_style(d, false).is_some_and(|s| s.foreground.is_some()) {
+        return;
     }
     let (Some(t), Some((lo, hi))) = (m.types.ceiling.get(&c.type_name), bounds(&c.boundary)) else { return };
     // ponytail: tiles square to the axes; a ceiling's own grid angle when rooms turn.
@@ -2235,6 +2272,7 @@ fn arrow(d: &mut Drawing, a: (f32, f32), b: (f32, f32)) -> (f32, f32) {
 fn roof(d: &mut Drawing, m: &Model, r: &Roof) {
     let faces = m.roof_faces(r).map_or_else(|_| vec![m.roof_outline(r)], |f| f.into_iter().flat_map(|(loops, _)| loops).collect());
     for f in faces {
+        override_patterns(d, m, std::slice::from_ref(&f), false, (P2(0.0, 0.0), 0.0));
         d.line(&f, BY_CATEGORY, INK, true);
     }
 }
@@ -2366,6 +2404,22 @@ fn fill_pattern(d: &mut Drawing, p: &crate::fills::FillPattern, rings: &[Vec<P2>
     d.part = part;
 }
 
+fn pattern_style(d: &Drawing, cut: bool) -> Option<crate::graphics::Style> {
+    let s = d.pattern_styles.get(&d.owner?)?.get(usize::from(cut))?;
+    (s.foreground.is_some() || s.background.is_some()).then(|| s.clone())
+}
+
+/// The overridden layers, clipped to the same pieces as the original surface. Whether its foreground replaces the material's.
+fn override_patterns(d: &mut Drawing, m: &Model, pieces: &[Vec<P2>], cut: bool, placed: (P2, f64)) -> bool {
+    let Some(s) = pattern_style(d, cut) else { return false };
+    for layer in [&s.background, &s.foreground].into_iter().flatten() {
+        let Some(p) = layer.pattern.as_ref().and_then(|n| m.fill_patterns.get(n)) else { continue };
+        let [r, g, b] = layer.color;
+        fill_pattern(d, p, pieces, pieces, Rgb(r, g, b), placed);
+    }
+    s.foreground.is_some()
+}
+
 /// A filled region: over the paper where its type masks, its background pattern, then its foreground, each in its colour
 /// (a solid one filled, a drafting one's lengths mm on the view's paper, a model one's mm), then its boundary's lines in
 /// their style, unless it has none. A sketch that doesn't close draws nothing.
@@ -2373,10 +2427,18 @@ pub(crate) fn filled_region(d: &mut Drawing, m: &Model, r: &FilledRegion) {
     let Some(t) = m.region_types.get(&r.type_name) else { return };
     let Ok(profile) = crate::sketch::solve(&r.sketch) else { return };
     let part = std::mem::replace(&mut d.part, Part::Pattern);
-    let layers: Vec<(&crate::fills::FillPattern, Rgb)> = [(&t.background, t.background_color), (&t.foreground, t.foreground_color)]
-        .into_iter()
-        .filter_map(|(name, [cr, cg, cb])| Some((name.as_ref().and_then(|n| m.fill_patterns.get(n))?, Rgb(cr, cg, cb))))
-        .collect();
+    // A view's override of the type's foreground or background replaces that layer's pattern and colour.
+    let over = pattern_style(d, false);
+    let layers: Vec<(&crate::fills::FillPattern, Rgb)> = [
+        (&t.background, t.background_color, over.as_ref().and_then(|s| s.background.as_ref())),
+        (&t.foreground, t.foreground_color, over.as_ref().and_then(|s| s.foreground.as_ref())),
+    ]
+    .into_iter()
+    .filter_map(|(name, color, layer)| {
+        let (name, [cr, cg, cb]) = layer.map_or((name, color), |p| (&p.pattern, p.color));
+        Some((name.as_ref().and_then(|n| m.fill_patterns.get(n))?, Rgb(cr, cg, cb)))
+    })
+    .collect();
     for region in &profile.regions {
         let rings: Vec<Vec<P2>> = std::iter::once(region.outer.clone()).chain(region.holes.iter().cloned()).collect();
         // Its outline less its holes, as convex pieces: a solid fill and a mask need them, and they cost more than a

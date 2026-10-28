@@ -8,7 +8,9 @@
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
-use bimcraft_core::graphics::{ANNOTATION, Applied, Dash, Detail, Graphics, Group, MODEL, Override, SCANS, Style, VisualStyle};
+use bimcraft_core::graphics::{
+    ANNOTATION, Applied, Dash, Detail, Graphics, Group, MODEL, Override, PatternFill, SCANS, Style, VisualStyle,
+};
 use bimcraft_core::model::{Element, Guid, Id, Model};
 use bimcraft_core::pen::{MAX_PEN, Pen};
 use bimcraft_core::schedule;
@@ -784,7 +786,7 @@ fn child(ui: &mut Ui, r: Rect, layout: Layout) -> Ui {
 /// The table of Visibility/Graphics, as Revit's: a row for each of `rows`, its visibility, a cell for each of the
 /// columns that opens its editor and shows what it overrides, Halftone, and Detail Level. A click on a row picks it,
 /// and its cells read Override…. The rows whose visibility or halftone changed, with their override as it is now.
-fn table(ui: &mut Ui, d: &mut VgDialog, rows: &[Row], cols: &Columns, enabled: bool) -> Vec<(Pick, Override)> {
+fn table(ui: &mut Ui, d: &mut VgDialog, model: &Model, rows: &[Row], cols: &Columns, enabled: bool) -> Vec<(Pick, Override)> {
     let total = NAME_W + cols.cells.len() as f32 * CELL_W + HALFTONE_W + if cols.detail { DETAIL_W } else { 0.0 };
     let line = ui.visuals().widgets.noninteractive.bg_stroke;
     let ink = ui.visuals().text_color();
@@ -869,7 +871,7 @@ fn table(ui: &mut Ui, d: &mut VgDialog, rows: &[Row], cols: &Columns, enabled: b
                     });
                 }
                 if !picked {
-                    paint_cell(&p, at, *k, &row.over, ink);
+                    paint_cell(ui, &p, at, *k, &row.over, ink, model);
                 }
                 x += CELL_W;
             }
@@ -896,7 +898,7 @@ fn table(ui: &mut Ui, d: &mut VgDialog, rows: &[Row], cols: &Columns, enabled: b
 
 /// What a cell of `o` overrides, drawn in it: a line as it would draw, a fill's colour, the transparency's percent; nothing
 /// where it overrides nothing.
-fn paint_cell(p: &Painter, r: Rect, cell: Cell, o: &Override, ink: Color32) {
+fn paint_cell(ui: &Ui, p: &Painter, r: Rect, cell: Cell, o: &Override, ink: Color32, model: &Model) {
     let r = r.shrink2(vec2(12.0, 0.0));
     let style = if cell.cut() { &o.cut } else { &o.projection };
     let rgb = |c: [u8; 3]| Color32::from_rgb(c[0], c[1], c[2]);
@@ -917,8 +919,8 @@ fn paint_cell(p: &Painter, r: Rect, cell: Cell, o: &Override, ink: Color32) {
             }
         }
         Cell::ProjectionPatterns | Cell::CutPatterns => {
-            if let Some(fill) = style.fill {
-                p.rect(r.shrink2(vec2(0.0, 5.0)), 0.0, rgb(fill), Stroke::new(1.0, ink), StrokeKind::Inside);
+            if style.fill.is_some() || style.foreground.is_some() || style.background.is_some() {
+                pattern_preview(ui, r.shrink2(vec2(0.0, 4.0)), style, model);
             }
         }
         Cell::Transparency => {
@@ -935,7 +937,7 @@ fn cell_window(ctx: &Context, d: &mut VgDialog, model: &Model) {
     let Some(mut e) = d.cell.take() else { return };
     let (mut ok, mut cancel) = (false, false);
     let r = Modal::new(UiId::new("vg-cell")).show(ctx, |ui| {
-        ui.set_width(360.0);
+        ui.set_width(if matches!(e.cell, Cell::ProjectionPatterns | Cell::CutPatterns) { 440.0 } else { 360.0 });
         ui.label(RichText::new(t(e.cell.title())).heading());
         ui.label(RichText::new(&e.name).color(pal().muted));
         ui.add_space(6.0);
@@ -943,7 +945,10 @@ fn cell_window(ctx: &Context, d: &mut VgDialog, model: &Model) {
         let style = if e.cell.cut() { &mut e.over.cut } else { &mut e.over.projection };
         Grid::new("vg-cell-grid").num_columns(2).spacing(vec2(16.0, 6.0)).show(ui, |ui| match e.cell {
             Cell::ProjectionLines | Cell::CutLines => line_rows(ui, section, style, start),
-            Cell::ProjectionPatterns | Cell::CutPatterns => fill_row(ui, section, style),
+            Cell::ProjectionPatterns | Cell::CutPatterns => {
+                fill_row(ui, section, style);
+                pattern_rows(ui, section, style, model);
+            }
             Cell::Transparency => {
                 let l = ui.label(t("Transparency"));
                 let mut pct = f64::from(e.over.transparency);
@@ -952,6 +957,12 @@ fn cell_window(ctx: &Context, d: &mut VgDialog, model: &Model) {
                 ui.end_row();
             }
         });
+        if matches!(e.cell, Cell::ProjectionPatterns | Cell::CutPatterns) {
+            ui.label(RichText::new(t("Unchecked layers inherit; <None> hides a layer.")).small().color(pal().muted));
+            ui.label(
+                RichText::new(t("Patterns appear in plans, ceiling plans, section cuts and filled regions.")).small().color(pal().muted),
+            );
+        }
         ui.add_space(8.0);
         ui.horizontal(|ui| {
             if ui.button(t("Clear Overrides")).clicked() {
@@ -960,8 +971,10 @@ fn cell_window(ctx: &Context, d: &mut VgDialog, model: &Model) {
                         let s = if e.cell.cut() { &mut e.over.cut } else { &mut e.over.projection };
                         (s.color, s.weight, s.dash) = (None, None, None);
                     }
-                    Cell::ProjectionPatterns => e.over.projection.fill = None,
-                    Cell::CutPatterns => e.over.cut.fill = None,
+                    Cell::ProjectionPatterns | Cell::CutPatterns => {
+                        let s = if e.cell.cut() { &mut e.over.cut } else { &mut e.over.projection };
+                        (s.fill, s.foreground, s.background) = (None, None, None);
+                    }
                     Cell::Transparency => e.over.transparency = 0,
                 }
             }
@@ -1004,7 +1017,7 @@ fn categories(ui: &mut Ui, d: &mut VgDialog, model: &Model, shown: &Graphics, na
     });
     ui.add_space(4.0);
     let needle = d.search.trim().to_lowercase();
-    let rows: Vec<Row> = names
+    let mut rows: Vec<Row> = names
         .iter()
         .map(|cat| (cat, lang::category(cat, true)))
         .filter(|(_, name)| name.to_lowercase().contains(&needle))
@@ -1015,10 +1028,14 @@ fn categories(ui: &mut Ui, d: &mut VgDialog, model: &Model, shown: &Graphics, na
             start: model.object_style(cat),
         })
         .collect();
+    rows.sort_by_cached_key(|r| r.name.to_lowercase());
     let model_tab = d.tab == 0;
-    let cols =
-        if model_tab { Columns { cells: &Cell::ALL, detail: true } } else { Columns { cells: &[Cell::ProjectionLines], detail: false } };
-    for (pick, o) in table(ui, d, &rows, &cols, enabled) {
+    let cols = if model_tab {
+        Columns { cells: &Cell::ALL, detail: true }
+    } else {
+        Columns { cells: &[Cell::ProjectionLines, Cell::ProjectionPatterns], detail: false }
+    };
+    for (pick, o) in table(ui, d, model, &rows, &cols, enabled) {
         put(d, model, &pick, o);
     }
     if rows.is_empty() {
@@ -1047,7 +1064,7 @@ fn filters(ui: &mut Ui, d: &mut VgDialog, model: &Model, shown: &Graphics, enabl
     let rows: Vec<Row> = (shown.filters.iter().enumerate())
         .map(|(i, a)| Row { pick: Pick::Filter(i), name: a.filter.clone(), over: a.over.clone(), start })
         .collect();
-    for (pick, o) in table(ui, d, &rows, &Columns { cells: &Cell::ALL, detail: false }, enabled) {
+    for (pick, o) in table(ui, d, model, &rows, &Columns { cells: &Cell::ALL, detail: false }, enabled) {
         put(d, model, &pick, o);
     }
     if rows.is_empty() {
@@ -1110,7 +1127,7 @@ fn elements(ui: &mut Ui, d: &mut VgDialog, model: &Model, selection: &[Id]) {
             start: model.object_style(cat),
         })
         .collect();
-    for (pick, o) in table(ui, d, &rows, &Columns { cells: &Cell::ALL, detail: false }, true) {
+    for (pick, o) in table(ui, d, model, &rows, &Columns { cells: &Cell::ALL, detail: false }, true) {
         put(d, model, &pick, o);
     }
     if rows.is_empty() {
@@ -1300,6 +1317,53 @@ fn line_rows(ui: &mut Ui, section: &str, s: &mut Style, weight: Pen) {
 /// A style's patterns, a grid row: the fill's colour.
 fn fill_row(ui: &mut Ui, section: &str, s: &mut Style) {
     colour_row(ui, section, "Fill color", &mut s.fill, [200, 200, 200]);
+}
+
+/// Independent pattern layers: an unchecked box inherits, <None> explicitly hides that layer.
+fn pattern_rows(ui: &mut Ui, section: &str, s: &mut Style, model: &Model) {
+    for (heading, pattern_label, color_label, value, color) in [
+        ("Foreground", "Foreground Pattern", "Foreground Color", &mut s.foreground, [40, 40, 40]),
+        ("Background", "Background Pattern", "Background Color", &mut s.background, [255, 255, 255]),
+    ] {
+        let mut on = value.is_some();
+        if override_box(ui, section, heading, &mut on) {
+            *value =
+                on.then(|| PatternFill { pattern: model.fill_patterns.iter().find(|(_, p)| p.is_solid()).map(|(n, _)| n.clone()), color });
+        }
+        let mut fallback = PatternFill::default();
+        let layer = value.as_mut().unwrap_or(&mut fallback);
+        ui.add_enabled_ui(on, |ui| {
+            ui.horizontal(|ui| {
+                let name = format!("{}: {}", t(section), t(pattern_label));
+                let shown = layer.pattern.as_deref().unwrap_or(t("<None>"));
+                let c = ComboBox::from_id_salt(&name).selected_text(shown).width(170.0).show_ui(ui, |ui| {
+                    ui.selectable_value(&mut layer.pattern, None, t("<None>"));
+                    for name in model.fill_patterns.keys() {
+                        ui.selectable_value(&mut layer.pattern, Some(name.clone()), name);
+                    }
+                });
+                c.response.widget_info(|| WidgetInfo::labeled(WidgetType::ComboBox, on, name.clone()));
+                let name = format!("{}: {}", t(section), t(color_label));
+                let c = ui.color_edit_button_srgb(&mut layer.color);
+                c.widget_info(|| WidgetInfo::labeled(WidgetType::ColorButton, on, name.clone()));
+            });
+        });
+        ui.end_row();
+    }
+    ui.label(t("Preview"));
+    let (rect, _) = ui.allocate_exact_size(vec2(220.0, 48.0), Sense::hover());
+    pattern_preview(ui, rect, s, model);
+    ui.end_row();
+}
+
+/// The two layers over paper, also used by the table's pattern cells.
+fn pattern_preview(ui: &Ui, rect: Rect, s: &Style, model: &Model) {
+    let rgb = |[r, g, b]: [u8; 3]| Color32::from_rgb(r, g, b);
+    ui.painter().rect_filled(rect, 0.0, s.fill.map_or(Color32::WHITE, rgb));
+    for layer in [&s.background, &s.foreground].into_iter().flatten() {
+        crate::fillpatterns::paint_pattern(ui, rect, layer.pattern.as_ref().and_then(|n| model.fill_patterns.get(n)), rgb(layer.color));
+    }
+    ui.painter().rect_stroke(rect, 0.0, Stroke::new(1.0, ui.visuals().widgets.noninteractive.bg_stroke.color), StrokeKind::Inside);
 }
 
 fn dash_name(d: Dash) -> &'static str {

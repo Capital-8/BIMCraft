@@ -225,6 +225,11 @@ fn find(h: &Harness<BimApp>, f: impl Fn(&Element) -> bool) -> Id {
 
 /// A click on the widget of `role` named `label`: of those named alike, the one that role picks out.
 fn pick(h: &mut Harness<BimApp>, role: Role, label: &str) {
+    // Alphabetical VG rows can start outside the table's viewport; scroll as a user would before clicking.
+    if h.state().vg_dialog.is_some() {
+        h.get_by_role_and_label(role, label).scroll_to_me();
+        h.run();
+    }
     h.get_by_role_and_label(role, label).click();
     h.run();
 }
@@ -5175,6 +5180,7 @@ mod draw;
 mod fills;
 mod fonts;
 mod gpu;
+mod graphics;
 mod groups;
 mod light_canvas;
 mod lines;

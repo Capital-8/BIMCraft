@@ -268,7 +268,7 @@ pub(crate) fn swatch(ui: &mut Ui, p: Option<&FillPattern>, width: f32, colour: C
     ui.painter().rect_stroke(rect, 2.0, Stroke::new(1.0, ui.visuals().widgets.noninteractive.bg_stroke.color), egui::StrokeKind::Inside);
 }
 
-fn paint_pattern(ui: &Ui, rect: egui::Rect, p: Option<&FillPattern>, colour: Color32) {
+pub(crate) fn paint_pattern(ui: &Ui, rect: egui::Rect, p: Option<&FillPattern>, colour: Color32) {
     // Off the screen (a scroll area's rows past its edge) there is nothing to paint, and a long list is not worked out each frame.
     if !ui.is_rect_visible(rect) {
         return;

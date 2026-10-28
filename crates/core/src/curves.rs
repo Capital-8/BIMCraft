@@ -1795,6 +1795,17 @@ mod tests {
     }
 
     #[test]
+    fn an_arc_ends_exactly_where_it_was_drawn_to() {
+        // Worked out again along the arc, an end lands a rounding off its point, by how the platform rounds sines.
+        for k in 1..60 {
+            let (a, b) = (P2(3000.0 + 7.3 * k as f64, -1.1 * k as f64), P2(5000.0 - 3.7 * k as f64, 13.9 * k as f64));
+            let sweep = -179.0 + 6.1 * k as f64;
+            let c = Curve::arc(a, b, sweep);
+            assert_eq!((c.start(), c.end()), (a, b), "sweep {sweep}");
+        }
+    }
+
+    #[test]
     fn a_line_an_arc_and_a_polyline_run_through_their_points() {
         let l = Curve::line(P2(0.0, 0.0), P2(1000.0, 0.0));
         assert_eq!((l.kind(), l.length(), l.middle()), ("line", 1000.0, P2(500.0, 0.0)));
