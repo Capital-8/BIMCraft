@@ -4,6 +4,8 @@
 //! is a pen, a colour and a pattern (or none, solid); a [`DetailLine`] is a line drawn in one view, in a style. Both are
 //! entries of the project's library: a style names its pattern, a line its style, and a file holds their GUIDs.
 
+use bimcraft_i18n::msg;
+
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
@@ -117,12 +119,12 @@ impl LineStyle {
 pub fn patterns(language: Language) -> BTreeMap<String, LinePattern> {
     use Segment::{Dash as D, Dot, Space as S};
     [
-        ("Dash", vec![D(3.0), S(1.5)]),
-        ("Long Dash", vec![D(8.0), S(2.0)]),
-        ("Dot", vec![Dot, S(1.0)]),
-        ("Dash Dot", vec![D(5.0), S(1.5), Dot, S(1.5)]),
-        ("Hidden", vec![D(1.5), S(1.0)]),
-        ("Centre", vec![D(10.0), S(1.5), D(2.0), S(1.5)]),
+        (msg!("Dash"), vec![D(3.0), S(1.5)]),
+        (msg!("Long Dash"), vec![D(8.0), S(2.0)]),
+        (msg!("Dot"), vec![Dot, S(1.0)]),
+        (msg!("Dash Dot"), vec![D(5.0), S(1.5), Dot, S(1.5)]),
+        (msg!("Hidden"), vec![D(1.5), S(1.0)]),
+        (msg!("Centre"), vec![D(10.0), S(1.5), D(2.0), S(1.5)]),
     ]
     .into_iter()
     .map(|(n, s)| (language.word(n).to_string(), LinePattern(s)))
@@ -134,7 +136,7 @@ pub fn default_patterns() -> BTreeMap<String, LinePattern> {
 }
 
 /// The style a detail line is drawn in unless told another, the first of a project's styles: in English.
-pub const THIN: &str = "Thin Lines";
+pub const THIN: &str = msg!("Thin Lines");
 
 /// The line styles a project starts with, named in `language`, black: a hairline, thin, medium and wide lines in the pens
 /// of fine lines, of what's seen and of what's cut, and hidden, centre and overhead lines.
@@ -142,13 +144,13 @@ pub fn styles(language: Language) -> BTreeMap<String, LineStyle> {
     let pattern = |n: &str| Some(language.word(n).to_string());
     let style = |pen, pattern| LineStyle { pen, color: [0, 0, 0], pattern };
     [
-        ("Hairline", style(Pen::HAIRLINE, None)),
+        (msg!("Hairline"), style(Pen::HAIRLINE, None)),
         (THIN, style(Pen::FINE, None)),
-        ("Medium Lines", style(Pen::PROJECTION, None)),
-        ("Wide Lines", style(Pen::CUT, None)),
-        ("Hidden Lines", style(Pen(2), pattern("Hidden"))),
-        ("Centre Lines", style(Pen(2), pattern("Centre"))),
-        ("Overhead Lines", style(Pen(2), pattern("Dash"))),
+        (msg!("Medium Lines"), style(Pen::PROJECTION, None)),
+        (msg!("Wide Lines"), style(Pen::CUT, None)),
+        (msg!("Hidden Lines"), style(Pen(2), pattern("Hidden"))),
+        (msg!("Centre Lines"), style(Pen(2), pattern("Centre"))),
+        (msg!("Overhead Lines"), style(Pen(2), pattern("Dash"))),
     ]
     .into_iter()
     .map(|(n, s)| (language.word(n).to_string(), s))

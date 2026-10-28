@@ -4,6 +4,8 @@
 //! moment offers, and [`BimApp::act`] does what one says. A new item is an [`Action`] variant, its
 //! label (a row in `lang::WORDS`), the group it joins in `context_items`, and its arm in `act`.
 
+use bimcraft_i18n::msg;
+
 use egui::{Button, Response};
 
 use crate::lang::t;
@@ -38,20 +40,20 @@ impl Action {
     pub(crate) fn label(self) -> &'static str {
         match self {
             Action::Cancel => "Cancel",
-            Action::Finish => "Finish Drawing",
+            Action::Finish => msg!("Finish Drawing"),
             Action::ZoomToFit => "Zoom to Fit",
             Action::ZoomIn => "Zoom In",
             Action::ZoomOut => "Zoom Out",
             Action::HomeView => "Home View",
             Action::EditType => "Edit Type",
-            Action::SelectAllInstances => "Select All Instances",
+            Action::SelectAllInstances => msg!("Select All Instances"),
             Action::HideElement => "Hide Element",
             Action::HideCategory => "Hide Category",
             Action::OverrideGraphics => "Override Graphics",
-            Action::CreateGroup => "Create Group",
-            Action::Ungroup => "Ungroup",
+            Action::CreateGroup => msg!("Create Group"),
+            Action::Ungroup => msg!("Ungroup"),
             Action::Delete => "Delete",
-            Action::ReloadCad => "Reload CAD",
+            Action::ReloadCad => msg!("Reload CAD"),
         }
     }
 
