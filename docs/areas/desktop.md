@@ -253,10 +253,10 @@ project that holds the draft's names, so the command's keep or replace rule and 
 The note belongs to the Patterns tab (the types do not show it), a file's patterns are told in the singular for one, and a left-out pattern is named with its reason (the
 core's message without the pattern's name it begins with), each cut at a word. In a test a file dialog is answered through `dialog::BEGUN`; no system dialog opens.
 
-A dialog that holds a long list (these two, Edit Type, and Line Styles) never runs off the window: the list, and a pattern's families or segments open under it, scroll in
+A dialog that holds a long list (these two, Edit Type, and Line Styles) never runs off the window: the list, and a fill pattern's families open under it, scroll in
 the height the window has left (`style::dialog_room`: the window's height less the dialog's frame, what is drawn above the list, and what is drawn under it, the notes
 and the row of buttons), so OK, Cancel and Apply stay in reach down to the least window, and the note and the error are boxes that scroll (`style::boxed_text`). When a
-pattern's families (or a line pattern's segments) are open they share the room with the list, half each. `tests/smallest.rs` opens each with forty of everything and a long
+fill pattern's families are open they share the room with the list, half each. Line pattern segments scroll in their separate creator. `tests/smallest.rs` opens each with forty of everything and a long
 note at the least window and asks that every button lie inside it. The room is worked out from the heights of the rows, not measured after layout, so a label that wraps
 in a language with long words can take a row or two more than it reserved: the dialog then scrolls a little instead of fitting exactly.
 
@@ -284,3 +284,8 @@ pattern asks `Model::align_pattern` where the pattern then starts and sends the 
 no swatch, but each still lays out its widgets. A sketch's Ctrl+Z takes back at most the last 100 changes (`sketch::UNDO`); an older one is forgotten. The window tells a replaced project by its `uid`, so
 `open` of the very file the window already holds, put in the session's place by a script or an embedder, is not noticed: the file keeps its `uid`, and a sketch or a dialog's draft survives it
 (the core's `Session` counts its replacements in a private `resets`; a public reader of that count would let the window see this one too).
+
+The Line Styles Patterns tab opens a separate Line Pattern Creator for New Pattern and Edit. Its preview uses the core
+pattern geometry (including font outlines) and can follow a curve. The creator saves into the parent draft, with its own
+Cancel, so OK/Apply remains one undoable Line Styles transaction. See [views and graphics](views-and-graphics.md) for the
+seven segment kinds, paper units, text fitting and centerline semantics.

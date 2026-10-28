@@ -85,7 +85,7 @@ pub const MAX_SLOPE: f64 = 75.0;
 /// 2: the library has ids and GUIDs too
 /// (`library`), and what names a library entry holds its GUID. 1: elements have GUIDs, ids six digits, and what points at
 /// an element holds its GUID. None (0): a file from before.
-pub const FORMAT: u32 = 8;
+pub const FORMAT: u32 = 9;
 /// How far past the model a level reaches without an extent of its own, mm.
 pub const LEVEL_PAST: f64 = 1000.0;
 
@@ -2005,7 +2005,7 @@ pub struct Model {
     /// has set apart from what a project starts with ([`Model::object_style`]).
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub object_styles: BTreeMap<String, crate::styles::ObjectStyle>,
-    /// Its line patterns, by name: dashes, dots and spaces, mm on paper.
+    /// Its line patterns, by name: graphic segments along a centerline, mm on paper.
     #[serde(default = "lines::default_patterns")]
     pub line_patterns: BTreeMap<String, LinePattern>,
     /// Its line styles, by name: a pen, a colour and a pattern, what detail lines draw in.
@@ -2526,6 +2526,7 @@ impl Model {
         // A material's `transparency` (added within 8) has no step: a file without it reads as opaque, as it was.
         // 7 to 8: a note's size is its text type's. A note of a size gets a type of it.
         self.typed_notes();
+        // 8 to 9: freely ordered graphic line segments; existing dash/space/dot patterns need no conversion.
         self.format = FORMAT;
     }
 

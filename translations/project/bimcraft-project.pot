@@ -43,15 +43,15 @@ msgstr ""
 msgid "Ceiling Luminaire"
 msgstr ""
 
-#: crates/core/src/render.rs:1796
+#: crates/core/src/render.rs:1836
 msgid "Ceiling Plan"
 msgstr ""
 
-#: crates/core/src/lines.rs:127
+#: crates/core/src/lines.rs:182
 msgid "Centre"
 msgstr ""
 
-#: crates/core/src/lines.rs:152
+#: crates/core/src/lines.rs:207
 msgid "Centre Lines"
 msgstr ""
 
@@ -87,15 +87,15 @@ msgstr ""
 msgid "Crosshatch"
 msgstr ""
 
-#: crates/core/src/render.rs:2339
+#: crates/core/src/render.rs:2379
 msgid "DN"
 msgstr ""
 
-#: crates/core/src/lines.rs:122
+#: crates/core/src/lines.rs:177
 msgid "Dash"
 msgstr ""
 
-#: crates/core/src/lines.rs:125
+#: crates/core/src/lines.rs:180
 msgid "Dash Dot"
 msgstr ""
 
@@ -103,7 +103,7 @@ msgstr ""
 msgid "Data Outlet"
 msgstr ""
 
-#: crates/core/src/commands.rs:5748
+#: crates/core/src/commands.rs:5750
 msgid "Dependent"
 msgstr ""
 
@@ -139,7 +139,7 @@ msgstr ""
 msgid "Door Schedule"
 msgstr ""
 
-#: crates/core/src/lines.rs:124
+#: crates/core/src/lines.rs:179
 msgid "Dot"
 msgstr ""
 
@@ -167,8 +167,8 @@ msgstr ""
 msgid "Elbow 90"
 msgstr ""
 
-#: crates/core/src/commands.rs:5532
-#: crates/core/src/commands.rs:7193
+#: crates/core/src/commands.rs:5534
+#: crates/core/src/commands.rs:7195
 msgid "Elevation"
 msgstr ""
 
@@ -233,7 +233,7 @@ msgstr ""
 msgid "Gypsum board"
 msgstr ""
 
-#: crates/core/src/lines.rs:147
+#: crates/core/src/lines.rs:202
 msgid "Hairline"
 msgstr ""
 
@@ -245,11 +245,11 @@ msgstr ""
 msgid "Height"
 msgstr ""
 
-#: crates/core/src/lines.rs:126
+#: crates/core/src/lines.rs:181
 msgid "Hidden"
 msgstr ""
 
-#: crates/core/src/lines.rs:151
+#: crates/core/src/lines.rs:206
 msgid "Hidden Lines"
 msgstr ""
 
@@ -285,7 +285,7 @@ msgstr ""
 msgid "Length"
 msgstr ""
 
-#: crates/core/src/commands.rs:3497
+#: crates/core/src/commands.rs:3499
 #: crates/core/src/model.rs:2222
 msgid "Level"
 msgstr ""
@@ -294,7 +294,7 @@ msgstr ""
 msgid "Level Schedule"
 msgstr ""
 
-#: crates/core/src/lines.rs:123
+#: crates/core/src/lines.rs:178
 msgid "Long Dash"
 msgstr ""
 
@@ -306,11 +306,11 @@ msgstr ""
 msgid "Masking"
 msgstr ""
 
-#: crates/core/src/commands.rs:4341
+#: crates/core/src/commands.rs:4343
 msgid "Mass"
 msgstr ""
 
-#: crates/core/src/lines.rs:149
+#: crates/core/src/lines.rs:204
 msgid "Medium Lines"
 msgstr ""
 
@@ -326,7 +326,7 @@ msgstr ""
 msgid "Mounting Height"
 msgstr ""
 
-#: crates/core/src/render.rs:1661
+#: crates/core/src/render.rs:1701
 msgid "NOT ENCLOSED"
 msgstr ""
 
@@ -362,7 +362,7 @@ msgstr ""
 msgid "Outlet"
 msgstr ""
 
-#: crates/core/src/lines.rs:153
+#: crates/core/src/lines.rs:208
 msgid "Overhead Lines"
 msgstr ""
 
@@ -390,7 +390,7 @@ msgstr ""
 msgid "Porcelain"
 msgstr ""
 
-#: crates/core/src/commands.rs:1977
+#: crates/core/src/commands.rs:1979
 msgid "Project"
 msgstr ""
 
@@ -414,7 +414,7 @@ msgstr ""
 msgid "Roof tiles"
 msgstr ""
 
-#: crates/core/src/commands.rs:4566
+#: crates/core/src/commands.rs:4568
 msgid "Room"
 msgstr ""
 
@@ -442,8 +442,8 @@ msgstr ""
 msgid "Seat Height"
 msgstr ""
 
-#: crates/core/src/commands.rs:5509
-#: crates/core/src/commands.rs:7192
+#: crates/core/src/commands.rs:5511
+#: crates/core/src/commands.rs:7194
 msgid "Section"
 msgstr ""
 
@@ -531,7 +531,7 @@ msgstr ""
 msgid "Thickness"
 msgstr ""
 
-#: crates/core/src/lines.rs:139
+#: crates/core/src/lines.rs:194
 msgid "Thin Lines"
 msgstr ""
 
@@ -555,11 +555,11 @@ msgstr ""
 msgid "Type"
 msgstr ""
 
-#: crates/core/src/render.rs:2339
+#: crates/core/src/render.rs:2379
 msgid "UP"
 msgstr ""
 
-#: crates/core/src/commands.rs:5889
+#: crates/core/src/commands.rs:5891
 msgid "Unnamed"
 msgstr ""
 
@@ -599,7 +599,7 @@ msgstr ""
 msgid "West"
 msgstr ""
 
-#: crates/core/src/lines.rs:150
+#: crates/core/src/lines.rs:205
 msgid "Wide Lines"
 msgstr ""
 

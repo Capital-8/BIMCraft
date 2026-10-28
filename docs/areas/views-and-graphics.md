@@ -45,7 +45,7 @@ would: a compound element's layer lines, an opening's jambs and glass, a stair's
 holds only the categories set apart from `styles::default_of` (which draws as before: cut pen 10, seen pen 4). What's next on this
 foundation: annotation categories' object styles and subcategories, viewports as windows onto their views, and printing.
 
-Detail lines and their line styles (`lines.rs`): a `LinePattern` is a dash or a dot then a space, again and again, each length mm
+Detail lines and their line styles (`lines.rs`): a `LinePattern` is a freely ordered sequence of 1–32 graphic segments, each length mm
 on paper, so it reads the same at any scale (`Solid` is none, a name no pattern takes); a `LineStyle` is a pen, a colour and a
 pattern; both are library entries (`Kind::LinePattern`, `Kind::LineStyle`), so a style names its pattern and a detail line its style
 by GUID in a file, and a rename (`rename_entry`) follows everywhere. A project starts with ours, named in its language
@@ -56,7 +56,20 @@ pattern's dashes in pixels at the view's paper (`LinePattern::dash`); a repeat u
 any list of on and off lengths (`Prim::Line::dash`), which SVG, PDF, the PNG and the canvas all take. The desktop has Annotate >
 Detail Line (DL; a line a click, as walls are, chained until Enter or the first point again; the Options Bar's Line Style and
 Chain; the Draw panel's other shapes, below) and Manage > Line Styles (`linestyles.rs`: styles and patterns on two tabs of one
-draft, applied as one undo step). Next: patterns made from lines drawn in a view.
+draft, applied as one undo step). Patterns > New Pattern or Edit opens the separate Line Pattern Creator
+(`linestyles/creator.rs`), with a live straight/curved preview and segment controls, add, reorder and delete. Save Pattern
+updates the library draft; Cancel Pattern discards just the creator, and the parent Cancel discards the whole draft.
+Segments are Gap (`space`), Straight (`dash`), Dot (`dot_length`, its reserved length, with a circle exactly the pen width),
+Offset (`length`, `count` 2–9, `distance` between adjacent lines symmetrically about the centerline), Wave and Zig Zag
+(`length`, `frequency` in cycles per segment, `amplitude` from centerline), and Text (`length`, `size`, `text`). Text uses
+bundled IBM Plex Sans on Linux, Windows and macOS, with the annotation font fallback for missing characters. Its size is
+maximum capital height; it scales uniformly down when its reserved length is shorter than the text. Text is centered on
+the axis and each glyph rotates with its own curve tangent. `lines/pattern.rs` makes shared stroke/fill geometry for
+preview, canvas, PNG, SVG and PDF; old alternating dash/space/dot patterns retain native dashes. On canvas and paper,
+pattern lettering uses the same non-zero contour tessellation as notes, keeping counters transparent during selection
+and hover as well as ordinary drawing; dots retain their pen-sized polygon rendering. Tiny or excessively dense
+patterns draw solid with bounded work. Region profiles, snapping, alignment and dimensions use the original centerline.
+Format 9 adds these segments; older dash/space/dot patterns open unchanged. Next: patterns made from lines drawn in a view.
 
 A detail line and a sketch line are any `curves::Curve`: a polyline (straight segments and arcs, each arc's turn in degrees
 counter-clockwise as a wall's; a line or an arc is one of two points), a circle, an ellipse whole or partial, a spline by its
