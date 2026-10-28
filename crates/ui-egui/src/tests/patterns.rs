@@ -388,7 +388,8 @@ fn a_line_pattern_or_style_deleted_and_made_again_under_its_name_is_the_new_one(
     press(&mut h, "Patterns");
     press(&mut h, "Long Dash: Delete");
     press(&mut h, "New Pattern");
-    type_into(&mut h, "Pattern 1: Name", "Long Dash");
+    type_into(&mut h, "Pattern Name", "Long Dash");
+    press(&mut h, "Save Pattern");
     press(&mut h, "OK");
     assert!(h.state().line_styles_dialog.is_none(), "{}", h.state().status.text);
     let m = &h.state().session.model;

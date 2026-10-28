@@ -45,7 +45,7 @@ msgstr "三维视图分辨率"
 msgid "; and {} more"
 msgstr "；另外 {} 项"
 
-#: crates/ui-egui/src/linestyles.rs:424
+#: crates/ui-egui/src/linestyles.rs:346
 msgid "<By Category>"
 msgstr "<按类别>"
 
@@ -213,7 +213,7 @@ msgstr "添加旋转体"
 msgid "Add Scale:"
 msgstr "添加比例："
 
-#: crates/ui-egui/src/linestyles.rs:306
+#: crates/ui-egui/src/linestyles/creator.rs:205
 msgid "Add Segment"
 msgstr "添加线段"
 
@@ -311,6 +311,10 @@ msgstr "对齐尺寸标注 (DI)：选取平行的墙面、墙端、门、窗或�
 msgid "All"
 msgstr "全部"
 
+#: crates/ui-egui/src/linestyles/creator.rs:184
+msgid "Amplitude"
+msgstr "振幅"
+
 #: crates/ui-egui/src/control.rs:206
 msgid "An agent can work on this project: bimcraft-cli mcp --connect {}"
 msgstr "智能体可以在此项目上工作：bimcraft-cli mcp --connect {}"
@@ -362,7 +366,7 @@ msgstr "注释笔 {}"
 #: crates/ui-egui/src/editor.rs:1017
 #: crates/ui-egui/src/fillpatterns.rs:728
 #: crates/ui-egui/src/graphics.rs:341
-#: crates/ui-egui/src/linestyles.rs:383
+#: crates/ui-egui/src/linestyles.rs:300
 #: crates/ui-egui/src/lineweights.rs:148
 #: crates/ui-egui/src/objectstyles.rs:76
 #: crates/ui-egui/src/properties.rs:968
@@ -716,7 +720,7 @@ msgstr "相机"
 #: crates/ui-egui/src/graphics.rs:342
 #: crates/ui-egui/src/graphics.rs:994
 #: crates/ui-egui/src/inquiry.rs:139
-#: crates/ui-egui/src/linestyles.rs:384
+#: crates/ui-egui/src/linestyles.rs:301
 #: crates/ui-egui/src/lineweights.rs:149
 #: crates/ui-egui/src/objectstyles.rs:77
 #: crates/ui-egui/src/properties.rs:2474
@@ -735,6 +739,10 @@ msgstr "取消编辑模式"
 #: crates/ui-egui/src/sketch.rs:722
 msgid "Cancel Edit Mode: drop the lines, keep it as it was"
 msgstr "取消编辑模式：放弃这些线，保持原样"
+
+#: crates/ui-egui/src/linestyles/creator.rs:214
+msgid "Cancel Pattern"
+msgstr "取消线型图案"
 
 #: crates/ui-egui/src/mep.rs:247
 msgid "Capture & Descent"
@@ -811,12 +819,12 @@ msgstr "圆心-端点弧：单击圆心、起点，然后单击终点"
 msgid "Centimetres"
 msgstr "厘米"
 
-#: crates/core/src/lines.rs:127
+#: crates/core/src/lines.rs:182
 #: crates/ui-egui/src/editor.rs:819
 msgid "Centre"
 msgstr "中心"
 
-#: crates/core/src/lines.rs:152
+#: crates/core/src/lines.rs:207
 msgid "Centre Lines"
 msgstr ""
 
@@ -825,7 +833,7 @@ msgid "Ceramic tile"
 msgstr "瓷砖"
 
 #: crates/ui-egui/src/lib.rs:3882
-#: crates/ui-egui/src/linestyles.rs:461
+#: crates/ui-egui/src/linestyles.rs:383
 #: crates/ui-egui/src/structure.rs:141
 msgid "Chain"
 msgstr "链"
@@ -1359,7 +1367,7 @@ msgstr "颜色"
 msgid "Colors"
 msgstr "颜色"
 
-#: crates/ui-egui/src/linestyles.rs:170
+#: crates/ui-egui/src/linestyles.rs:149
 msgid "Colour"
 msgstr "颜色"
 
@@ -1555,6 +1563,7 @@ msgstr "无法保存设置：{}"
 
 #: crates/core/src/schedule.rs:196
 #: crates/ui-egui/src/filter.rs:83
+#: crates/ui-egui/src/linestyles/creator.rs:175
 msgid "Count"
 msgstr "数量"
 
@@ -1652,6 +1661,10 @@ msgstr "交叉线"
 msgid "Current view only"
 msgstr "仅当前视图"
 
+#: crates/ui-egui/src/linestyles/creator.rs:108
+msgid "Curve preview"
+msgstr "曲线预览"
+
 #: crates/ui-egui/src/fillpatterns.rs:587
 #: crates/ui-egui/src/footer.rs:289
 msgid "Custom"
@@ -1682,7 +1695,7 @@ msgstr "剖切面"
 msgid "Cylinder"
 msgstr "圆柱体"
 
-#: crates/core/src/render.rs:2339
+#: crates/core/src/render.rs:2379
 msgid "DN"
 msgstr "下"
 
@@ -1702,12 +1715,11 @@ msgstr "深色模式"
 msgid "Dark UI, Light Canvas"
 msgstr "深色界面，浅色画布"
 
-#: crates/core/src/lines.rs:122
-#: crates/ui-egui/src/linestyles.rs:271
+#: crates/core/src/lines.rs:177
 msgid "Dash"
 msgstr "划线"
 
-#: crates/core/src/lines.rs:125
+#: crates/core/src/lines.rs:180
 msgid "Dash Dot"
 msgstr ""
 
@@ -1718,10 +1730,6 @@ msgstr "虚线"
 #: crates/ui-egui/src/fillpatterns.rs:393
 msgid "Dashes"
 msgstr "虚线"
-
-#: crates/ui-egui/src/linestyles.rs:212
-msgid "Dashes, dots and spaces, mm on paper, so a pattern reads the same at any scale."
-msgstr "划线、点和间隔以图纸上的毫米计，因此图案在任何比例下看起来都相同。"
 
 #: crates/ui-egui/src/lib.rs:2696
 msgid "Data"
@@ -1763,9 +1771,9 @@ msgstr "默认厚度"
 #: crates/ui-egui/src/fillpatterns.rs:595
 #: crates/ui-egui/src/graphics.rs:398
 #: crates/ui-egui/src/graphics.rs:485
-#: crates/ui-egui/src/linestyles.rs:191
-#: crates/ui-egui/src/linestyles.rs:232
-#: crates/ui-egui/src/linestyles.rs:293
+#: crates/ui-egui/src/linestyles/creator.rs:167
+#: crates/ui-egui/src/linestyles.rs:170
+#: crates/ui-egui/src/linestyles.rs:205
 #: crates/ui-egui/src/lineweights.rs:53
 #: crates/ui-egui/src/phasing.rs:519
 #: crates/ui-egui/src/properties.rs:1698
@@ -1819,7 +1827,7 @@ msgstr "拆除 (DW)：单击图元，在视图阶段中将其拆除；再次单�
 msgid "Demolished"
 msgstr "已拆除"
 
-#: crates/core/src/commands.rs:5747
+#: crates/core/src/commands.rs:5749
 msgid "Dependent"
 msgstr "相关"
 
@@ -1986,8 +1994,7 @@ msgstr "老虎窗"
 msgid "Dormer: click a roof's slope where its front wall goes; the roof opens under it"
 msgstr "老虎窗：在屋顶坡面上单击其前墙的位置；屋顶在其下方开洞"
 
-#: crates/core/src/lines.rs:124
-#: crates/ui-egui/src/linestyles.rs:274
+#: crates/core/src/lines.rs:179
 msgid "Dot"
 msgstr "点"
 
@@ -2012,6 +2019,7 @@ msgid "Double-clicking a tab's name does the same; a click on a tab then shows i
 msgstr "双击选项卡名称也有同样效果；之后单击选项卡会显示其工具，直到选取其中一个"
 
 #: crates/ui-egui/src/graphics.rs:1121
+#: crates/ui-egui/src/linestyles/creator.rs:163
 msgid "Down"
 msgstr "下移"
 
@@ -2132,7 +2140,7 @@ msgstr "接地极"
 msgid "East"
 msgstr "东"
 
-#: crates/ui-egui/src/linestyles.rs:227
+#: crates/ui-egui/src/linestyles.rs:202
 #: crates/ui-egui/src/shortcuts.rs:527
 msgid "Edit"
 msgstr "编辑"
@@ -2199,7 +2207,7 @@ msgstr "电气设备"
 msgid "Electrical Equipment (EE): a distribution board, where you click on the wall; Space turns it"
 msgstr "电气设备 (EE)：在墙上单击处放置配电箱；按空格键旋转"
 
-#: crates/core/src/commands.rs:1367
+#: crates/core/src/commands.rs:1369
 msgid "Elements"
 msgstr "图元"
 
@@ -2244,7 +2252,8 @@ msgstr "终点标高偏移"
 msgid "Endpoint"
 msgstr "端点"
 
-#: crates/ui-egui/src/linestyles.rs:88
+#: crates/ui-egui/src/linestyles/creator.rs:224
+#: crates/ui-egui/src/linestyles.rs:90
 msgid "Enter a name for every style and pattern."
 msgstr "请为每个样式和图案输入名称。"
 
@@ -2685,6 +2694,10 @@ msgstr "门窗框材质"
 msgid "Frame Width"
 msgstr "门窗框宽度"
 
+#: crates/ui-egui/src/linestyles/creator.rs:182
+msgid "Frequency (cycles per segment)"
+msgstr "频率（每段周期数）"
+
 #: crates/ui-egui/src/editor.rs:736
 msgid "From"
 msgstr "从"
@@ -2726,6 +2739,10 @@ msgstr "山墙边：单击屋顶迹线的一条边使其竖直成为山墙端；
 msgid "Gable Ends"
 msgstr "山墙端"
 
+#: crates/ui-egui/src/linestyles/creator.rs:74
+msgid "Gap"
+msgstr "间隙"
+
 #: crates/core/src/fixtures.rs:211
 msgid "Gate Valve"
 msgstr "闸阀"
@@ -2745,6 +2762,10 @@ msgstr "玻璃"
 #: crates/ui-egui/src/phasing.rs:25
 msgid "Graphic Overrides"
 msgstr "图形替换"
+
+#: crates/ui-egui/src/linestyles.rs:189
+msgid "Graphic segments in mm on paper, repeating along the centerline."
+msgstr "以图纸毫米计的图形段，沿中心线重复。"
 
 #: crates/ui-egui/src/graphics.rs:576
 msgid "Graphics"
@@ -2778,7 +2799,7 @@ msgstr "组："
 msgid "Gypsum board"
 msgstr "石膏板"
 
-#: crates/core/src/lines.rs:147
+#: crates/core/src/lines.rs:202
 #: crates/ui-egui/src/graphics.rs:1282
 msgid "Hairline"
 msgstr "发丝线"
@@ -2818,7 +2839,7 @@ msgstr "高度偏移："
 msgid "Height:"
 msgstr "高度："
 
-#: crates/core/src/lines.rs:126
+#: crates/core/src/lines.rs:181
 msgid "Hidden"
 msgstr ""
 
@@ -2826,7 +2847,7 @@ msgstr ""
 msgid "Hidden Line"
 msgstr "隐藏线"
 
-#: crates/core/src/lines.rs:151
+#: crates/core/src/lines.rs:206
 msgid "Hidden Lines"
 msgstr ""
 
@@ -3197,8 +3218,13 @@ msgid "Legends are coming in a later version."
 msgstr "图例功能将在后续版本中推出。"
 
 #: crates/core/src/family.rs:1257
+#: crates/ui-egui/src/linestyles/creator.rs:135
 msgid "Length"
 msgstr "长度"
+
+#: crates/ui-egui/src/linestyles/creator.rs:112
+msgid "Lengths and sizes are mm on paper. The centerline defines geometry and dimensions."
+msgstr "长度和尺寸以图纸毫米计。中心线决定几何和尺寸标注。"
 
 #: crates/core/src/commands.rs:117
 msgid "Level"
@@ -3248,19 +3274,23 @@ msgstr "线"
 msgid "Line Graphics"
 msgstr "线图形"
 
-#: crates/ui-egui/src/linestyles.rs:441
-#: crates/ui-egui/src/linestyles.rs:457
+#: crates/ui-egui/src/linestyles/creator.rs:96
+msgid "Line Pattern Creator"
+msgstr "线型图案创建器"
+
+#: crates/ui-egui/src/linestyles.rs:363
+#: crates/ui-egui/src/linestyles.rs:379
 #: crates/ui-egui/src/sketch.rs:781
 msgid "Line Style"
 msgstr "线样式"
 
-#: crates/ui-egui/src/linestyles.rs:435
-#: crates/ui-egui/src/linestyles.rs:451
+#: crates/ui-egui/src/linestyles.rs:357
+#: crates/ui-egui/src/linestyles.rs:373
 #: crates/ui-egui/src/sketch.rs:771
 msgid "Line Style:"
 msgstr "线样式："
 
-#: crates/ui-egui/src/linestyles.rs:360
+#: crates/ui-egui/src/linestyles.rs:277
 msgid "Line Styles"
 msgstr "线样式"
 
@@ -3272,7 +3302,7 @@ msgstr "线样式：详图线所用的笔、颜色和线型图案，以及图案
 msgid "Line Through"
 msgstr "尺寸线经过点"
 
-#: crates/ui-egui/src/linestyles.rs:170
+#: crates/ui-egui/src/linestyles.rs:149
 msgid "Line Weight"
 msgstr "线宽"
 
@@ -3401,7 +3431,7 @@ msgstr "定位线"
 msgid "Location Line:"
 msgstr "定位线："
 
-#: crates/core/src/lines.rs:123
+#: crates/core/src/lines.rs:178
 msgid "Long Dash"
 msgstr ""
 
@@ -3514,7 +3544,7 @@ msgstr "最大化"
 msgid "Maximum Riser Height"
 msgstr "最大踢面高度"
 
-#: crates/core/src/commands.rs:1320
+#: crates/core/src/commands.rs:1322
 msgid "Measure"
 msgstr "测量"
 
@@ -3526,7 +3556,7 @@ msgstr "测量 (ME)：单击两点；其长度和角度显示在两点之间的�
 msgid "Medium"
 msgstr "中等"
 
-#: crates/core/src/lines.rs:149
+#: crates/core/src/lines.rs:204
 msgid "Medium Lines"
 msgstr ""
 
@@ -3665,7 +3695,7 @@ msgstr "多个类别"
 msgid "Multiple Categories ({})"
 msgstr "多个类别（{}）"
 
-#: crates/core/src/render.rs:1661
+#: crates/core/src/render.rs:1701
 msgid "NOT ENCLOSED"
 msgstr "未封闭"
 
@@ -3715,7 +3745,7 @@ msgid "New Filter"
 msgstr "新建过滤器"
 
 #: crates/ui-egui/src/fillpatterns.rs:618
-#: crates/ui-egui/src/linestyles.rs:248
+#: crates/ui-egui/src/linestyles.rs:218
 msgid "New Pattern"
 msgstr "新建图案"
 
@@ -3731,7 +3761,7 @@ msgstr "新建明细表"
 msgid "New Set"
 msgstr "新建选项集"
 
-#: crates/ui-egui/src/linestyles.rs:201
+#: crates/ui-egui/src/linestyles.rs:180
 msgid "New Style"
 msgstr "新建样式"
 
@@ -3898,7 +3928,7 @@ msgstr "编号"
 #: crates/ui-egui/src/graphics.rs:343
 #: crates/ui-egui/src/graphics.rs:995
 #: crates/ui-egui/src/inquiry.rs:140
-#: crates/ui-egui/src/linestyles.rs:385
+#: crates/ui-egui/src/linestyles.rs:302
 #: crates/ui-egui/src/lineweights.rs:150
 #: crates/ui-egui/src/objectstyles.rs:78
 #: crates/ui-egui/src/properties.rs:2475
@@ -3929,6 +3959,7 @@ msgid "Off"
 msgstr "关"
 
 #: crates/core/src/schedule.rs:191
+#: crates/ui-egui/src/linestyles/creator.rs:74
 #: crates/ui-egui/src/sketch.rs:684
 msgid "Offset"
 msgstr "偏移"
@@ -4039,7 +4070,7 @@ msgstr "插座和设备"
 msgid "Overhang:"
 msgstr "悬挑："
 
-#: crates/core/src/lines.rs:153
+#: crates/core/src/lines.rs:208
 msgid "Overhead Lines"
 msgstr ""
 
@@ -4145,7 +4176,7 @@ msgid "Patch Panels"
 msgstr "配线架"
 
 #: crates/ui-egui/src/fillpatterns.rs:620
-#: crates/ui-egui/src/linestyles.rs:250
+#: crates/ui-egui/src/linestyles.rs:220
 msgid "Pattern"
 msgstr "图案"
 
@@ -4156,6 +4187,10 @@ msgstr "图案角度 (°)"
 #: crates/ui-egui/src/graphics.rs:754
 msgid "Pattern Graphics"
 msgstr "图案图形"
+
+#: crates/ui-egui/src/linestyles/creator.rs:98
+msgid "Pattern Name"
+msgstr "图案名称"
 
 #: crates/ui-egui/src/graphics.rs:734
 msgid "Patterns"
@@ -4656,6 +4691,7 @@ msgstr "保留"
 
 #: crates/ui-egui/src/editor.rs:983
 #: crates/ui-egui/src/graphics.rs:1395
+#: crates/ui-egui/src/linestyles/creator.rs:103
 msgid "Preview"
 msgstr "预览"
 
@@ -5150,6 +5186,10 @@ msgstr "另存为…"
 msgid "Save Family…"
 msgstr "保存族…"
 
+#: crates/ui-egui/src/linestyles/creator.rs:215
+msgid "Save Pattern"
+msgstr "保存图案"
+
 #: crates/ui-egui/src/settings.rs:458
 msgid "Save a recovery copy every"
 msgstr "每隔多久保存一次恢复副本"
@@ -5183,7 +5223,7 @@ msgstr "比例：此视图所代表的图纸，为模型的 1 : n；其注释和
 msgid "Scan"
 msgstr "扫描"
 
-#: crates/core/src/commands.rs:1183
+#: crates/core/src/commands.rs:1185
 msgid "Schedule"
 msgstr "明细表"
 
@@ -5258,21 +5298,49 @@ msgstr "剖面：{}"
 msgid "Sections (Building Section)"
 msgstr "剖面（建筑剖面）"
 
-#: crates/ui-egui/src/linestyles.rs:269
+#: crates/ui-egui/src/linestyles/creator.rs:131
 msgid "Segment {}"
 msgstr "线段 {}"
 
-#: crates/ui-egui/src/linestyles.rs:284
+#: crates/ui-egui/src/linestyles/creator.rs:185
+msgid "Segment {} Amplitude"
+msgstr "段 {} 振幅"
+
+#: crates/ui-egui/src/linestyles/creator.rs:177
+msgid "Segment {} Count"
+msgstr "段 {} 数量"
+
+#: crates/ui-egui/src/linestyles/creator.rs:183
+msgid "Segment {} Frequency"
+msgstr "段 {} 频率"
+
+#: crates/ui-egui/src/linestyles/creator.rs:139
 msgid "Segment {} Length"
 msgstr "线段 {} 长度"
 
-#: crates/ui-egui/src/linestyles.rs:293
+#: crates/ui-egui/src/linestyles/creator.rs:189
+msgid "Segment {} Size"
+msgstr "段 {} 大小"
+
+#: crates/ui-egui/src/linestyles/creator.rs:179
+msgid "Segment {} Spacing"
+msgstr "段 {} 间距"
+
+#: crates/ui-egui/src/linestyles/creator.rs:191
+msgid "Segment {} Text"
+msgstr "段 {} 文字"
+
+#: crates/ui-egui/src/linestyles/creator.rs:167
 msgid "Segment {}: Delete"
 msgstr "线段 {}：删除"
 
-#: crates/ui-egui/src/linestyles.rs:257
-msgid "Segments of {}"
-msgstr "{} 的线段"
+#: crates/ui-egui/src/linestyles/creator.rs:163
+msgid "Segment {}: Down"
+msgstr "段 {}：下移"
+
+#: crates/ui-egui/src/linestyles/creator.rs:158
+msgid "Segment {}: Up"
+msgstr "段 {}：上移"
 
 #: crates/ui-egui/src/lib.rs:2860
 msgid "Select"
@@ -5477,6 +5545,7 @@ msgstr "窗台高度"
 msgid "Single Door"
 msgstr "单扇门"
 
+#: crates/ui-egui/src/linestyles/creator.rs:188
 #: crates/ui-egui/src/properties.rs:247
 msgid "Size"
 msgstr "尺寸"
@@ -5626,11 +5695,8 @@ msgstr "GitHub 上的源代码"
 msgid "South"
 msgstr "南"
 
-#: crates/ui-egui/src/linestyles.rs:280
-msgid "Space"
-msgstr "间隔"
-
 #: crates/ui-egui/src/fillpatterns.rs:393
+#: crates/ui-egui/src/linestyles/creator.rs:178
 msgid "Spacing"
 msgstr "间距"
 
@@ -5720,6 +5786,10 @@ msgstr "起点-终点-半径弧：单击起点、终点，再单击圆弧经过�
 msgid "Stop Following in This View"
 msgstr "在此视图中停止应用"
 
+#: crates/ui-egui/src/linestyles/creator.rs:74
+msgid "Straight"
+msgstr "直线"
+
 #: crates/core/src/schedule.rs:252
 msgid "Structural"
 msgstr "结构"
@@ -5736,11 +5806,11 @@ msgstr "结构柱 (CL)：单击柱的位置"
 msgid "Structure"
 msgstr "结构"
 
-#: crates/ui-egui/src/linestyles.rs:203
+#: crates/ui-egui/src/linestyles.rs:182
 msgid "Style"
 msgstr "样式"
 
-#: crates/ui-egui/src/linestyles.rs:26
+#: crates/ui-egui/src/linestyles.rs:28
 msgid "Styles"
 msgstr "样式"
 
@@ -5927,6 +5997,10 @@ msgstr "文字大小"
 msgid "Text:"
 msgstr "文字："
 
+#: crates/ui-egui/src/linestyles/creator.rs:208
+msgid "Text: IBM Plex Sans (bundled). Text scales down to fit its segment."
+msgstr "文字：IBM Plex Sans（内置）。文字会缩小以适应其所在段。"
+
 #: crates/ui-egui/src/properties.rs:1748
 msgid "Texture"
 msgstr "纹理"
@@ -5993,7 +6067,8 @@ msgstr "墙的中点，沿其弧线"
 
 #: crates/ui-egui/src/fillpatterns.rs:200
 #: crates/ui-egui/src/fillpatterns.rs:457
-#: crates/ui-egui/src/linestyles.rs:91
+#: crates/ui-egui/src/linestyles/creator.rs:226
+#: crates/ui-egui/src/linestyles.rs:93
 msgid "The name `{}` is already in use."
 msgstr "名称“{}”已被使用。"
 
@@ -6002,7 +6077,7 @@ msgid "The pen each category draws its lines in, seen and cut, in every plan and
 msgstr "每个类别在所有平面和剖面中绘制线条所用的笔，可见线和剖切线各一支。视图的可见性/图形设置会替换它们。"
 
 #: crates/ui-egui/src/fillpatterns.rs:186
-#: crates/ui-egui/src/linestyles.rs:82
+#: crates/ui-egui/src/linestyles.rs:84
 msgid "The project changed while this window was open: Cancel, and open it again."
 msgstr "此窗口打开期间项目已更改：请取消并重新打开。"
 
@@ -6081,7 +6156,7 @@ msgstr "厚度"
 msgid "Thickness:"
 msgstr "厚度："
 
-#: crates/core/src/lines.rs:139
+#: crates/core/src/lines.rs:194
 #: crates/ui-egui/src/lib.rs:3135
 msgid "Thin Lines"
 msgstr "细线"
@@ -6304,7 +6379,7 @@ msgstr "类型："
 msgid "Types"
 msgstr "类型"
 
-#: crates/core/src/render.rs:2339
+#: crates/core/src/render.rs:2379
 msgid "UP"
 msgstr "上"
 
@@ -6378,7 +6453,7 @@ msgstr "取消隐藏图元"
 msgid "Units"
 msgstr "单位"
 
-#: crates/core/src/commands.rs:5888
+#: crates/core/src/commands.rs:5890
 msgid "Unnamed"
 msgstr "未命名"
 
@@ -6391,6 +6466,7 @@ msgid "Untitled project"
 msgstr "未命名项目"
 
 #: crates/ui-egui/src/graphics.rs:1115
+#: crates/ui-egui/src/linestyles/creator.rs:158
 msgid "Up"
 msgstr "上移"
 
@@ -6598,6 +6674,10 @@ msgstr "衣柜"
 msgid "Washbasin"
 msgstr "洗手盆"
 
+#: crates/ui-egui/src/linestyles/creator.rs:74
+msgid "Wave"
+msgstr "波浪"
+
 #: crates/core/src/model.rs:1214
 msgid "West"
 msgstr "西"
@@ -6606,7 +6686,7 @@ msgstr "西"
 msgid "What High Contrast Point Clouds, on the view control bar, draws a view's scans in"
 msgstr "视图控制栏上的“高对比度点云”用来绘制视图中扫描的颜色"
 
-#: crates/ui-egui/src/linestyles.rs:164
+#: crates/ui-egui/src/linestyles.rs:143
 msgid "What detail lines draw in: a pen, a colour and a line pattern."
 msgstr "详图线的绘制方式：一支笔、一种颜色和一种线型图案。"
 
@@ -6630,8 +6710,8 @@ msgstr "按文件坐标放置，与测量时的位置一致"
 msgid "Where two walls or grids cross"
 msgstr "两面墙或两条轴网相交处"
 
-#: crates/core/src/lines.rs:150
-#: crates/ui-egui/src/linestyles.rs:432
+#: crates/core/src/lines.rs:205
+#: crates/ui-egui/src/linestyles.rs:354
 msgid "Wide Lines"
 msgstr ""
 
@@ -6706,6 +6786,14 @@ msgstr "昨天"
 #: crates/ui-egui/src/properties.rs:280
 msgid "Z Justification"
 msgstr "Z 轴对正"
+
+#: crates/ui-egui/src/linestyles/creator.rs:74
+msgid "Zig Zag"
+msgstr "锯齿"
+
+#: crates/ui-egui/src/linestyles/creator.rs:109
+msgid "Zoom"
+msgstr "缩放"
 
 #: crates/ui-egui/src/canvas.rs:1291
 msgid "Zoom In"
@@ -7219,7 +7307,7 @@ msgstr "{} 年前"
 msgid "{}: Angle"
 msgstr "{}：角度"
 
-#: crates/ui-egui/src/linestyles.rs:180
+#: crates/ui-egui/src/linestyles.rs:159
 msgid "{}: Colour"
 msgstr "{}：颜色"
 
@@ -7229,12 +7317,12 @@ msgstr "{}：交叉线"
 
 #: crates/ui-egui/src/fillpatterns.rs:359
 #: crates/ui-egui/src/fillpatterns.rs:595
-#: crates/ui-egui/src/linestyles.rs:191
-#: crates/ui-egui/src/linestyles.rs:232
+#: crates/ui-egui/src/linestyles.rs:170
+#: crates/ui-egui/src/linestyles.rs:205
 msgid "{}: Delete"
 msgstr "{}：删除"
 
-#: crates/ui-egui/src/linestyles.rs:228
+#: crates/ui-egui/src/linestyles.rs:202
 msgid "{}: Edit"
 msgstr "{}：编辑"
 
@@ -7246,7 +7334,7 @@ msgstr "{}：编辑线"
 msgid "{}: Edit Patterns"
 msgstr "{}：编辑图案"
 
-#: crates/ui-egui/src/linestyles.rs:177
+#: crates/ui-egui/src/linestyles.rs:156
 msgid "{}: Line Weight"
 msgstr "{}：线宽"
 
@@ -7256,12 +7344,12 @@ msgstr "{}：遮罩"
 
 #: crates/ui-egui/src/fillpatterns.rs:347
 #: crates/ui-egui/src/fillpatterns.rs:553
-#: crates/ui-egui/src/linestyles.rs:176
-#: crates/ui-egui/src/linestyles.rs:225
+#: crates/ui-egui/src/linestyles.rs:155
+#: crates/ui-egui/src/linestyles.rs:200
 msgid "{}: Name"
 msgstr "{}：名称"
 
-#: crates/ui-egui/src/linestyles.rs:183
+#: crates/ui-egui/src/linestyles.rs:162
 msgid "{}: Pattern"
 msgstr "{}：图案"
 
@@ -7286,7 +7374,7 @@ msgstr "{}：`{}` 不是有效的长度"
 
 #: crates/ui-egui/src/properties.rs:1975
 msgid "{}: `{}` is not a number"
-msgstr ""
+msgstr "{}：`{}` 不是数字"
 
 #: crates/ui-egui/src/editor.rs:219
 msgid "{}: `{}` isn't a number"
@@ -7803,3 +7891,12 @@ msgstr "导线"
 #: crates/ui-egui/src/canvas.rs:2064
 #~ msgid "text: type what the note says in the Options Bar first"
 #~ msgstr "文字：请先在选项栏中输入注释内容"
+#: crates/ui-egui/src/linestyles.rs:212
+#~ msgid "Dashes, dots and spaces, mm on paper, so a pattern reads the same at any scale."
+#~ msgstr "划线、点和间隔以图纸上的毫米计，因此图案在任何比例下看起来都相同。"
+#: crates/ui-egui/src/linestyles.rs:257
+#~ msgid "Segments of {}"
+#~ msgstr "{} 的线段"
+#: crates/ui-egui/src/linestyles.rs:280
+#~ msgid "Space"
+#~ msgstr "间隔"

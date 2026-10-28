@@ -45,7 +45,7 @@ msgstr ""
 msgid "; and {} more"
 msgstr ""
 
-#: crates/ui-egui/src/linestyles.rs:424
+#: crates/ui-egui/src/linestyles.rs:346
 msgid "<By Category>"
 msgstr ""
 
@@ -213,7 +213,7 @@ msgstr ""
 msgid "Add Scale:"
 msgstr ""
 
-#: crates/ui-egui/src/linestyles.rs:306
+#: crates/ui-egui/src/linestyles/creator.rs:205
 msgid "Add Segment"
 msgstr ""
 
@@ -311,6 +311,10 @@ msgstr ""
 msgid "All"
 msgstr ""
 
+#: crates/ui-egui/src/linestyles/creator.rs:184
+msgid "Amplitude"
+msgstr ""
+
 #: crates/ui-egui/src/control.rs:206
 msgid "An agent can work on this project: bimcraft-cli mcp --connect {}"
 msgstr ""
@@ -362,7 +366,7 @@ msgstr ""
 #: crates/ui-egui/src/editor.rs:1017
 #: crates/ui-egui/src/fillpatterns.rs:728
 #: crates/ui-egui/src/graphics.rs:341
-#: crates/ui-egui/src/linestyles.rs:383
+#: crates/ui-egui/src/linestyles.rs:300
 #: crates/ui-egui/src/lineweights.rs:148
 #: crates/ui-egui/src/objectstyles.rs:76
 #: crates/ui-egui/src/properties.rs:968
@@ -716,7 +720,7 @@ msgstr ""
 #: crates/ui-egui/src/graphics.rs:342
 #: crates/ui-egui/src/graphics.rs:994
 #: crates/ui-egui/src/inquiry.rs:139
-#: crates/ui-egui/src/linestyles.rs:384
+#: crates/ui-egui/src/linestyles.rs:301
 #: crates/ui-egui/src/lineweights.rs:149
 #: crates/ui-egui/src/objectstyles.rs:77
 #: crates/ui-egui/src/properties.rs:2474
@@ -734,6 +738,10 @@ msgstr ""
 
 #: crates/ui-egui/src/sketch.rs:722
 msgid "Cancel Edit Mode: drop the lines, keep it as it was"
+msgstr ""
+
+#: crates/ui-egui/src/linestyles/creator.rs:214
+msgid "Cancel Pattern"
 msgstr ""
 
 #: crates/ui-egui/src/mep.rs:247
@@ -811,12 +819,12 @@ msgstr ""
 msgid "Centimetres"
 msgstr ""
 
-#: crates/core/src/lines.rs:127
+#: crates/core/src/lines.rs:182
 #: crates/ui-egui/src/editor.rs:819
 msgid "Centre"
 msgstr ""
 
-#: crates/core/src/lines.rs:152
+#: crates/core/src/lines.rs:207
 msgid "Centre Lines"
 msgstr ""
 
@@ -825,7 +833,7 @@ msgid "Ceramic tile"
 msgstr ""
 
 #: crates/ui-egui/src/lib.rs:3882
-#: crates/ui-egui/src/linestyles.rs:461
+#: crates/ui-egui/src/linestyles.rs:383
 #: crates/ui-egui/src/structure.rs:141
 msgid "Chain"
 msgstr ""
@@ -1359,7 +1367,7 @@ msgstr ""
 msgid "Colors"
 msgstr ""
 
-#: crates/ui-egui/src/linestyles.rs:170
+#: crates/ui-egui/src/linestyles.rs:149
 msgid "Colour"
 msgstr ""
 
@@ -1555,6 +1563,7 @@ msgstr ""
 
 #: crates/core/src/schedule.rs:196
 #: crates/ui-egui/src/filter.rs:83
+#: crates/ui-egui/src/linestyles/creator.rs:175
 msgid "Count"
 msgstr ""
 
@@ -1652,6 +1661,10 @@ msgstr ""
 msgid "Current view only"
 msgstr ""
 
+#: crates/ui-egui/src/linestyles/creator.rs:108
+msgid "Curve preview"
+msgstr ""
+
 #: crates/ui-egui/src/fillpatterns.rs:587
 #: crates/ui-egui/src/footer.rs:289
 msgid "Custom"
@@ -1682,7 +1695,7 @@ msgstr ""
 msgid "Cylinder"
 msgstr ""
 
-#: crates/core/src/render.rs:2339
+#: crates/core/src/render.rs:2379
 msgid "DN"
 msgstr ""
 
@@ -1702,12 +1715,11 @@ msgstr ""
 msgid "Dark UI, Light Canvas"
 msgstr ""
 
-#: crates/core/src/lines.rs:122
-#: crates/ui-egui/src/linestyles.rs:271
+#: crates/core/src/lines.rs:177
 msgid "Dash"
 msgstr ""
 
-#: crates/core/src/lines.rs:125
+#: crates/core/src/lines.rs:180
 msgid "Dash Dot"
 msgstr ""
 
@@ -1717,10 +1729,6 @@ msgstr ""
 
 #: crates/ui-egui/src/fillpatterns.rs:393
 msgid "Dashes"
-msgstr ""
-
-#: crates/ui-egui/src/linestyles.rs:212
-msgid "Dashes, dots and spaces, mm on paper, so a pattern reads the same at any scale."
 msgstr ""
 
 #: crates/ui-egui/src/lib.rs:2696
@@ -1763,9 +1771,9 @@ msgstr ""
 #: crates/ui-egui/src/fillpatterns.rs:595
 #: crates/ui-egui/src/graphics.rs:398
 #: crates/ui-egui/src/graphics.rs:485
-#: crates/ui-egui/src/linestyles.rs:191
-#: crates/ui-egui/src/linestyles.rs:232
-#: crates/ui-egui/src/linestyles.rs:293
+#: crates/ui-egui/src/linestyles/creator.rs:167
+#: crates/ui-egui/src/linestyles.rs:170
+#: crates/ui-egui/src/linestyles.rs:205
 #: crates/ui-egui/src/lineweights.rs:53
 #: crates/ui-egui/src/phasing.rs:519
 #: crates/ui-egui/src/properties.rs:1698
@@ -1819,7 +1827,7 @@ msgstr ""
 msgid "Demolished"
 msgstr ""
 
-#: crates/core/src/commands.rs:5747
+#: crates/core/src/commands.rs:5749
 msgid "Dependent"
 msgstr ""
 
@@ -1986,8 +1994,7 @@ msgstr ""
 msgid "Dormer: click a roof's slope where its front wall goes; the roof opens under it"
 msgstr ""
 
-#: crates/core/src/lines.rs:124
-#: crates/ui-egui/src/linestyles.rs:274
+#: crates/core/src/lines.rs:179
 msgid "Dot"
 msgstr ""
 
@@ -2012,6 +2019,7 @@ msgid "Double-clicking a tab's name does the same; a click on a tab then shows i
 msgstr ""
 
 #: crates/ui-egui/src/graphics.rs:1121
+#: crates/ui-egui/src/linestyles/creator.rs:163
 msgid "Down"
 msgstr ""
 
@@ -2132,7 +2140,7 @@ msgstr ""
 msgid "East"
 msgstr ""
 
-#: crates/ui-egui/src/linestyles.rs:227
+#: crates/ui-egui/src/linestyles.rs:202
 #: crates/ui-egui/src/shortcuts.rs:527
 msgid "Edit"
 msgstr ""
@@ -2199,7 +2207,7 @@ msgstr ""
 msgid "Electrical Equipment (EE): a distribution board, where you click on the wall; Space turns it"
 msgstr ""
 
-#: crates/core/src/commands.rs:1367
+#: crates/core/src/commands.rs:1369
 msgid "Elements"
 msgstr ""
 
@@ -2244,7 +2252,8 @@ msgstr ""
 msgid "Endpoint"
 msgstr ""
 
-#: crates/ui-egui/src/linestyles.rs:88
+#: crates/ui-egui/src/linestyles/creator.rs:224
+#: crates/ui-egui/src/linestyles.rs:90
 msgid "Enter a name for every style and pattern."
 msgstr ""
 
@@ -2685,6 +2694,10 @@ msgstr ""
 msgid "Frame Width"
 msgstr ""
 
+#: crates/ui-egui/src/linestyles/creator.rs:182
+msgid "Frequency (cycles per segment)"
+msgstr ""
+
 #: crates/ui-egui/src/editor.rs:736
 msgid "From"
 msgstr ""
@@ -2726,6 +2739,10 @@ msgstr ""
 msgid "Gable Ends"
 msgstr ""
 
+#: crates/ui-egui/src/linestyles/creator.rs:74
+msgid "Gap"
+msgstr ""
+
 #: crates/core/src/fixtures.rs:211
 msgid "Gate Valve"
 msgstr ""
@@ -2744,6 +2761,10 @@ msgstr ""
 
 #: crates/ui-egui/src/phasing.rs:25
 msgid "Graphic Overrides"
+msgstr ""
+
+#: crates/ui-egui/src/linestyles.rs:189
+msgid "Graphic segments in mm on paper, repeating along the centerline."
 msgstr ""
 
 #: crates/ui-egui/src/graphics.rs:576
@@ -2778,7 +2799,7 @@ msgstr ""
 msgid "Gypsum board"
 msgstr ""
 
-#: crates/core/src/lines.rs:147
+#: crates/core/src/lines.rs:202
 #: crates/ui-egui/src/graphics.rs:1282
 msgid "Hairline"
 msgstr ""
@@ -2818,7 +2839,7 @@ msgstr ""
 msgid "Height:"
 msgstr ""
 
-#: crates/core/src/lines.rs:126
+#: crates/core/src/lines.rs:181
 msgid "Hidden"
 msgstr ""
 
@@ -2826,7 +2847,7 @@ msgstr ""
 msgid "Hidden Line"
 msgstr ""
 
-#: crates/core/src/lines.rs:151
+#: crates/core/src/lines.rs:206
 msgid "Hidden Lines"
 msgstr ""
 
@@ -3197,7 +3218,12 @@ msgid "Legends are coming in a later version."
 msgstr ""
 
 #: crates/core/src/family.rs:1257
+#: crates/ui-egui/src/linestyles/creator.rs:135
 msgid "Length"
+msgstr ""
+
+#: crates/ui-egui/src/linestyles/creator.rs:112
+msgid "Lengths and sizes are mm on paper. The centerline defines geometry and dimensions."
 msgstr ""
 
 #: crates/core/src/commands.rs:117
@@ -3248,19 +3274,23 @@ msgstr ""
 msgid "Line Graphics"
 msgstr ""
 
-#: crates/ui-egui/src/linestyles.rs:441
-#: crates/ui-egui/src/linestyles.rs:457
+#: crates/ui-egui/src/linestyles/creator.rs:96
+msgid "Line Pattern Creator"
+msgstr ""
+
+#: crates/ui-egui/src/linestyles.rs:363
+#: crates/ui-egui/src/linestyles.rs:379
 #: crates/ui-egui/src/sketch.rs:781
 msgid "Line Style"
 msgstr ""
 
-#: crates/ui-egui/src/linestyles.rs:435
-#: crates/ui-egui/src/linestyles.rs:451
+#: crates/ui-egui/src/linestyles.rs:357
+#: crates/ui-egui/src/linestyles.rs:373
 #: crates/ui-egui/src/sketch.rs:771
 msgid "Line Style:"
 msgstr ""
 
-#: crates/ui-egui/src/linestyles.rs:360
+#: crates/ui-egui/src/linestyles.rs:277
 msgid "Line Styles"
 msgstr ""
 
@@ -3272,7 +3302,7 @@ msgstr ""
 msgid "Line Through"
 msgstr ""
 
-#: crates/ui-egui/src/linestyles.rs:170
+#: crates/ui-egui/src/linestyles.rs:149
 msgid "Line Weight"
 msgstr ""
 
@@ -3401,7 +3431,7 @@ msgstr ""
 msgid "Location Line:"
 msgstr ""
 
-#: crates/core/src/lines.rs:123
+#: crates/core/src/lines.rs:178
 msgid "Long Dash"
 msgstr ""
 
@@ -3514,7 +3544,7 @@ msgstr ""
 msgid "Maximum Riser Height"
 msgstr ""
 
-#: crates/core/src/commands.rs:1320
+#: crates/core/src/commands.rs:1322
 msgid "Measure"
 msgstr ""
 
@@ -3526,7 +3556,7 @@ msgstr ""
 msgid "Medium"
 msgstr ""
 
-#: crates/core/src/lines.rs:149
+#: crates/core/src/lines.rs:204
 msgid "Medium Lines"
 msgstr ""
 
@@ -3665,7 +3695,7 @@ msgstr ""
 msgid "Multiple Categories ({})"
 msgstr ""
 
-#: crates/core/src/render.rs:1661
+#: crates/core/src/render.rs:1701
 msgid "NOT ENCLOSED"
 msgstr ""
 
@@ -3715,7 +3745,7 @@ msgid "New Filter"
 msgstr ""
 
 #: crates/ui-egui/src/fillpatterns.rs:618
-#: crates/ui-egui/src/linestyles.rs:248
+#: crates/ui-egui/src/linestyles.rs:218
 msgid "New Pattern"
 msgstr ""
 
@@ -3731,7 +3761,7 @@ msgstr ""
 msgid "New Set"
 msgstr ""
 
-#: crates/ui-egui/src/linestyles.rs:201
+#: crates/ui-egui/src/linestyles.rs:180
 msgid "New Style"
 msgstr ""
 
@@ -3898,7 +3928,7 @@ msgstr ""
 #: crates/ui-egui/src/graphics.rs:343
 #: crates/ui-egui/src/graphics.rs:995
 #: crates/ui-egui/src/inquiry.rs:140
-#: crates/ui-egui/src/linestyles.rs:385
+#: crates/ui-egui/src/linestyles.rs:302
 #: crates/ui-egui/src/lineweights.rs:150
 #: crates/ui-egui/src/objectstyles.rs:78
 #: crates/ui-egui/src/properties.rs:2475
@@ -3929,6 +3959,7 @@ msgid "Off"
 msgstr ""
 
 #: crates/core/src/schedule.rs:191
+#: crates/ui-egui/src/linestyles/creator.rs:74
 #: crates/ui-egui/src/sketch.rs:684
 msgid "Offset"
 msgstr ""
@@ -4039,7 +4070,7 @@ msgstr ""
 msgid "Overhang:"
 msgstr ""
 
-#: crates/core/src/lines.rs:153
+#: crates/core/src/lines.rs:208
 msgid "Overhead Lines"
 msgstr ""
 
@@ -4145,7 +4176,7 @@ msgid "Patch Panels"
 msgstr ""
 
 #: crates/ui-egui/src/fillpatterns.rs:620
-#: crates/ui-egui/src/linestyles.rs:250
+#: crates/ui-egui/src/linestyles.rs:220
 msgid "Pattern"
 msgstr ""
 
@@ -4155,6 +4186,10 @@ msgstr ""
 
 #: crates/ui-egui/src/graphics.rs:754
 msgid "Pattern Graphics"
+msgstr ""
+
+#: crates/ui-egui/src/linestyles/creator.rs:98
+msgid "Pattern Name"
 msgstr ""
 
 #: crates/ui-egui/src/graphics.rs:734
@@ -4656,6 +4691,7 @@ msgstr ""
 
 #: crates/ui-egui/src/editor.rs:983
 #: crates/ui-egui/src/graphics.rs:1395
+#: crates/ui-egui/src/linestyles/creator.rs:103
 msgid "Preview"
 msgstr ""
 
@@ -5150,6 +5186,10 @@ msgstr ""
 msgid "Save Family…"
 msgstr ""
 
+#: crates/ui-egui/src/linestyles/creator.rs:215
+msgid "Save Pattern"
+msgstr ""
+
 #: crates/ui-egui/src/settings.rs:458
 msgid "Save a recovery copy every"
 msgstr ""
@@ -5183,7 +5223,7 @@ msgstr ""
 msgid "Scan"
 msgstr ""
 
-#: crates/core/src/commands.rs:1183
+#: crates/core/src/commands.rs:1185
 msgid "Schedule"
 msgstr ""
 
@@ -5258,20 +5298,48 @@ msgstr ""
 msgid "Sections (Building Section)"
 msgstr ""
 
-#: crates/ui-egui/src/linestyles.rs:269
+#: crates/ui-egui/src/linestyles/creator.rs:131
 msgid "Segment {}"
 msgstr ""
 
-#: crates/ui-egui/src/linestyles.rs:284
+#: crates/ui-egui/src/linestyles/creator.rs:185
+msgid "Segment {} Amplitude"
+msgstr ""
+
+#: crates/ui-egui/src/linestyles/creator.rs:177
+msgid "Segment {} Count"
+msgstr ""
+
+#: crates/ui-egui/src/linestyles/creator.rs:183
+msgid "Segment {} Frequency"
+msgstr ""
+
+#: crates/ui-egui/src/linestyles/creator.rs:139
 msgid "Segment {} Length"
 msgstr ""
 
-#: crates/ui-egui/src/linestyles.rs:293
+#: crates/ui-egui/src/linestyles/creator.rs:189
+msgid "Segment {} Size"
+msgstr ""
+
+#: crates/ui-egui/src/linestyles/creator.rs:179
+msgid "Segment {} Spacing"
+msgstr ""
+
+#: crates/ui-egui/src/linestyles/creator.rs:191
+msgid "Segment {} Text"
+msgstr ""
+
+#: crates/ui-egui/src/linestyles/creator.rs:167
 msgid "Segment {}: Delete"
 msgstr ""
 
-#: crates/ui-egui/src/linestyles.rs:257
-msgid "Segments of {}"
+#: crates/ui-egui/src/linestyles/creator.rs:163
+msgid "Segment {}: Down"
+msgstr ""
+
+#: crates/ui-egui/src/linestyles/creator.rs:158
+msgid "Segment {}: Up"
 msgstr ""
 
 #: crates/ui-egui/src/lib.rs:2860
@@ -5477,6 +5545,7 @@ msgstr ""
 msgid "Single Door"
 msgstr ""
 
+#: crates/ui-egui/src/linestyles/creator.rs:188
 #: crates/ui-egui/src/properties.rs:247
 msgid "Size"
 msgstr ""
@@ -5626,11 +5695,8 @@ msgstr ""
 msgid "South"
 msgstr ""
 
-#: crates/ui-egui/src/linestyles.rs:280
-msgid "Space"
-msgstr ""
-
 #: crates/ui-egui/src/fillpatterns.rs:393
+#: crates/ui-egui/src/linestyles/creator.rs:178
 msgid "Spacing"
 msgstr ""
 
@@ -5720,6 +5786,10 @@ msgstr ""
 msgid "Stop Following in This View"
 msgstr ""
 
+#: crates/ui-egui/src/linestyles/creator.rs:74
+msgid "Straight"
+msgstr ""
+
 #: crates/core/src/schedule.rs:252
 msgid "Structural"
 msgstr ""
@@ -5736,11 +5806,11 @@ msgstr ""
 msgid "Structure"
 msgstr ""
 
-#: crates/ui-egui/src/linestyles.rs:203
+#: crates/ui-egui/src/linestyles.rs:182
 msgid "Style"
 msgstr ""
 
-#: crates/ui-egui/src/linestyles.rs:26
+#: crates/ui-egui/src/linestyles.rs:28
 msgid "Styles"
 msgstr ""
 
@@ -5927,6 +5997,10 @@ msgstr ""
 msgid "Text:"
 msgstr ""
 
+#: crates/ui-egui/src/linestyles/creator.rs:208
+msgid "Text: IBM Plex Sans (bundled). Text scales down to fit its segment."
+msgstr ""
+
 #: crates/ui-egui/src/properties.rs:1748
 msgid "Texture"
 msgstr ""
@@ -5993,7 +6067,8 @@ msgstr ""
 
 #: crates/ui-egui/src/fillpatterns.rs:200
 #: crates/ui-egui/src/fillpatterns.rs:457
-#: crates/ui-egui/src/linestyles.rs:91
+#: crates/ui-egui/src/linestyles/creator.rs:226
+#: crates/ui-egui/src/linestyles.rs:93
 msgid "The name `{}` is already in use."
 msgstr ""
 
@@ -6002,7 +6077,7 @@ msgid "The pen each category draws its lines in, seen and cut, in every plan and
 msgstr ""
 
 #: crates/ui-egui/src/fillpatterns.rs:186
-#: crates/ui-egui/src/linestyles.rs:82
+#: crates/ui-egui/src/linestyles.rs:84
 msgid "The project changed while this window was open: Cancel, and open it again."
 msgstr ""
 
@@ -6081,7 +6156,7 @@ msgstr ""
 msgid "Thickness:"
 msgstr ""
 
-#: crates/core/src/lines.rs:139
+#: crates/core/src/lines.rs:194
 #: crates/ui-egui/src/lib.rs:3135
 msgid "Thin Lines"
 msgstr ""
@@ -6304,7 +6379,7 @@ msgstr ""
 msgid "Types"
 msgstr ""
 
-#: crates/core/src/render.rs:2339
+#: crates/core/src/render.rs:2379
 msgid "UP"
 msgstr ""
 
@@ -6378,7 +6453,7 @@ msgstr ""
 msgid "Units"
 msgstr ""
 
-#: crates/core/src/commands.rs:5888
+#: crates/core/src/commands.rs:5890
 msgid "Unnamed"
 msgstr ""
 
@@ -6391,6 +6466,7 @@ msgid "Untitled project"
 msgstr ""
 
 #: crates/ui-egui/src/graphics.rs:1115
+#: crates/ui-egui/src/linestyles/creator.rs:158
 msgid "Up"
 msgstr ""
 
@@ -6598,6 +6674,10 @@ msgstr ""
 msgid "Washbasin"
 msgstr ""
 
+#: crates/ui-egui/src/linestyles/creator.rs:74
+msgid "Wave"
+msgstr ""
+
 #: crates/core/src/model.rs:1214
 msgid "West"
 msgstr ""
@@ -6606,7 +6686,7 @@ msgstr ""
 msgid "What High Contrast Point Clouds, on the view control bar, draws a view's scans in"
 msgstr ""
 
-#: crates/ui-egui/src/linestyles.rs:164
+#: crates/ui-egui/src/linestyles.rs:143
 msgid "What detail lines draw in: a pen, a colour and a line pattern."
 msgstr ""
 
@@ -6630,8 +6710,8 @@ msgstr ""
 msgid "Where two walls or grids cross"
 msgstr ""
 
-#: crates/core/src/lines.rs:150
-#: crates/ui-egui/src/linestyles.rs:432
+#: crates/core/src/lines.rs:205
+#: crates/ui-egui/src/linestyles.rs:354
 msgid "Wide Lines"
 msgstr ""
 
@@ -6705,6 +6785,14 @@ msgstr ""
 
 #: crates/ui-egui/src/properties.rs:280
 msgid "Z Justification"
+msgstr ""
+
+#: crates/ui-egui/src/linestyles/creator.rs:74
+msgid "Zig Zag"
+msgstr ""
+
+#: crates/ui-egui/src/linestyles/creator.rs:109
+msgid "Zoom"
 msgstr ""
 
 #: crates/ui-egui/src/canvas.rs:1291
@@ -7219,7 +7307,7 @@ msgstr ""
 msgid "{}: Angle"
 msgstr ""
 
-#: crates/ui-egui/src/linestyles.rs:180
+#: crates/ui-egui/src/linestyles.rs:159
 msgid "{}: Colour"
 msgstr ""
 
@@ -7229,12 +7317,12 @@ msgstr ""
 
 #: crates/ui-egui/src/fillpatterns.rs:359
 #: crates/ui-egui/src/fillpatterns.rs:595
-#: crates/ui-egui/src/linestyles.rs:191
-#: crates/ui-egui/src/linestyles.rs:232
+#: crates/ui-egui/src/linestyles.rs:170
+#: crates/ui-egui/src/linestyles.rs:205
 msgid "{}: Delete"
 msgstr ""
 
-#: crates/ui-egui/src/linestyles.rs:228
+#: crates/ui-egui/src/linestyles.rs:202
 msgid "{}: Edit"
 msgstr ""
 
@@ -7246,7 +7334,7 @@ msgstr ""
 msgid "{}: Edit Patterns"
 msgstr ""
 
-#: crates/ui-egui/src/linestyles.rs:177
+#: crates/ui-egui/src/linestyles.rs:156
 msgid "{}: Line Weight"
 msgstr ""
 
@@ -7256,12 +7344,12 @@ msgstr ""
 
 #: crates/ui-egui/src/fillpatterns.rs:347
 #: crates/ui-egui/src/fillpatterns.rs:553
-#: crates/ui-egui/src/linestyles.rs:176
-#: crates/ui-egui/src/linestyles.rs:225
+#: crates/ui-egui/src/linestyles.rs:155
+#: crates/ui-egui/src/linestyles.rs:200
 msgid "{}: Name"
 msgstr ""
 
-#: crates/ui-egui/src/linestyles.rs:183
+#: crates/ui-egui/src/linestyles.rs:162
 msgid "{}: Pattern"
 msgstr ""
 

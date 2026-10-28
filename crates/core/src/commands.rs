@@ -930,9 +930,11 @@ pub static ALL: &[Command] = &[
         "line_pattern",
         "Line Patterns",
         &[],
-        "{name?, segments?: [{dash: mm} | {space: mm} | \"dot\", …], rename?, delete?: true} a line pattern of the project's: \
-         a dash or a dot then a space, again and again, each dash and space 0.05 to 100 mm long on paper, so it reads the \
-         same at any scale. A project starts with Dash, Long Dash, Dot, Dash Dot, Hidden and Centre; Solid is a line with \
+        "{name?, segments?: [{dash: mm} | {space: mm} | \"dot\" | {dot_length: mm} | {offset: {length, count, distance}} | {wave: {length, frequency, amplitude}} | {zigzag: {length, frequency, amplitude}} | {text: {length, size, text}}, …], rename?, delete?: true} a line pattern of the project's: \
+         1–32 freely ordered graphic segments, each 0.05–100 mm long on paper, so it reads the \
+         same at any scale. Offsets have 2–9 lines spaced symmetrically; frequency is cycles per segment, 0.1–100; \
+         amplitude and spacing are mm. Text uses bundled IBM Plex Sans, size is maximum capital height (shrinks to fit length), \
+         1–256 single-line characters, following the curve. All graphics preserve the centerline. A project starts with Dash, Long Dash, Dot, Dash Dot, Hidden and Centre; Solid is a line with \
          none. `rename` renames it, the line styles using it following; `delete` takes it away, while no style uses it. \
          Without `name`, it lists every pattern",
         line_pattern,

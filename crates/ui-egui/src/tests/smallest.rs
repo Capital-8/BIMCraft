@@ -264,10 +264,15 @@ fn line_styles_with_forty_of_each_stay_inside_the_least_window_with_their_button
     dialog_fits(&h, "line-styles", &["Line Styles", "New Style", "OK", "Cancel", "Apply"], "Styles");
     press(&mut h, "Patterns");
     dialog_fits(&h, "line-styles", &["Line Styles", "New Pattern", "OK", "Cancel", "Apply"], "Patterns");
-    // A pattern open for its segments adds a table of them under the list.
+    // A pattern opens its own creator, whose list scrolls independently.
     press(&mut h, "Dashes 00: Edit");
     for _ in 0..14 {
         press(&mut h, "Add Segment");
     }
-    dialog_fits(&h, "line-styles", &["Line Styles", "Add Segment", "OK", "Cancel", "Apply"], "a pattern's segments");
+    dialog_fits(
+        &h,
+        "line-pattern-creator",
+        &["Line Pattern Creator", "Add Segment", "Save Pattern", "Cancel Pattern"],
+        "a pattern's creator",
+    );
 }

@@ -377,10 +377,9 @@ pub(crate) fn paint(p: &Painter, at: Place, d: &Drawing, selected: &[Id], hovere
             _ => None,
         };
         match prim {
-            // A convex ring alone, smooth-edged; else (a curved wall's outline, walls' union) cut into
-            // triangles, which meet without a seam. No holes: no fill has one.
-            // A letter: its holes too, filled by the non-zero rule, its edges smoothed by its outline.
-            Prim::Fill { rings, color: c } if *part == render::Part::Text => {
+            // Notes and compound pattern glyphs use the non-zero fill rule, preserving counters and overlapping contours.
+            // Single-contour pattern fills (including dots) keep their ordinary polygon rendering below.
+            Prim::Fill { rings, color: c } if *part == render::Part::Text || (*part == render::Part::LinePattern && rings.len() > 1) => {
                 let fill = accent.map_or(color(*c), |a| a.0);
                 let mut mesh = Mesh::default();
                 for tri in letter(rings).iter() {
@@ -395,6 +394,7 @@ pub(crate) fn paint(p: &Painter, at: Place, d: &Drawing, selected: &[Id], hovere
                     p.add(Shape::closed_line(r.iter().map(|q| at.pos(*q)).collect(), Stroke::new(0.5, fill)));
                 }
             }
+            // Ordinary fills are convex rings or independent polygons, triangulated without seams.
             Prim::Fill { rings, color: c } => {
                 let fill = accent.map_or(color(*c), |a| a.1);
                 match rings.as_slice() {

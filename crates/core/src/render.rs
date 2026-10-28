@@ -61,6 +61,8 @@ pub enum Part {
     Cut,
     Text,
     Pattern,
+    /// Stroke-like pattern graphics: filled dots and font outlines take line colour overrides.
+    LinePattern,
 }
 
 impl Part {
@@ -213,7 +215,7 @@ pub struct Drawing {
     pub owners: Vec<Option<Id>>,
     /// What each primitive draws of its element, for overrides.
     pub parts: Vec<Part>,
-    /// The pen each line is drawn in, for [`Drawing::weigh`] to size; none for a fill, a picture, lettering's strokes and
+    /// The pen each stroke or pattern dot is drawn in, for [`Drawing::weigh`] to size; none for other fills, pictures, lettering and
     /// what is sized already (a view's lines on a sheet).
     pub pens: Vec<Option<Pen>>,
     regions: regions::Layers,
@@ -289,13 +291,51 @@ impl Drawing {
         let width = self.width(pen);
         self.push_pen(Prim::Line { pts, width, color, dash, closed }, Some(pen));
     }
+    /// One shared path for detail lines and region boundaries, in paper units.
+    fn styled(&mut self, m: &Model, st: &crate::lines::LineStyle, mut pts: Vec<(f32, f32)>, closed: bool) {
+        let k = sheet::DENSITY as f32 * self.paper;
+        let pattern = st.pattern.as_ref().and_then(|n| m.line_patterns.get(n));
+        let color = Rgb(st.color[0], st.color[1], st.color[2]);
+        if let Some(p) = pattern.filter(|p| !p.is_dash()) {
+            if closed && let Some(first) = pts.first().copied() {
+                pts.push(first);
+            }
+            let part = std::mem::replace(&mut self.part, Part::LinePattern);
+            for graphic in p.geometry(&pts, k, (self.weights.mm(st.pen, true) * sheet::DENSITY) as f32 * self.paper, color) {
+                self.push_pen(graphic.prim, graphic.weighted.then_some(st.pen));
+            }
+            self.part = part;
+        } else {
+            self.stroke(pts, st.pen, color, pattern.and_then(|p| p.dash(k)), closed);
+        }
+    }
+
     /// Each line's width as its pen draws it in this view, as annotation where `annotation` says its owner is, else as
     /// the model: the last step of drawing a view, once its overrides have set their pens.
     pub(crate) fn weigh(&mut self, annotation: impl Fn(Option<Id>) -> bool) {
         let (weights, k) = (self.weights, self.paper);
         for ((prim, owner), pen) in self.prims.iter_mut().zip(&self.owners).zip(&self.pens) {
-            if let (Prim::Line { width, .. }, Some(pen)) = (prim, pen) {
-                *width = (weights.mm(*pen, annotation(*owner)) * sheet::DENSITY) as f32 * k;
+            let Some(pen) = pen else { continue };
+            let width = (weights.mm(*pen, annotation(*owner)) * sheet::DENSITY) as f32 * k;
+            match prim {
+                Prim::Line { width: w, .. } => *w = width,
+                // Only dot fills carry a pen. Other fills and font outlines keep their geometry.
+                Prim::Fill { rings, .. } => {
+                    let bounds = rings.iter().flatten().fold(((f32::MAX, f32::MAX), (f32::MIN, f32::MIN)), |(lo, hi), &(x, y)| {
+                        ((lo.0.min(x), lo.1.min(y)), (hi.0.max(x), hi.1.max(y)))
+                    });
+                    let ((l, t), (r, b)) = bounds;
+                    let diameter = r - l;
+                    if diameter > 0.0 && diameter.is_finite() {
+                        let k = if width > 0.0 { width } else { 1.0 } / diameter;
+                        let (cx, cy) = ((l + r) * 0.5, (t + b) * 0.5);
+                        for (x, y) in rings.iter_mut().flatten() {
+                            *x = cx + (*x - cx) * k;
+                            *y = cy + (*y - cy) * k;
+                        }
+                    }
+                }
+                _ => {}
             }
         }
     }
@@ -2556,10 +2596,8 @@ pub(crate) fn filled_region(d: &mut Drawing, m: &Model, r: &FilledRegion) {
     // and no style of its own, not at all.
     for l in r.sketch.iter().filter(|l| !l.invisible) {
         let Some(st) = l.style.as_ref().or(r.line_style.as_ref()).and_then(|n| m.line_styles.get(n)) else { continue };
-        let dash = st.pattern.as_ref().and_then(|p| m.line_patterns.get(p)).and_then(|p| p.dash(sheet::DENSITY as f32 * d.paper));
-        let [cr, cg, cb] = st.color;
         let pts = l.points().into_iter().map(|p| d.view.px(p)).collect();
-        d.stroke(pts, st.pen, Rgb(cr, cg, cb), dash, false);
+        d.styled(m, st, pts, false);
     }
 }
 
@@ -2567,8 +2605,6 @@ pub(crate) fn filled_region(d: &mut Drawing, m: &Model, r: &FilledRegion) {
 /// pattern says, solid where they'd be too small to see.
 pub(crate) fn detail_line(d: &mut Drawing, m: &Model, l: &DetailLine) {
     let Some(st) = m.line_styles.get(&l.style) else { return };
-    let px_per_mm = sheet::DENSITY as f32 * d.paper;
-    let dash = st.pattern.as_ref().and_then(|p| m.line_patterns.get(p)).and_then(|p| p.dash(px_per_mm));
     // A closed one is stroked as a ring, so its dashes and its corner run on round its first point.
     let closed = l.curve.is_closed() && l.insulation.is_none();
     let mut pts: Vec<(f32, f32)> = l.drawn().into_iter().map(|p| d.view.px(p)).collect();
@@ -2576,7 +2612,7 @@ pub(crate) fn detail_line(d: &mut Drawing, m: &Model, l: &DetailLine) {
         pts.pop();
     }
     let [r, g, b] = st.color;
-    d.stroke(pts, st.pen, Rgb(r, g, b), dash, closed);
+    d.styled(m, st, pts, closed);
     // Its centre marks: a cross 3 mm across on paper, solid.
     if l.centre_mark {
         let arm = d.px((1.5 * sheet::DENSITY) as f32);
@@ -2616,6 +2652,23 @@ fn lines_at(m: &Model, key: Id, id: Id, at: P2, reach: f64, pattern: bool) -> Ve
     // A window round the point, 10 px to `reach`, drawn without the view's own linework (an edge drawn unseen is still one).
     let scale = 10.0 / reach.max(1.0);
     let view = View { scale, cx: at.0, cy: at.1, width: 1000, height: 1000 };
+    if !pattern {
+        let centerlines: Option<Vec<Vec<P2>>> = match m.elements.get(id).filter(|e| m.annotation_in(e, key)) {
+            Some(Element::DetailLine(l)) => Some(vec![l.curve.points()]),
+            Some(Element::FilledRegion(r)) => Some(r.sketch.iter().map(|l| l.points()).collect()),
+            _ => None,
+        };
+        if let Some(lines) = centerlines {
+            let mut out: Vec<_> = lines
+                .iter()
+                .flat_map(|pts| pts.windows(2))
+                .map(|w| (geom::dist_to_segment(at, w[0], w[1]) * scale, w[0], w[1]))
+                .filter(|(d, ..)| *d <= 10.5)
+                .collect();
+            out.sort_by(|a, b| a.0.total_cmp(&b.0));
+            return out;
+        }
+    }
     let bare;
     let m = match crate::graphics::graphics_of(m, key).filter(|g| !g.linework.is_empty()) {
         Some(_) => {
@@ -2669,7 +2722,12 @@ fn linework(d: &mut Drawing, m: &Model, items: &[crate::graphics::Linework]) {
         let Some(id) = m.elements.id(l.element) else { continue };
         let style = l.style.as_ref().and_then(|n| m.line_styles.get(n)).map(|st| {
             let dash = st.pattern.as_ref().and_then(|p| m.line_patterns.get(p)).and_then(|p| p.dash(px_per_mm));
-            (st.pen, Rgb(st.color[0], st.color[1], st.color[2]), dash)
+            EdgeStyle {
+                pen: st.pen,
+                color: Rgb(st.color[0], st.color[1], st.color[2]),
+                dash,
+                pattern: st.pattern.as_ref().and_then(|n| m.line_patterns.get(n)).filter(|p| !p.is_dash()).cloned(),
+            }
         });
         if l.style.is_some() && style.is_none() {
             continue;
@@ -2679,7 +2737,7 @@ fn linework(d: &mut Drawing, m: &Model, items: &[crate::graphics::Linework]) {
         if len < 1e-3 {
             continue;
         }
-        edges.entry(id).or_default().push(Edge { a, u: (b - a) * (1.0 / len), len, style });
+        edges.entry(id).or_default().push(Edge { a, u: (b - a) * (1.0 / len), len, style, k: px_per_mm });
     }
     if edges.is_empty() {
         return;
@@ -2697,7 +2755,27 @@ fn linework(d: &mut Drawing, m: &Model, items: &[crate::graphics::Linework]) {
             pieces = pieces.into_iter().flat_map(|(prim, pen)| along(prim, pen, edge)).collect();
         }
         for (prim, pen) in pieces {
-            keep(d, prim, owner, part, pen);
+            let pattern = mine
+                .iter()
+                .rev()
+                .find(|edge| {
+                    let Prim::Line { pts, .. } = &prim else { return false };
+                    pts.iter().all(|&p| {
+                        let p = pt(p) - edge.a;
+                        p.cross(edge.u).abs() <= 1.0 && p.dot(edge.u) >= -0.01 && p.dot(edge.u) <= edge.len + 0.01
+                    })
+                })
+                .and_then(|edge| {
+                    let style = edge.style.as_ref()?;
+                    Some((style.pattern.as_ref()?, style.color, edge.k))
+                });
+            if let (Some((pattern, color, k)), Prim::Line { pts, .. }, Some(pen)) = (pattern, &prim, pen) {
+                for graphic in pattern.geometry(pts, k, d.width(pen), color) {
+                    keep(d, graphic.prim, owner, Part::LinePattern, graphic.weighted.then_some(pen));
+                }
+            } else {
+                keep(d, prim, owner, part, pen);
+            }
         }
     }
 }
@@ -2707,14 +2785,22 @@ struct Edge {
     a: P2,
     u: P2,
     len: f64,
-    style: Option<(Pen, Rgb, Option<Vec<f32>>)>,
+    style: Option<EdgeStyle>,
+    k: f32,
+}
+
+struct EdgeStyle {
+    pen: Pen,
+    color: Rgb,
+    dash: Option<Vec<f32>>,
+    pattern: Option<crate::lines::LinePattern>,
 }
 
 /// The line `prim`, split where `edge` begins and ends along it: the pieces on the edge in its style (gone, when it is
 /// unseen), the rest as they were. A line off the edge comes back whole.
 fn along(prim: Prim, pen: Option<Pen>, edge: &Edge) -> Vec<(Prim, Option<Pen>)> {
     let Prim::Line { pts, width, color, dash, closed } = &prim else { return vec![(prim, pen)] };
-    let Edge { a, u, len, style } = edge;
+    let Edge { a, u, len, style, .. } = edge;
     // Each piece of the line, marked when it lies on the edge.
     let mut runs: Vec<(bool, Vec<(f32, f32)>)> = Vec::new();
     let mut put = |on: bool, p: P2, q: P2| {
@@ -2751,7 +2837,9 @@ fn along(prim: Prim, pen: Option<Pen>, edge: &Edge) -> Vec<(Prim, Option<Pen>)> 
     runs.into_iter()
         .filter_map(|(on, run)| match (on, style) {
             (false, _) => Some((Prim::Line { pts: run, width: *width, color: *color, dash: dash.clone(), closed: false }, pen)),
-            (true, Some((p, c, k))) => Some((Prim::Line { pts: run, width: *width, color: *c, dash: k.clone(), closed: false }, Some(*p))),
+            (true, Some(EdgeStyle { pen: p, color: c, dash: k, .. })) => {
+                Some((Prim::Line { pts: run, width: *width, color: *c, dash: k.clone(), closed: false }, Some(*p)))
+            }
             (true, None) => None,
         })
         .collect()
