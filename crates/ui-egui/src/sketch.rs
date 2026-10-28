@@ -3,6 +3,8 @@
 //! (`bimcraft_core::sketch`) or names what's wrong; the lines it names are drawn in the error colour until the sketch
 //! changes. A line the element kept from its last sketch keeps its id and GUID; a new one gets them at Finish.
 
+use bimcraft_i18n::msg;
+
 use std::collections::BTreeSet;
 
 use bimcraft_core::geom::{self, P2};
@@ -78,12 +80,12 @@ impl Sketch {
     /// What the contextual tab calls it.
     pub fn title(&self) -> &'static str {
         match self.of {
-            Of::Floor(_) => "Create Floor Boundary",
-            Of::Ceiling(_) => "Create Ceiling Boundary",
+            Of::Floor(_) => msg!("Create Floor Boundary"),
+            Of::Ceiling(_) => msg!("Create Ceiling Boundary"),
             Of::Roof(_) => "Create Roof Footprint",
-            Of::Shaft(_) => "Create Shaft Opening Sketch",
-            Of::Region { masking: false, .. } => "Create Filled Region Boundary",
-            Of::Region { masking: true, .. } => "Create Masking Region Boundary",
+            Of::Shaft(_) => msg!("Create Shaft Opening Sketch"),
+            Of::Region { masking: false, .. } => msg!("Create Filled Region Boundary"),
+            Of::Region { masking: true, .. } => msg!("Create Masking Region Boundary"),
             Of::Edit(_) => "Edit Boundary",
         }
     }
@@ -623,7 +625,7 @@ impl BimApp {
         let drawn = ui.scope(|ui| {
             panel(ui, "Mode", |ui| {
                 if sketching {
-                    let tip = "Finish Edit Mode: the lines, closed into loops, become the outline and its holes";
+                    let tip = msg!("Finish Edit Mode: the lines, closed into loops, become the outline and its holes");
                     if big_button(ui, Icon::Check, "Finish Edit Mode", false, tip).clicked() {
                         self.finish_sketch();
                     }
@@ -649,14 +651,18 @@ impl BimApp {
     pub(crate) fn sketch_starters(&mut self, ui: &mut Ui) {
         let Some(level) = self.plan_level() else { return };
         let (of, label, tip) = match self.tool {
-            Tool::Floor => (Of::Floor(level), "Boundary Line", "Boundary Line: sketch the floor's outline, and any openings in it"),
-            Tool::Ceiling => (Of::Ceiling(level), "Sketch Ceiling", "Sketch Ceiling: sketch the ceiling's outline, and any openings in it"),
+            Tool::Floor => {
+                (Of::Floor(level), msg!("Boundary Line"), msg!("Boundary Line: sketch the floor's outline, and any openings in it"))
+            }
+            Tool::Ceiling => {
+                (Of::Ceiling(level), msg!("Sketch Ceiling"), msg!("Sketch Ceiling: sketch the ceiling's outline, and any openings in it"))
+            }
             Tool::Roof => (
                 Of::Roof(level),
                 "Boundary Line",
-                "Boundary Line: sketch the roof's footprint, on the level above, and any courtyards in it",
+                msg!("Boundary Line: sketch the roof's footprint, on the level above, and any courtyards in it"),
             ),
-            Tool::Shaft(_) => (Of::Shaft(level), "Boundary Line", "Boundary Line: sketch the shaft opening's outline"),
+            Tool::Shaft(_) => (Of::Shaft(level), "Boundary Line", msg!("Boundary Line: sketch the shaft opening's outline")),
             _ => return,
         };
         panel(ui, "Draw", |ui| {
@@ -698,10 +704,20 @@ impl BimApp {
 
     /// Annotate's Region panel: Filled Region, Masking Region, sketched in the plan on screen.
     pub(crate) fn region_panel(&mut self, ui: &mut Ui) {
-        panel(ui, "Region", |ui| {
+        panel(ui, msg!("Region"), |ui| {
             for (icon, label, tip, masking) in [
-                (Icon::FilledRegion, "Filled Region", "Filled Region (FR): sketch an area filled with a pattern, in this view", false),
-                (Icon::MaskingRegion, "Masking Region", "Masking Region: sketch an area that hides what's under it, in this view", true),
+                (
+                    Icon::FilledRegion,
+                    msg!("Filled Region"),
+                    msg!("Filled Region (FR): sketch an area filled with a pattern, in this view"),
+                    false,
+                ),
+                (
+                    Icon::MaskingRegion,
+                    msg!("Masking Region"),
+                    msg!("Masking Region: sketch an area that hides what's under it, in this view"),
+                    true,
+                ),
             ] {
                 let on = matches!(self.sketch.as_ref().map(|s| s.of), Some(Of::Region { masking: m, .. }) if m == masking);
                 if big_button(ui, icon, label, on, tip).clicked()
@@ -719,10 +735,12 @@ impl BimApp {
         Some(match &self.tool {
             Tool::SketchLine(_) if self.shape() != draw::Shape::Line => return self.shape_prompt(),
             Tool::SketchLine(chain) if chain.is_empty() => "Click where the line starts.",
-            Tool::SketchLine(_) => "Click the line's end; the next starts there. The first point again closes the loop; Esc stops.",
-            Tool::SketchPick => "Click a wall: a boundary line along it.",
+            Tool::SketchLine(_) => msg!("Click the line's end; the next starts there. The first point again closes the loop; Esc stops."),
+            Tool::SketchPick => msg!("Click a wall: a boundary line along it."),
             _ => {
-                "Pick sketch lines (a box picks several); drag a picked line's end to move it; Delete removes them. Finish Edit Mode when every loop is closed."
+                msg!(
+                    "Pick sketch lines (a box picks several); drag a picked line's end to move it; Delete removes them. Finish Edit Mode when every loop is closed."
+                )
             }
         })
     }

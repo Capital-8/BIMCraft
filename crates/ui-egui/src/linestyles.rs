@@ -2,6 +2,8 @@
 //! patterns (dashes, dots and spaces, mm on paper), on two tabs of one draft, applied as one undo step (OK and Apply), or
 //! dropped (Cancel).
 
+use bimcraft_i18n::msg;
+
 use std::collections::{BTreeMap, BTreeSet};
 
 use bimcraft_core::engine::Session;
@@ -21,7 +23,7 @@ use crate::style::{ERROR_HEIGHT, boxed_text, dialog_room, dialog_row, pal};
 use crate::{BimApp, Status};
 
 /// The dialog's tabs.
-const TABS: [&str; 2] = ["Styles", "Patterns"];
+const TABS: [&str; 2] = [msg!("Styles"), "Patterns"];
 
 /// A pattern as edited: the name it had (none, new), the name it has, its segments.
 struct PatternRow {
@@ -165,7 +167,7 @@ fn styles_tab(ui: &mut Ui, d: &mut LineStylesDialog, below: f32) {
     let mut delete = None;
     ScrollArea::vertical().max_height(dialog_room(ui, below + dialog_row(ui))).show(ui, |ui| {
         Grid::new("line-styles").striped(true).num_columns(5).show(ui, |ui| {
-            for h in ["Name", "Line Weight", "Colour", "Pattern", ""] {
+            for h in ["Name", msg!("Line Weight"), msg!("Colour"), "Pattern", ""] {
                 ui.label(RichText::new(t(h)).strong());
             }
             ui.end_row();
@@ -419,7 +421,7 @@ impl BimApp {
 
 /// The Linework tool's choices besides the line styles: hide the edge, or put it back as its category draws it.
 pub(crate) const INVISIBLE: &str = "<Invisible lines>";
-pub(crate) const BY_CATEGORY: &str = "<By Category>";
+pub(crate) const BY_CATEGORY: &str = msg!("<By Category>");
 
 impl BimApp {
     /// The Linework tool's Options Bar: the style the edge clicked takes, hidden, or back by category.
