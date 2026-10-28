@@ -2224,9 +2224,11 @@ fn text_notes_go_where_clicked_in_plans_sections_and_sheets() {
     press(&mut h, "Annotate");
     press(&mut h, "Text");
     assert!(h.query_by_label("Modify | Place Text").is_some());
-    // With nothing typed, a click says what's missing.
+    // With nothing typed in the Options Bar, a click opens the note on the canvas; left empty, it makes nothing.
     click(&mut h, P2(2000.0, 2000.0));
-    assert!(ids(&h, "text").is_empty() && h.state().status.error);
+    assert!(h.state().note_edit.is_some());
+    key(&mut h, Key::Escape);
+    assert!(ids(&h, "text").is_empty() && h.state().note_edit.is_none());
     type_into(&mut h, "Text:", "Tiled floor");
     click(&mut h, P2(2000.0, 2000.0));
     let notes = ids(&h, "text");
@@ -5190,6 +5192,7 @@ mod lineweights;
 mod links;
 mod look;
 mod mep;
+mod notes;
 mod objectstyles;
 mod patterns;
 mod planviews;

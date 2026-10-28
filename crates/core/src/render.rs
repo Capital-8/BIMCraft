@@ -820,7 +820,7 @@ pub fn sketch(m: &Model, view: View, id: Id, e: &Element) -> Drawing {
     match e {
         Element::Dimension(dm) => dimension(&mut d, m, dm),
         Element::Tag(t) => tag(&mut d, m, t),
-        Element::Text(n) => note(&mut d, n),
+        Element::Text(n) => note(&mut d, m, n),
         Element::DetailLine(l) => detail_line(&mut d, m, l),
         Element::FilledRegion(r) => filled_region(&mut d, m, r),
         Element::DetailGroup(g) => detail_group(&mut d, m, g),
@@ -1252,7 +1252,7 @@ fn section_in(m: &Model, id: impl Key, view: View, k: f32, n: f64, picture: Opti
     for (&nid, e) in m.elements.iter().filter(|(id, _)| look.shows(**id)) {
         d.owner = Some(nid);
         match e {
-            Element::Text(n) if m.same(n.view, id) => note(&mut d, n),
+            Element::Text(n) if m.same(n.view, id) => note(&mut d, m, n),
             Element::DetailLine(l) if m.same(l.view, id) => detail_line(&mut d, m, l),
             Element::DetailGroup(g) if m.same(g.view, id) => detail_group(&mut d, m, g),
             Element::RepeatingDetail(r) if m.same(r.view, id) => r.groups().iter().for_each(|g| detail_group(&mut d, m, g)),
@@ -1754,7 +1754,7 @@ fn draw_plan(m: &Model, plan: impl Key, view: View, up: bool, k: f32, n: f64, ti
             {
                 tag(&mut d, m, t)
             }
-            Element::Text(n) if m.annotation_in(e, key) && inside(n.at) => note(&mut d, n),
+            Element::Text(n) if m.annotation_in(e, key) && inside(n.at) => note(&mut d, m, n),
             Element::DetailLine(l) if m.annotation_in(e, key) => detail_line(&mut d, m, l),
             Element::DetailGroup(g) if m.annotation_in(e, key) => detail_group(&mut d, m, g),
             Element::RepeatingDetail(r) if m.annotation_in(e, key) => r.groups().iter().for_each(|g| detail_group(&mut d, m, g)),
@@ -2776,27 +2776,90 @@ pub(crate) fn detail_group(d: &mut Drawing, m: &Model, g: &crate::groups::Detail
     for e in &members {
         match e {
             Element::DetailLine(l) => detail_line(d, m, l),
-            Element::Text(n) => note(d, n),
+            Element::Text(n) => note(d, m, n),
             _ => {}
         }
     }
 }
 
-/// A text note: its lines down from its top left corner, turned as it is, and its leader with an
-/// arrow at its end.
-pub(crate) fn note(d: &mut Drawing, n: &Note) {
-    let h = d.px((n.size * sheet::DENSITY) as f32);
-    // Counter-clockwise in the view, clockwise on screen.
-    let a = -(n.angle.to_radians() as f32);
-    let (sin, cos) = a.sin_cos();
-    let at = d.view.px(n.at);
-    let turn = |(x, y): (f32, f32)| (at.0 + x * cos - y * sin, at.1 + x * sin + y * cos);
-    for (i, line) in n.text.lines().enumerate() {
-        let mid = turn((font::width(line, h) / 2.0, h / 2.0 + i as f32 * h * 1.6));
-        d.text_turned(line, mid, h, a, INK);
+/// A text note's type, laid out: what its drawing and a front end's editor read.
+pub fn note_layout(m: &Model, n: &Note) -> crate::text::Layout {
+    let t = m.text_types.get(&n.type_name).cloned().unwrap_or_default();
+    crate::text::layout(&t, &n.text, &crate::text::styles(&t, &n.text, n.override_format, &n.runs))
+}
+
+/// Where a note's layout lands in a drawing: the pixel of its top left, the pixels a mm of paper is, and how far it is
+/// turned, radians clockwise on screen.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct NoteFrame {
+    pub at: (f32, f32),
+    pub k: f32,
+    pub angle: f32,
+}
+
+impl NoteFrame {
+    /// Point `(x, y)` of the layout (mm, y down) as a pixel of the drawing.
+    pub fn px(&self, (x, y): (f64, f64)) -> (f32, f32) {
+        let (sin, cos) = self.angle.sin_cos();
+        let (x, y) = (x as f32 * self.k, y as f32 * self.k);
+        (self.at.0 + x * cos - y * sin, self.at.1 + x * sin + y * cos)
+    }
+
+    /// Pixel `p` of the drawing as a point of the layout.
+    pub fn mm(&self, p: (f32, f32)) -> (f64, f64) {
+        let (sin, cos) = self.angle.sin_cos();
+        let (dx, dy) = (p.0 - self.at.0, p.1 - self.at.1);
+        let k = self.k.max(f32::EPSILON);
+        (f64::from((dx * cos + dy * sin) / k), f64::from((-dx * sin + dy * cos) / k))
+    }
+}
+
+impl Drawing {
+    /// Where note `n` lands in this drawing.
+    pub fn note_frame(&self, n: &Note) -> NoteFrame {
+        // Counter-clockwise in the view, clockwise on screen.
+        NoteFrame { at: self.view.px(n.at), k: self.px(sheet::DENSITY as f32), angle: -(n.angle.to_radians() as f32) }
+    }
+}
+
+/// A text note: its lines down from its top left corner in its type's lettering, turned as it is, its border when its
+/// type has one, and its leader with an arrow at its end.
+pub(crate) fn note(d: &mut Drawing, m: &Model, n: &Note) {
+    let t = m.text_types.get(&n.type_name).cloned().unwrap_or_default();
+    let layout = note_layout(m, n);
+    let frame = d.note_frame(n);
+    let f = |(x, y): (f32, f32)| frame.px((f64::from(x), f64::from(y)));
+    let color = Rgb(t.color[0], t.color[1], t.color[2]);
+    let k = frame.k;
+    let part = std::mem::replace(&mut d.part, Part::Text);
+    let drawn = layout.drawn();
+    for letter in &drawn.fill {
+        d.push(Prim::Fill { rings: letter.iter().map(|r| r.iter().copied().map(f).collect()).collect(), color });
+    }
+    for (pts, width) in drawn.strokes {
+        d.push(Prim::Line { pts: pts.into_iter().map(f).collect(), width: (width * k).max(1.0), color, dash: None, closed: false });
+    }
+    for (a, b) in drawn.underlines {
+        d.push(Prim::Line {
+            pts: vec![frame.px(a), frame.px(b)],
+            width: (drawn.underline_width * k).max(1.0),
+            color,
+            dash: None,
+            closed: false,
+        });
+    }
+    d.part = part;
+    let off = if t.border { t.border_offset } else { 0.4 * t.size };
+    if t.border {
+        let [l, top, r, b] = layout.frame(t.border_offset);
+        let ring = [(l, top), (r, top), (r, b), (l, b)].into_iter().map(|p| frame.px(p)).collect();
+        d.stroke(ring, t.border_pen, color, None, true);
     }
     if let Some(to) = n.leader {
-        let (from, to) = (turn((-h * 0.4, h / 2.0)), d.view.px(to));
+        // From the side nearer where it points.
+        let to = d.view.px(to);
+        let right = frame.mm(to).0 > layout.width / 2.0;
+        let from = frame.px((if right { layout.width + off } else { -off }, t.size / 2.0));
         d.stroke(vec![from, to], Pen::PROJECTION, INK, None, false);
         arrow(d, from, to);
     }

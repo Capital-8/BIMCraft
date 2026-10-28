@@ -24,10 +24,9 @@ use crate::massing;
 use crate::model::{
     CEILING_HEIGHT, CadImport, Ceiling, CeilingType, Column, ColumnType, Component, DEFAULT_HEIGHT, DimKind, Dimension, Element, Extrusion,
     Face, Facing, Floor, FloorType, Grid, Guid, Id, Key, Landing, Layer, Level, Line, Location, MAX_COORD, MAX_POINTS, MAX_SLOPE, MAX_TEXT,
-    Mass, Model, NOTE_SIZE, Note, Opening, OpeningType, PARAMETER_CATEGORIES, ParameterKind, Pattern, PlanView, PointCloud,
-    ProjectParameter, RAMP_SLOPE, RAMP_WIDTH, RISER, Railing, RailingType, Ramp, Reference, Roof, RoofType, Room, RoomSeparator,
-    STAIR_WIDTH, Schedule, Section, SectionBox, Shaft, Sheet, Side, Spot, Stair, TOL, TREAD, Tag, View3D, Viewport, Wall, WallType,
-    heading, paper,
+    Mass, Model, Note, Opening, OpeningType, PARAMETER_CATEGORIES, ParameterKind, Pattern, PlanView, PointCloud, ProjectParameter,
+    RAMP_SLOPE, RAMP_WIDTH, RISER, Railing, RailingType, Ramp, Reference, Roof, RoofType, Room, RoomSeparator, STAIR_WIDTH, Schedule,
+    Section, SectionBox, Shaft, Sheet, Side, Spot, Stair, TOL, TREAD, Tag, View3D, Viewport, Wall, WallType, heading, paper,
 };
 use crate::paint;
 use crate::phasing;
@@ -530,11 +529,32 @@ pub static ALL: &[Command] = &[
         "text",
         ui_msg!("Text"),
         &["TX"],
-        "{text, at: [x, y], view?, size?, angle?, leader?: [x, y]} a text note, its first line's top left at `at`, in a view \
-         by name or id: a level's plan (the lowest by default; `at` in plan mm), a section or an elevation (`at` along its \
-         line from its start, and up), or a sheet by number (`at` in paper mm). `size` is its capitals' height on paper, \
-         mm (2.5); `angle` degrees counter-clockwise; with `leader`, a line to that point. Lines break at \\n",
+        "{text, at: [x, y], view?, type?, angle?, leader?: [x, y], override_format?, runs?: [{from, to, bold?, italic?, \
+         underline?}, …]} a text note, its first line's top left at `at`, in a view by name or id: a level's plan (the lowest \
+         by default; `at` in plan mm), a section or an elevation (`at` along its line from its start, and up), or a sheet by \
+         number (`at` in paper mm). Lettered as its text `type` says (2.5mm unless told; `text_type` lists and makes them: \
+         its font, its size, its border), turned `angle` degrees counter-clockwise; with `leader`, a line to that point. \
+         Lines break at \\n. With `override_format`, each run makes characters `from` up to `to` (counted in characters, a \
+         line break one) bold, italic or underlined (true), or not (false), whatever the type says; they stay when the \
+         type changes, and `modify` with a new `text` alone keeps them on what didn't change. Font and size are the type's",
         text_note,
+    ),
+    edit(
+        "text_type",
+        "Text Types",
+        &[],
+        "{name?, font?, size?, bold?, italic?, underline?, width_factor?, color?, border?, border_offset?, border_pen?, \
+         like?, rename?, delete?: true} a text type of the project's: its `font`, any the system has, or one BIMCraft carries \
+         (IBM Plex Sans, IBM Plex Mono, BIMCraft Lettering: single-stroke capitals); Arial, the default, letters on any system \
+         (where it isn't installed, Liberation Sans, Arimo, Helvetica or the like stands in, else IBM Plex Sans), and a font a \
+         file names that this system hasn't is stood in for likewise. Its capitals' height on paper (`size`, mm, 2.5 for a new \
+         one), bold, italic and underlined or not (a family's own bold and italic faces where it has them), `width_factor` (1: \
+         as the font draws it), its colour (\"#rrggbb\" or [r, g, b], black unless told), and whether a border is drawn round \
+         its notes, `border_offset` mm on paper out from their text (where a leader starts too; 1), in pen `border_pen` (0 to \
+         16; 1). A new one starts as `like` says, or as 2.5mm Arial. A project starts with 2.5mm, 3.5mm and 5mm. `rename` \
+         renames it, its notes following; `delete` takes it away while no note is of it. Without `name`, it lists every type, \
+         the fonts this system has, and the font that letters each type here (`drawn_with`)",
+        text_type,
     ),
     edit(
         "spot",
@@ -1819,8 +1839,9 @@ pub fn element_json(m: &Model, id: Id) -> Value {
             extra.insert("area_m2".into(), json!(region.as_ref().map_or(0.0, |g| m2(g.area()))));
             extra.insert("perimeter_m".into(), json!(region.as_ref().map_or(0.0, |g| (g.perimeter() / 10.0).round() / 100.0)));
         }
-        Element::Text(_) => {
+        Element::Text(n) => {
             extra.insert("level".into(), json!(m.level_of(e)));
+            extra.insert("size".into(), json!(m.text_types.get(&n.type_name).map(|t| t.size)));
         }
         Element::DetailGroup(g) => {
             extra.insert("members".into(), json!(m.detail_groups.get(&g.type_name).map_or(0, |t| t.members.len())));
@@ -4603,20 +4624,126 @@ fn tag(s: &mut Session, p: &Value) -> R {
 
 fn text_note(s: &mut Session, p: &Value) -> R {
     let c = "text";
+    if p.get("size").is_some() {
+        return Err(bad(c, "a note's size is its text type's: give `type` (`text_type` lists them, and makes one of a size)"));
+    }
+    only(c, p, &["text", "at", "view", "type", "angle", "leader", "override_format", "runs"])?;
     let m = &s.model;
-    let text = string(c, p, "text")?.ok_or_else(|| bad(c, "`text` is required"))?;
+    let text = note_text(c, p)?.ok_or_else(|| bad(c, "`text` is required"))?;
     let at = point_req(c, p, "at")?;
     let view = view_param(c, m, p, true)?;
+    let type_name = match name_param(c, p, "type")? {
+        Some(n) => n,
+        None => crate::text::default_type(&m.text_types).cloned().ok_or_else(|| bad(c, "the project has no text type; make one first"))?,
+    };
+    let runs = match p.get("runs") {
+        v if absent(v) => Vec::new(),
+        Some(v) => serde_json::from_value(v.clone()).map_err(|e| bad(c, format!("`runs`: {e}")))?,
+        None => Vec::new(),
+    };
     let n = Note {
         view: m.guid(view),
         at,
         text,
-        size: num(c, p, "size")?.unwrap_or(NOTE_SIZE),
+        type_name,
+        size: None,
         angle: num(c, p, "angle")?.unwrap_or(0.0),
         leader: point_opt(c, p, "leader")?,
+        override_format: flag(c, p, "override_format")?,
+        runs,
     };
     let id = s.model_mut().insert(Element::Text(n));
     Ok(json!({"id": id}))
+}
+
+/// A note's `text`: up to [`crate::text::MAX_NOTE`] characters.
+fn note_text(c: &str, p: &Value) -> Result<Option<String>, String> {
+    match p.get("text") {
+        v if absent(v) => Ok(None),
+        Some(Value::String(t)) if t.chars().count() <= crate::text::MAX_NOTE => Ok(Some(t.clone())),
+        Some(v) => Err(bad(c, format!("`text` must be text of at most {} characters, got {v}", crate::text::MAX_NOTE))),
+        None => Ok(None),
+    }
+}
+
+fn text_type(s: &mut Session, p: &Value) -> R {
+    let c = "text_type";
+    let keys = ["font", "size", "bold", "italic", "underline", "width_factor", "color", "border", "border_offset", "border_pen"];
+    only(c, p, &[&["name", "like", "rename", "delete"][..], &keys[..]].concat())?;
+    let Some(name) = name_param(c, p, "name")? else {
+        // What letters each type here: its font, or what stands in for it.
+        let drawn: serde_json::Map<String, Value> =
+            s.model.text_types.iter().map(|(n, t)| (n.clone(), json!(crate::text::resolve(&t.font, false, false).family()))).collect();
+        return Ok(json!({"types": s.model.text_types, "fonts": crate::text::families(), "drawn_with": drawn}));
+    };
+    let m = s.model_mut();
+    if flag(c, p, "delete")? {
+        if m.text_types.remove(&name).is_none() {
+            return Err(bad(c, format!("there's no text type `{name}`")));
+        }
+        if let Some((id, _)) = m.elements.iter().find(|(_, e)| matches!(e, Element::Text(n) if n.type_name == name)) {
+            return Err(bad(c, format!("note {id} is of `{name}`; give it another type first")));
+        }
+        return Ok(json!({"deleted": name}));
+    }
+    let mut t = match (m.text_types.get(&name), name_param(c, p, "like")?) {
+        (Some(t), _) => t.clone(),
+        (None, Some(like)) => {
+            m.text_types.get(&like).cloned().ok_or_else(|| bad(c, format!("there's no text type `{like}` to start from")))?
+        }
+        (None, None) => crate::text::TextType::default(),
+    };
+    if let Some(f) = name_param(c, p, "font")? {
+        // A font the type has already stays, though this system hasn't it (a project from another).
+        if !f.trim().eq_ignore_ascii_case(t.font.trim()) {
+            t.font = crate::text::known(&f).ok_or_else(|| {
+                let all = crate::text::families();
+                let word = f.split_whitespace().next().unwrap_or_default().to_lowercase();
+                let like: Vec<&str> = all.iter().map(String::as_str).filter(|n| n.to_lowercase().contains(&word)).take(12).collect();
+                let some: Vec<&str> = if like.is_empty() { all.iter().map(String::as_str).take(12).collect() } else { like };
+                let n = all.len();
+                bad(
+                    c,
+                    format!(
+                        "this system has no font `{f}` (it has {n}, such as: {}); `text_type` without `name` lists them",
+                        some.join(", ")
+                    ),
+                )
+            })?;
+        }
+    }
+    for (key, slot) in [("size", &mut t.size), ("width_factor", &mut t.width_factor), ("border_offset", &mut t.border_offset)] {
+        if let Some(x) = num(c, p, key)? {
+            *slot = x;
+        }
+    }
+    for (key, slot) in [("bold", &mut t.bold), ("italic", &mut t.italic), ("underline", &mut t.underline), ("border", &mut t.border)] {
+        if !absent(p.get(key)) {
+            *slot = flag(c, p, key)?;
+        }
+    }
+    if let Some(v) = p.get("color").filter(|v| !v.is_null()) {
+        t.color = colour(v).ok_or_else(|| bad(c, format!("`color` is \"#rrggbb\" or [r, g, b], each 0 to 255, not {v}")))?;
+    }
+    if let Some(v) = p.get("border_pen").filter(|v| !v.is_null()) {
+        t.border_pen = serde_json::from_value(v.clone()).map_err(|e| bad(c, format!("`border_pen`: {e}")))?;
+    }
+    let name = match name_param(c, p, "rename")? {
+        Some(to) if to != name => {
+            if m.text_types.contains_key(&to) {
+                return Err(bad(c, format!("there's already a text type `{to}`")));
+            }
+            m.text_types.remove(&name);
+            rename_entry(m, &LibKind::TextType, &name, &to);
+            to
+        }
+        _ => name,
+    };
+    t.check(&name).map_err(|e| bad(c, e))?;
+    if m.text_types.get(&name) != Some(&t) {
+        m.text_types.insert(name.clone(), t.clone());
+    }
+    Ok(json!({"name": name, "type": t}))
 }
 
 fn spot(s: &mut Session, p: &Value) -> R {
@@ -6494,6 +6621,13 @@ fn modify(s: &mut Session, p: &Value) -> R {
             }
         }
         let mut e2 = serde_json::from_value::<Element>(v).map_err(|e| bad(c, format!("element {id}: {e}")))?;
+        // A note's new text keeps its runs on what didn't change, unless it is given runs of its own.
+        if let (Element::Text(old), Element::Text(n)) = (e, &mut e2)
+            && old.text != n.text
+            && !fields.contains_key("runs")
+        {
+            n.runs = crate::text::remap(&old.text, &n.text, &old.runs);
+        }
         graphics::check_followed(m, e, &e2).map_err(|err| bad(c, format!("element {id}: {err}")))?;
         // A wall put on another of its lines stays where it is: its line moves across it instead.
         if let (Element::Wall(old), Element::Wall(w)) = (e, &mut e2)

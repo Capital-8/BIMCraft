@@ -193,7 +193,7 @@ fn rows(category: &str) -> &'static [Row] {
         }
         "text" => &[
             ("Text", "text", "Text", Text),
-            ("Graphics", "size", msg!("Text Size (mm)"), Number),
+            ("Text", "override_format", msg!("Override Formatting"), Flag),
             ("Other", "angle", msg!("Rotation (°)"), Number),
             ("Other", "at", "Location", Point),
         ],
@@ -875,6 +875,10 @@ impl BimApp {
         if let Some((category, name, elements)) = self.type_subject() {
             if category == "region" {
                 self.fill_patterns_dialog = Some(crate::fillpatterns::FillPatternsDialog::edit(&self.session.model, &name, elements));
+                return;
+            }
+            if category == "text" {
+                self.text_type_dialog = Some(crate::notes::TextTypeDialog::new(&self.session.model, name, elements));
                 return;
             }
             let pair = if category == "component" {

@@ -319,7 +319,7 @@ pub fn draw(m: &Model, id: impl Key) -> Option<Drawing> {
             && n.view == guid
         {
             d.own(Some(nid));
-            render::note(&mut d, n);
+            render::note(&mut d, m, n);
         }
         if let Element::DetailLine(l) = e
             && l.view == guid

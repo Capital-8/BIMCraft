@@ -108,7 +108,15 @@ impl BimApp {
         if let Some(t) = &self.cut.texture {
             p.image(t.id(), rect, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
         }
-        paint(&p, Place::at(rect.min), &d, &self.selection, hovered, self.thin, &[]);
+        paint(&p, Place { hide: self.writing(), ..Place::at(rect.min) }, &d, &self.selection, hovered, self.thin, &[]);
+        // While a note is written here, the pointer is its editor's.
+        if self.writing_in(id) {
+            p.extend(crop);
+            p.extend(datum);
+            self.note_canvas(ui, &response, &p, Place::at(rect.min), &d);
+            self.nav_bar(ui, rect, id);
+            return;
+        }
         p.extend(crop);
         // A drag draws a selection box: it takes what the drawing over the picture has in it, and
         // what the picture shows.
@@ -132,6 +140,13 @@ impl BimApp {
             let p = view.mm(q);
             P2((p.0 / 10.0).round() * 10.0, (p.1 / 10.0).round() * 10.0)
         };
+        // A double click on a note writes in it.
+        if response.double_clicked()
+            && let Some(note) = hovered.filter(|h| crate::notes::is_note(&model, *h))
+        {
+            self.edit_note(note);
+            return;
+        }
         match (clicked, &self.tool) {
             (Some(q), Tool::Modify) => {
                 let found = pick(&self.cut, q);

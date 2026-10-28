@@ -51,6 +51,7 @@ pub enum Kind {
     FillPattern,
     FilledRegionType,
     DetailGroup,
+    TextType,
 }
 
 impl Kind {
@@ -77,6 +78,7 @@ impl Kind {
             Kind::FillPattern => "fill pattern".into(),
             Kind::FilledRegionType => "filled region type".into(),
             Kind::DetailGroup => "detail group".into(),
+            Kind::TextType => "text type".into(),
         }
     }
 
@@ -101,6 +103,7 @@ impl Kind {
             "fill-pattern" => Kind::FillPattern,
             "filled-region-type" => Kind::FilledRegionType,
             "detail-group" => Kind::DetailGroup,
+            "text-type" => Kind::TextType,
             _ => Kind::Type(s.strip_prefix("type:")?.to_string()),
         })
     }
@@ -129,6 +132,7 @@ impl fmt::Display for Kind {
             Kind::FillPattern => f.write_str("fill-pattern"),
             Kind::FilledRegionType => f.write_str("filled-region-type"),
             Kind::DetailGroup => f.write_str("detail-group"),
+            Kind::TextType => f.write_str("text-type"),
         }
     }
 }
@@ -534,6 +538,7 @@ impl Model {
         add(Kind::FillPattern, &mut self.fill_patterns.keys());
         add(Kind::FilledRegionType, &mut self.region_types.keys());
         add(Kind::DetailGroup, &mut self.detail_groups.keys());
+        add(Kind::TextType, &mut self.text_types.keys());
         out
     }
 
@@ -925,6 +930,7 @@ impl crate::model::Element {
                 }
             }
             Element::CadImport(ci) => f(&Kind::Cad, &mut ci.cad),
+            Element::Text(n) => f(&Kind::TextType, &mut n.type_name),
             Element::Schedule(sc) => {
                 let mut fields: Vec<&mut String> =
                     sc.fields.iter_mut().map(|x| &mut x.name).chain(sc.sort.iter_mut().map(|x| &mut x.field)).collect();

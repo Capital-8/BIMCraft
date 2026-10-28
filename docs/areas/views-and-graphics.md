@@ -121,6 +121,37 @@ at most `MAX_LINEWORK` (2,000) edges, ends within `MAX_COORD`, and a line style 
 lines along all its edges in one pass (`render::linework`: the cost is the prims plus the edges, not a pass over every prim for
 each edge). A line style a view's linework uses can't be deleted, and an element's entries go with it.
 
+Text notes and text types (`text.rs`). A `Note` is drawn in one view, as a detail line is, and is of a text type
+(`Model::text_types`, library entries of `Kind::TextType`, so a file names a note's type by GUID and `rename_entry` follows a
+rename): Revit's font, size (its capitals' height on paper, mm), bold, italic, underline, width factor, colour, and a border
+`border_offset` mm on paper round its text in pen `border_pen`, from whose side nearer its end a leader starts. A project starts
+with 2.5mm, 3.5mm and 5mm in Arial; `text_type` makes, renames and deletes them (none in use). A type's font is a name:
+any font the system has, or one we carry (IBM Plex Sans, IBM Plex Mono, BIMCraft Lettering: `font.rs`'s single-stroke
+capitals). `text/system.rs` lists the system's fonts once (`system::index`): it looks through the folders Linux, Windows
+and macOS keep them in and reads each file only as far as its OpenType table directory and its `name`, `OS/2` and `head`
+tables (family, weight, italic, whether it varies its weight), from the public specification, every offset checked; a face
+is read whole (`system::load`, kept, up to `MAX_FONT`) only when a note is lettered in it. `text::resolve` turns a type's font
+and a character's bold and italic into a `Face`: ours by name; else the family; else its stand-ins (`system::substitutes`:
+Arial by Liberation Sans, Arimo, Helvetica, Nimbus Sans, DejaVu Sans…, Times New Roman and Courier New likewise); else Plex
+Sans. So Arial, the default, letters on any system, and a file naming a font this one hasn't opens (`TextType::check`
+takes any name) and draws with what stands in; the `text_type` command refuses a font the system can't letter, unless the
+type has it already. A family's own bold and italic faces are taken where it has them; else a variable face is set to
+`wght` 700, any other is made bold by its outline drawn round heavier (our lettering by heavier strokes), and italic by
+slanting it. A character a face hasn't is lettered from Plex Sans, then Plex Mono, then the system's wide fonts
+(`system::FALLBACKS`: Noto Sans CJK, Microsoft YaHei, PingFang…), else drawn as the lettering's question mark.
+`text::shape` reads a glyph's outline with `ttf-parser` once and keeps it. `text_type` without a name lists the fonts
+(`text::families`) and what letters each type here (`drawn_with`); Type Properties shows "drawn with" when that differs. A note may override bold, italic and underline on parts of itself: `override_format`
+lets its `runs` (character ranges, a line break one character) count, each setting any of the three either way, so a part
+stays bold, or not, whatever type the note gets. `modify` with new `text` alone keeps the runs on what didn't change
+(`text::remap`: the common start and end keep theirs, what came in takes the format before it). `text::layout` lays a note out
+in mm on paper (lines `LINE_PITCH` sizes apart, each character's place and width), which `render::note` draws (each letter a
+`Prim::Fill` of rings filled by the non-zero rule, our lettering and Plex Mono's bold as lines, underlines as lines; `Part::Text`)
+and which the desktop's editor reads for its caret, its selection and a click's place (`Layout::caret`, `boxes`, `index_at`;
+`Drawing::note_frame` turns layout mm into the drawing's pixels and back). The canvas fills a letter, holes and all, from
+`text::triangles` (strips between every corner's and crossing's height), kept by its points for the frames that draw it again.
+A file of format 7 has notes with a `size`: reading it gives each a type of that size (`Model::typed_notes`), and `Model::check`
+refuses a `size` left on one. A note holds up to `MAX_NOTE` (4,000) characters and `MAX_RUNS` (1,000) runs.
+
 Detail groups (`groups.rs`) are Revit's: `create_group` (GP) makes the detail lines, filled regions and text notes given,
 all of one view, into a group type (`Model::detail_groups`) holding them as `Member`s about the middle of them, in no
 view, and puts one `DetailGroup` element in their place. Members are parts (`HasPart`, `parts_now`): each has its own id

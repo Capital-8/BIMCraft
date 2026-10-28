@@ -251,8 +251,8 @@ const SEMIBOLD: &str = "plex-semibold";
 pub fn families() -> [FontFamily; 3] {
     [FontFamily::Proportional, FontFamily::Monospace, FontFamily::Name(SEMIBOLD.into())]
 }
-const PLEX_SANS: &[u8] = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/fonts/ibm-plex-sans/IBMPlexSans-Variable.ttf"));
-const PLEX_MONO: &[u8] = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/fonts/ibm-plex-mono/IBMPlexMono-Regular.ttf"));
+// The core's, which text types letter notes in: the window holds one copy.
+use bimcraft_core::text::{PLEX_MONO, PLEX_SANS};
 
 /// IBM Plex Sans (regular, and semibold as a family of its own) and Plex Mono first, egui's own faces behind them for the
 /// symbols Plex hasn't.

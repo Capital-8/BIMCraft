@@ -58,6 +58,7 @@ pub mod snap;
 pub mod stairs;
 pub mod step;
 pub mod styles;
+pub mod text;
 pub mod texture;
 pub mod units;
 pub mod view3d;
@@ -79,3 +80,5 @@ mod purge_tests;
 mod structure_tests;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod text_tests;
