@@ -2432,6 +2432,8 @@ fn dimension(d: &mut Drawing, m: &Model, dim: &Dimension) {
         DimKind::Aligned | DimKind::Linear => aligned(d, m, dim),
         DimKind::Angular => angular(d, m, dim),
         DimKind::Radial => radial(d, m, dim),
+        DimKind::Diameter => diameter(d, m, dim),
+        DimKind::ArcLength => arc_length(d, m, dim),
     }
 }
 
@@ -2495,6 +2497,49 @@ fn radial(d: &mut Drawing, m: &Model, dim: &Dimension) {
     let (x, y) = d.view.px(end);
     let w = font::width(&text, d.px(10.0)) / 2.0 + d.px(6.0);
     d.text(&text, (x + u.0 as f32 * w, y - u.1 as f32 * w), d.px(10.0), INK);
+}
+
+/// A diameter dimension: a line across a round element through its centre, toward `at`, arrows at the edge both sides,
+/// and the diameter past its end.
+fn diameter(d: &mut Drawing, m: &Model, dim: &Dimension) {
+    let Some(Ok((c, r))) = dim.refs.first().map(|x| m.reference_arc(x)) else { return };
+    let u = if dim.at.dist(c) > 0.0 { (dim.at - c).unit() } else { P2(1.0, 0.0) };
+    let (near, far) = (c + u * r, c - u * r);
+    let end = if dim.at.dist(c) > r { dim.at } else { near };
+    d.line(&[far, end], Pen::PROJECTION, INK, false);
+    let (a, b) = (d.view.px(near), d.view.px(far));
+    arrow(d, b, a);
+    arrow(d, a, b);
+    let text = format!("Ø {}", m.units.length(2.0 * r));
+    let (x, y) = d.view.px(end);
+    let w = font::width(&text, d.px(10.0)) / 2.0 + d.px(6.0);
+    d.text(&text, (x + u.0 as f32 * w, y - u.1 as f32 * w), d.px(10.0), INK);
+}
+
+/// An arc length dimension: an arc through `at` round the arc's centre, as far round as it sweeps, witness lines out
+/// along the radii from its ends, ticks where they cross, and its length outside its middle.
+fn arc_length(d: &mut Drawing, m: &Model, dim: &Dimension) {
+    let Some(Ok((o, radius, from, sweep))) = dim.refs.first().map(|x| m.reference_sweep(x)) else { return };
+    let r = dim.at.dist(o);
+    if r <= 0.0 {
+        return;
+    }
+    let px = f64::from(d.k) / d.view.scale;
+    let ray = |t: f64| P2(t.cos(), t.sin());
+    let n = ((sweep.abs() / 0.05).ceil() as u32).clamp(8, 720);
+    let line: Vec<P2> = (0..=n).map(|i| o + ray(from + sweep * f64::from(i) / f64::from(n)) * r).collect();
+    d.line(&line, Pen::PROJECTION, INK, false);
+    for t in [from, from + sweep] {
+        let u = ray(t);
+        // From just off the arc it measures to just past its line, whichever side of it the line lies.
+        let (a, b) = if r > radius { (radius + 3.0 * px, r + 4.0 * px) } else { (radius - 3.0 * px, r - 4.0 * px) };
+        d.line(&[o + u * a, o + u * b], Pen::PROJECTION, INK, false);
+        let (p, k) = (o + u * r, (u + u.perp()) * (3.0 * px));
+        d.line(&[p - k, p + k], Pen::HEAVY, INK, false);
+    }
+    let (text, mid) = (m.units.length(radius * sweep.abs()), ray(from + sweep / 2.0));
+    let clear = f64::from(font::width(&text, 10.0) / 2.0) * mid.0.abs() + 5.0 * mid.1.abs() + 4.0;
+    d.text(&text, d.view.px(o + mid * (r + clear * px)), d.px(10.0), INK);
 }
 
 /// Fill pattern `p` over `rings` (model mm; `pieces`, the same with their holes cut out, for a solid one) in `color`, its

@@ -658,7 +658,8 @@ pub struct Clearance {
 /// A dimension in a level's plan. Aligned: the distances between parallel references, along a
 /// line through `at` across them; between points, along the line through the first two; lines and points, square to the
 /// lines. Linear: the same, its line horizontal or vertical as `orient` says (its lines square to it). Angular: the angle between two references that meet, on the
-/// side of `at`, its arc through `at`. Radial: a round element's radius, its line toward `at`. It
+/// side of `at`, its arc through `at`. Radial: a round element's radius, its line toward `at`; diameter, across it through
+/// its centre. Arc length: how long an arc is along it, its line an arc through `at` round the same centre. It
 /// measures the model as it is, so it follows what it measures.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -677,13 +678,17 @@ pub struct Dimension {
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "snake_case")]
 pub enum DimKind {
     #[default]
     Aligned,
     Linear,
     Angular,
     Radial,
+    /// Across a round element, through its centre.
+    Diameter,
+    /// Along an arc: a curved wall's centre line or face, or a detail line's arc.
+    ArcLength,
 }
 
 /// Which way a linear dimension's line runs: horizontal, measuring east and west, or vertical, north and south.
@@ -4010,6 +4015,38 @@ impl Model {
         }
     }
 
+    /// The arc an arc length dimension measures along on `r`: its centre, its radius, the angle its start lies at from the
+    /// centre and how far it sweeps (radians, counter-clockwise positive). A curved wall's centre line or one of its faces,
+    /// or a detail line that is an arc.
+    pub fn reference_sweep(&self, r: &Reference) -> Result<(P2, f64, f64, f64), String> {
+        let what = "an arc length dimension measures along curved walls and arcs";
+        match self.elements.get(r.id) {
+            Some(Element::Wall(w)) => {
+                let axis = walls::Axis::of(w);
+                let Some((c, radius, a0, sweep)) = axis.arc() else { return Err(format!("wall {} is straight; {what}", r.id)) };
+                let (ext, int) = walls::faces(self, w);
+                let off = match r.face {
+                    Face::Left => ext,
+                    Face::Right => int,
+                    Face::Centre => (ext + int) / 2.0,
+                    Face::Start | Face::End => return Err(format!("wall {}'s ends are straight; {what}", r.id)),
+                };
+                Ok((c, radius - sweep.signum() * off, a0, sweep))
+            }
+            Some(Element::DetailLine(l)) => match &l.curve {
+                crate::curves::Curve::Circle { .. } => Err(format!("detail line {} is a circle, which has no ends; {what}", r.id)),
+                c => c
+                    .segments()
+                    .first()
+                    .filter(|_| c.kind() == "arc")
+                    .and_then(walls::Axis::arc)
+                    .ok_or_else(|| format!("detail line {} is a {}; {what}", r.id, c.kind())),
+            },
+            Some(e) => Err(format!("{} {} isn't curved; {what}", e.category(), r.id)),
+            None => Err(format!("element {} doesn't exist", r.id)),
+        }
+    }
+
     /// An angular dimension's arc: where its two lines meet, the angle (radians, counter-clockwise
     /// from east) of the ray it starts on, and how far it sweeps counter-clockwise to the other:
     /// the one of the four angles the lines make that holds `at`.
@@ -4070,6 +4107,10 @@ impl Model {
                 .collect(),
             DimKind::Angular => self.angle_sector(d).map(|(_, _, sweep)| sweep.to_degrees()).into_iter().collect(),
             DimKind::Radial => d.refs.first().and_then(|r| self.reference_arc(r).ok()).map(|(_, r)| r).into_iter().collect(),
+            DimKind::Diameter => d.refs.first().and_then(|r| self.reference_arc(r).ok()).map(|(_, r)| 2.0 * r).into_iter().collect(),
+            DimKind::ArcLength => {
+                d.refs.first().and_then(|r| self.reference_sweep(r).ok()).map(|(_, r, _, t)| r * t.abs()).into_iter().collect()
+            }
         }
     }
 
@@ -4658,12 +4699,16 @@ impl Model {
                     }
                     point(&who, d.at)?;
                     match (d.kind, d.refs.len()) {
-                        (DimKind::Aligned | DimKind::Linear, 2..=MAX_POINTS) | (DimKind::Angular, 2) | (DimKind::Radial, 1) => {}
+                        (DimKind::Aligned | DimKind::Linear, 2..=MAX_POINTS)
+                        | (DimKind::Angular, 2)
+                        | (DimKind::Radial | DimKind::Diameter | DimKind::ArcLength, 1) => {}
                         (DimKind::Aligned | DimKind::Linear, _) => {
                             return Err(format!("{who}: a dimension measures between 2 to {MAX_POINTS} references"));
                         }
                         (DimKind::Angular, _) => return Err(format!("{who}: an angular dimension measures between two lines")),
                         (DimKind::Radial, _) => return Err(format!("{who}: a radial dimension measures one round element")),
+                        (DimKind::Diameter, _) => return Err(format!("{who}: a diameter dimension measures one round element")),
+                        (DimKind::ArcLength, _) => return Err(format!("{who}: an arc length dimension measures along one arc")),
                     }
                     match (d.kind, d.orient) {
                         (DimKind::Linear, None) => {
@@ -4677,9 +4722,20 @@ impl Model {
                     let mut seen = BTreeSet::new();
                     let mut first: Option<(Reference, Line)> = None;
                     for r in &d.refs {
-                        if d.kind == DimKind::Radial {
-                            self.reference_arc(r).map_err(|e| format!("{who}: {e}"))?;
-                            continue;
+                        match d.kind {
+                            DimKind::Radial => {
+                                self.reference_arc(r).map_err(|e| format!("{who}: {e}"))?;
+                                continue;
+                            }
+                            DimKind::Diameter => {
+                                self.reference_arc(r).map_err(|e| format!("{who}: {}", e.replace("a radial", "a diameter")))?;
+                                continue;
+                            }
+                            DimKind::ArcLength => {
+                                self.reference_sweep(r).map_err(|e| format!("{who}: {e}"))?;
+                                continue;
+                            }
+                            _ => {}
                         }
                         let what = format!("{} {}", self.cat(r.id), self.shown(r.id));
                         if r.point.is_some() && d.kind == DimKind::Angular {

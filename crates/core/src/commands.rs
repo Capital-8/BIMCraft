@@ -518,18 +518,20 @@ pub static ALL: &[Command] = &[
         "dimension",
         ui_msg!("Aligned Dimension"),
         &["DI"],
-        "{refs: [ref, …], at: [x, y], level?, kind?: aligned|linear|angular|radial, orient?: horizontal|vertical} aligned \
-         (the default): the distances between parallel references, along a line through `at` (between points, along the \
-         first two; points and lines, square to the lines); linear: the same with its line horizontal or vertical as `orient` \
-         says, or without one as `at` lies: east or west of the points, vertical, else horizontal (its lines must run square \
-         to it); angular: the angle between two references that meet, on the side \
-         of `at`; radial: a round column's radius, toward `at`. A ref is {id, face?}: a wall's centre (the default), left or \
-         right face (of its start-to-end direction), start or end; a door's or window's centre, or its jamb toward its wall's \
-         start or end; a grid's line; a straight detail line, or its start or end (radial: a circle or an arc of one). With \
-         `point: start|end`, {id, face?, point} is the point at that end of the line: a wall's centre line's end, a face's \
+        "{refs: [ref, …], at: [x, y], level?, kind?: aligned|linear|angular|radial|diameter|arc_length, orient?: \
+         horizontal|vertical} aligned (the default): the distances between parallel references, along a line through `at` \
+         (between points, along the first two; points and lines, square to the lines); linear: the same with its line \
+         horizontal or vertical as `orient` says, or without one as `at` lies: east or west of the points, vertical, else \
+         horizontal (its lines must run square to it); angular: the angle between two references that meet, on the side \
+         of `at`; radial: a round column's, curved wall's, circle's or arc's radius, toward `at`; diameter: the same \
+         across, through its centre; arc_length: how long a curved wall's centre line or face, or an arc, is along it, \
+         its line an arc through `at`. A ref is {id, face?}: a wall's centre (the default), left or right face (of its \
+         start-to-end direction), start or end; a door's or window's centre, or its jamb toward its wall's start or end; \
+         a grid's line; a straight detail line, or its start or end (radial: a circle or an arc of one). With `point: \
+         start|end`, {id, face?, point} is the point at that end of the line: a wall's centre line's end, a face's \
          corner, a grid's, a detail line's (of any shape) or a jamb's end. Or a point [x, y] on one of those lines (for \
-         radial, on a round column's edge), or {endpoint: [x, y]}, the end of one nearest it, within 100 mm. It follows what \
-         it measures",
+         radial and diameter, on a round edge; for arc_length, on the arc), or {endpoint: [x, y]}, the end of one nearest \
+         it, within 100 mm. It follows what it measures",
         dimension,
     ),
     edit(
@@ -4637,14 +4639,55 @@ fn endpoint_near(m: &Model, level: Guid, view: Option<Guid>, p: P2) -> Option<Re
         .map(|(r, _)| r)
 }
 
-/// The round column on `level` whose edge passes nearest `p`, within 100 mm.
-fn arc_near(m: &Model, level: impl Key, p: P2) -> Option<Reference> {
-    let level = m.guid(level);
+/// Of the arcs a plan of `level` (`view`, when not the level's own) shows (its curved walls' centre lines and faces, its
+/// detail lines that are arcs), the one passing nearest `p`, within 100 mm.
+fn sweep_near(m: &Model, level: Guid, view: Option<Guid>, p: P2) -> Option<Reference> {
+    let plan = view.unwrap_or(level);
     m.elements
         .with_guids()
-        .filter(|(_, _, e)| e.column().is_some_and(|col| col.level == level))
-        .filter_map(|(_, id, _)| {
-            let r = Reference::line(id, Face::Centre);
+        .flat_map(|(_, id, e)| {
+            match e {
+                Element::Wall(w) if w.arc != 0.0 && m.cut_by(w, level) => vec![Face::Centre, Face::Left, Face::Right],
+                Element::DetailLine(l) if m.same(l.view, plan) => vec![Face::Centre],
+                _ => Vec::new(),
+            }
+            .into_iter()
+            .map(move |face| Reference::line(id, face))
+        })
+        .filter_map(|r| {
+            let (c, radius, a0, sweep) = m.reference_sweep(&r).ok()?;
+            // How far round from its start `p` lies, the way it sweeps: within it, the distance off it; else from its ends.
+            let t = (sweep.signum() * ((p.1 - c.1).atan2(p.0 - c.0) - a0)).rem_euclid(std::f64::consts::TAU);
+            let gap = if t <= sweep.abs() {
+                (p.dist(c) - radius).abs()
+            } else {
+                let end = |a: f64| c + P2(a.cos(), a.sin()) * radius;
+                p.dist(end(a0)).min(p.dist(end(a0 + sweep)))
+            };
+            Some((r, gap))
+        })
+        .filter(|(_, d)| *d <= 100.0)
+        .min_by(|a, b| a.1.total_cmp(&b.1))
+        .map(|(r, _)| r)
+}
+
+/// Of what a plan of `level` (`view`, when not the level's own) shows round (its round columns, its curved walls' centre
+/// lines and faces, its detail lines that are circles or arcs), the one whose edge passes nearest `p`, within 100 mm.
+fn arc_near(m: &Model, level: Guid, view: Option<Guid>, p: P2) -> Option<Reference> {
+    let plan = view.unwrap_or(level);
+    m.elements
+        .with_guids()
+        .flat_map(|(_, id, e)| {
+            match e {
+                e if e.column().is_some_and(|col| col.level == level) => vec![Face::Centre],
+                Element::Wall(w) if w.arc != 0.0 && m.cut_by(w, level) => vec![Face::Centre, Face::Left, Face::Right],
+                Element::DetailLine(l) if m.same(l.view, plan) => vec![Face::Centre],
+                _ => Vec::new(),
+            }
+            .into_iter()
+            .map(move |face| Reference::line(id, face))
+        })
+        .filter_map(|r| {
             let (c, radius) = m.reference_arc(&r).ok()?;
             Some((r, (p.dist(c) - radius).abs()))
         })
@@ -4660,9 +4703,8 @@ fn dimension(s: &mut Session, p: &Value) -> R {
     let at = point_req(c, p, "at")?;
     let kind = match string(c, p, "kind")? {
         None => DimKind::Aligned,
-        Some(k) => {
-            serde_json::from_value(json!(k)).map_err(|_| bad(c, format!("`kind` is aligned, linear, angular or radial, not `{k}`")))?
-        }
+        Some(k) => serde_json::from_value(json!(k))
+            .map_err(|_| bad(c, format!("`kind` is aligned, linear, angular, radial, diameter or arc_length, not `{k}`")))?,
     };
     let mut orient: Option<Orient> = match string(c, p, "orient")? {
         None => None,
@@ -4685,7 +4727,10 @@ fn dimension(s: &mut Session, p: &Value) -> R {
             continue;
         }
         let r = match point(v) {
-            Some(q) if kind == DimKind::Radial => arc_near(m, level, q).ok_or_else(|| near(q, "round column's edge"))?,
+            Some(q) if matches!(kind, DimKind::Radial | DimKind::Diameter) => {
+                arc_near(m, level, view, q).ok_or_else(|| near(q, "round column's, curved wall's, circle's or arc's edge"))?
+            }
+            Some(q) if kind == DimKind::ArcLength => sweep_near(m, level, view, q).ok_or_else(|| near(q, "curved wall or arc"))?,
             Some(q) => {
                 // After the first: one parallel to it, or for an angle, one across it.
                 let first = refs.first().and_then(|r| m.reference_line(r).ok());

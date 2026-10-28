@@ -170,3 +170,76 @@ fn a_dimension_to_points_draws_its_witness_lines_from_the_points() {
     assert!(dark(crate::geom::P2(-1000.0, -500.0)), "a witness line down from the first point");
     assert!(dark(crate::geom::P2(4000.0, -500.0)), "and from the second");
 }
+
+#[test]
+fn a_diameter_dimension_measures_across_a_round_column_a_circle_or_a_curved_wall() {
+    let mut s = Session::new();
+    let col = id_of(&run(&mut s, "column", json!({"at": [5000, 3000], "type": "Round 300"})));
+    let d = run(&mut s, "dimension", json!({"kind": "diameter", "refs": [{"id": col}], "at": [5600, 3600]}));
+    assert_eq!(d["values"], json!([300.0]));
+    let round = id_of(&run(&mut s, "detail_line", json!({"centre": [8000, 0], "radius": 1200})));
+    let d = run(&mut s, "dimension", json!({"kind": "diameter", "refs": [{"id": round}], "at": [9500, 0]}));
+    assert_eq!(d["values"], json!([2400.0]));
+    // A point on a round column's edge finds it.
+    let d = run(&mut s, "dimension", json!({"kind": "diameter", "refs": [[5150, 3000]], "at": [5600, 2400]}));
+    assert_eq!(d["values"], json!([300.0]));
+    let straight = id_of(&run(&mut s, "detail_line", json!({"start": [0, 0], "end": [1000, 0]})));
+    let e = err(&mut s, "dimension", json!({"kind": "diameter", "refs": [{"id": straight}], "at": [0, 0]}));
+    assert!(e.contains("diameter") && e.contains("round"), "{e}");
+}
+
+#[test]
+fn an_arc_length_dimension_measures_along_a_curved_wall_or_an_arc_and_follows_it() {
+    let mut s = Session::new();
+    // A half circle 3000 mm round its centre line, 200 mm thick.
+    let wall = run(&mut s, "wall", json!({"points": [[0, 0], [6000, 0]], "arc": 180}))["ids"][0].as_u64().unwrap_or_default();
+    let pi = std::f64::consts::PI;
+    let length = |s: &mut Session, refs: Value| {
+        let d = run(s, "dimension", json!({"kind": "arc_length", "refs": refs, "at": [3000, -4000]}));
+        (id_of(&d), d["values"][0].as_f64().unwrap_or_default())
+    };
+    let (centre, v) = length(&mut s, json!([{"id": wall}]));
+    assert!((v - pi * 3000.0).abs() < 0.01, "{v}");
+    let (_, inner) = length(&mut s, json!([{"id": wall, "face": "left"}]));
+    let (_, outer) = length(&mut s, json!([{"id": wall, "face": "right"}]));
+    let (lo, hi) = (inner.min(outer), inner.max(outer));
+    assert!((lo - pi * 2900.0).abs() < 0.01 && (hi - pi * 3100.0).abs() < 0.01, "{inner} {outer}");
+    // An arc drawn as a detail line, by a point on it.
+    run(&mut s, "detail_line", json!({"start": [10000, 0], "end": [12000, 0], "arc": 90}));
+    let d = run(&mut s, "dimension", json!({"kind": "arc_length", "refs": [[11000, -414.21]], "at": [11000, -2000]}));
+    let r = 1000.0 * 2f64.sqrt();
+    assert!((d["values"][0].as_f64().unwrap_or_default() - r * pi / 2.0).abs() < 0.01, "{d}");
+    // The wall's end moves: the arc it measures grows.
+    run(&mut s, "modify", json!({"id": wall, "end": [8000, 0]}));
+    let v = values(&mut s, centre)[0].as_f64().unwrap_or_default();
+    assert!((v - pi * 4000.0).abs() < 0.01, "{v}");
+    // A straight wall has no arc, nor a circle ends.
+    let straight = run(&mut s, "wall", json!({"points": [[0, 9000], [6000, 9000]]}))["ids"][0].as_u64().unwrap_or_default();
+    let e = err(&mut s, "dimension", json!({"kind": "arc_length", "refs": [{"id": straight}], "at": [0, 0]}));
+    assert!(e.contains("straight"), "{e}");
+    let round = id_of(&run(&mut s, "detail_line", json!({"centre": [8000, 9000], "radius": 1200})));
+    let e = err(&mut s, "dimension", json!({"kind": "arc_length", "refs": [{"id": round}], "at": [0, 0]}));
+    assert!(e.contains("circle"), "{e}");
+}
+
+#[test]
+fn diameter_and_arc_length_dimensions_draw_across_and_round() {
+    let mut s = Session::new();
+    // A circle round [0, 0], and a quarter arc round [10000, 0] from east to north, 2000 mm out.
+    run(&mut s, "detail_line", json!({"centre": [0, 0], "radius": 1500}));
+    run(&mut s, "detail_line", json!({"start": [12000, 0], "end": [10000, 2000], "arc": 90}));
+    run(&mut s, "dimension", json!({"kind": "diameter", "refs": [[1500, 0]], "at": [3000, 0]}));
+    run(&mut s, "dimension", json!({"kind": "arc_length", "refs": [[12000, 10]], "at": [13000, 0]}));
+    let level = s.model.levels().first().map(|l| l.0).unwrap_or_default();
+    let d = crate::render::plan(&s.model, level, 800, 600);
+    let png = crate::render::png(&d).unwrap_or_default();
+    let pm = tiny_skia::Pixmap::decode_png(&png).unwrap_or_else(|e| panic!("{e}"));
+    let dark = |p: crate::geom::P2| {
+        let (x, y) = d.view.px(p);
+        pm.pixel(x as u32, y as u32).is_some_and(|c| c.red() < 200 && c.green() < 200 && c.blue() < 200)
+    };
+    assert!(dark(crate::geom::P2(-700.0, 0.0)), "the diameter's line crosses the circle");
+    let on = |t: f64| crate::geom::P2(10000.0 + 3000.0 * t.to_radians().cos(), 3000.0 * t.to_radians().sin());
+    assert!(dark(on(30.0)) && dark(on(60.0)), "the arc length's line, an arc 3000 mm round");
+    assert!(!dark(on(120.0)), "only as far round as the arc sweeps");
+}

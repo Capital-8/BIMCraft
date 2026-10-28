@@ -1882,7 +1882,7 @@ impl BimApp {
             Some(Element::Dimension(d)) => match d.kind {
                 DimKind::Aligned | DimKind::Linear => Tool::Dimension(Vec::new()),
                 DimKind::Angular => Tool::Angular(Vec::new()),
-                DimKind::Radial => Tool::Radial(None),
+                DimKind::Radial | DimKind::Diameter | DimKind::ArcLength => Tool::Radial(None),
             },
             Some(Element::Text(_)) => Tool::Text,
             Some(Element::DetailLine(l)) => {
