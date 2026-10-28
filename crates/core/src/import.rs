@@ -2319,7 +2319,9 @@ pub fn ifc(bytes: &[u8], name: &str) -> Result<Imported, String> {
         elements_from.entry(id).or_default().push(rid);
     }
 
-    // Room separation lines: virtual elements BIMCraft wrote, a line per segment of their axis.
+    // Room separation lines: virtual elements BIMCraft wrote, a line per segment of their axis, MAX_POINTS of them at most
+    // between all, since an axis of millions of points would be millions of elements.
+    let mut separations = 0;
     for id in named(&["IFCVIRTUALELEMENT"]) {
         let Some(x) = e(id).filter(|x| text(x.args.get(4)) == Some(crate::ifc::SEPARATION)) else { continue };
         seen.insert(id);
@@ -2327,6 +2329,16 @@ pub fn ifc(bytes: &[u8], name: &str) -> Result<Imported, String> {
             leave(&mut skipped, &mut seen, id, "its room separation line has no axis");
             continue;
         };
+        if separations + axis.len() - 1 > MAX_POINTS {
+            leave(
+                &mut skipped,
+                &mut seen,
+                id,
+                &format!("its room separation line would pass the {MAX_POINTS} segments the lines of a project may have"),
+            );
+            continue;
+        }
+        separations += axis.len() - 1;
         let level = level_for(id, axis.first().map_or(0.0, |p| p[2]));
         for w in axis.windows(2) {
             let (start, end) = (micron(r.flat(w[0])), micron(r.flat(w[1])));
@@ -3142,6 +3154,62 @@ ENDSEC;END-ISO-10303-21;",
         assert!(only(&past.model, "wire").is_empty());
         assert_eq!(past.skipped.len(), 1);
         assert!(past.skipped[0].contains("no body BIMCraft can read"), "{:?}", past.skipped);
+    }
+
+    #[test]
+    fn room_separation_lines_past_what_a_project_may_hold_are_left_out_not_made() {
+        // A storey with a room separation line for each count of `points`, along the x axis 100 mm a point.
+        let lines = |points: &[usize]| {
+            let mut file = String::from(
+                "ISO-10303-21;HEADER;FILE_SCHEMA(('IFC4'));ENDSEC;DATA;
+#1=IFCSIUNIT(*,.LENGTHUNIT.,.MILLI.,.METRE.);
+#2=IFCUNITASSIGNMENT((#1));
+#3=IFCPROJECT('p',$,'Lines',$,$,$,$,$,#2);
+#4=IFCCARTESIANPOINT((0.,0.,0.));
+#5=IFCAXIS2PLACEMENT3D(#4,$,$);
+#6=IFCLOCALPLACEMENT($,#5);
+#7=IFCBUILDINGSTOREY('s',$,'Level 0',$,$,#6,$,$,.ELEMENT.,0.);
+",
+            );
+            let mut held = Vec::new();
+            for (k, &n) in points.iter().enumerate() {
+                let b = 100 + 10 * k;
+                let xyz: Vec<String> = (0..n).map(|i| format!("({}.,0.,0.)", i * 100)).collect();
+                let index: Vec<String> = (1..=n).map(|i| i.to_string()).collect();
+                file += &format!(
+                    "#{b}=IFCCARTESIANPOINTLIST3D(({}));
+#{}=IFCINDEXEDPOLYCURVE(#{b},(IFCLINEINDEX(({}))),$);
+#{}=IFCSHAPEREPRESENTATION($,'Axis','Curve2D',(#{}));
+#{}=IFCPRODUCTDEFINITIONSHAPE($,$,(#{}));
+#{}=IFCVIRTUALELEMENT('v{k}',$,'Room Separation Line',$,'RoomSeparation',#6,#{},$);
+",
+                    xyz.join(","),
+                    b + 1,
+                    index.join(","),
+                    b + 2,
+                    b + 1,
+                    b + 3,
+                    b + 2,
+                    b + 4,
+                    b + 3
+                );
+                held.push(format!("#{}", b + 4));
+            }
+            file + &format!("#30=IFCRELCONTAINEDINSPATIALSTRUCTURE('r',$,$,$,({}),#7);\nENDSEC;END-ISO-10303-21;", held.join(","))
+        };
+        let read = |points: &[usize]| {
+            let i = ifc(lines(points).as_bytes(), "x").unwrap();
+            (only(&i.model, "roomseparator").len(), i.skipped)
+        };
+        // MAX_POINTS segments of one line are made, one more is left out with its reason.
+        assert_eq!(read(&[MAX_POINTS + 1]), (MAX_POINTS, Vec::<String>::new()));
+        let (made, skipped) = read(&[MAX_POINTS + 2]);
+        assert_eq!(made, 0);
+        assert!(skipped.len() == 1 && skipped[0].contains("room separation"), "{skipped:?}");
+        // Nor do all the lines together pass MAX_POINTS: the second of two long ones is left out.
+        let (made, skipped) = read(&[6000, 6000]);
+        assert_eq!(made, 5999);
+        assert!(skipped.len() == 1 && skipped[0].contains("room separation"), "{skipped:?}");
     }
 
     /// An IFC4 file in mm with a 6 x 4 m slab 200 mm thick, its profile round two holes, an
