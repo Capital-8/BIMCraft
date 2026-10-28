@@ -6,6 +6,9 @@ pub mod autosave;
 #[cfg(test)]
 mod autosave_tests;
 pub mod bridge;
+pub mod cad;
+#[cfg(test)]
+mod cad_tests;
 pub mod cloud;
 #[cfg(test)]
 mod cloud_tests;
@@ -14,6 +17,7 @@ mod component_geometry;
 mod csg;
 pub mod curves;
 pub mod draw;
+pub mod dxf;
 pub mod engine;
 pub mod family;
 pub mod favorites;
@@ -46,6 +50,7 @@ pub mod sample;
 pub mod schedule;
 #[cfg(test)]
 mod section_box_tests;
+pub mod selection;
 pub mod sheet;
 pub mod skeleton;
 pub mod sketch;

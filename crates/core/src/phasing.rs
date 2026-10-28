@@ -244,6 +244,7 @@ pub(crate) fn check_project(m: &Model) -> Result<(), String> {
     }
     for (s, o) in &m.phase_overrides {
         o.check(&format!("the {} phase's overrides", s.name()))?;
+        o.check_patterns(m)?;
         if o.hidden || o.transparency > 0 {
             return Err(format!("the {} phase's overrides: a phase filter hides what it doesn't display; overrides draw", s.name()));
         }

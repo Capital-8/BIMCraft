@@ -135,6 +135,14 @@ Unhide. Only Reveal Hidden Elements lets what a view hides be picked, so the Mod
 `BimApp::hidden_selection` finds the active view hiding: the elements hidden one by one, and the categories hidden whole. They run `graphics` with `show_elements` or `show`
 (`unhide_selection`), the selection stays, and with nothing of it hidden EU opens the Elements tab as before and VU says so.
 
+Filter. While something is selected, every tab's Select panel has Filter, and the funnel by the status bar's count opens it too
+(`filter.rs`): Revit's Filter, the selection counted by category, each checked to keep or cleared to leave out, with Check All,
+Check None and the total kept; OK keeps what is checked selected. Its Filter by list goes further: any parameter every selected
+element has, which `selection::common` finds (the schedules' fields their categories share, Category first, Count left out; what
+schedules aren't of, lines, regions, text, tags, grids, views and sheets, has its fields in `schedule::MORE`: a line's Line Style), and
+the list becomes that parameter's values (`selection::groups`, as schedules show them, numbers by value, `(none)` last), to keep or
+leave out the same way. The `filter_selection` command gives agents the same: the groups, the shared fields, and with `keep`, the ids kept.
+
 Undo's list. The arrows beside Undo and Redo (`BimApp::steps_list`) list `Session::steps`, each a `Step` the core keeps with its
 undo snapshot: the command's label and the elements it made and took away, by category, which `step_name` turns into Create Walls
 or Delete Door (else the label). A click runs `undo` or `redo` with `count`.

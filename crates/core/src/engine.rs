@@ -166,6 +166,15 @@ impl Session {
                         m.clouds.remove(&name);
                     }
                 }
+                // A CAD drawing, with the last import.
+                let unplaced = self.model.unplaced_cads();
+                if !unplaced.is_empty() {
+                    let m = self.model_mut();
+                    for name in &unplaced {
+                        m.cads.remove(name);
+                    }
+                    m.forget_cad_layers(&unplaced);
+                }
                 // What a command was given by id points at the element's GUID; what it put in the library has an id and a GUID.
                 self.model_mut().resolve();
                 self.model_mut().sync_library();

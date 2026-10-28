@@ -197,6 +197,15 @@ A plan may follow the box (`section_box` on a `Level` or a `PlanView`, set by `m
 from the box's bottom up to its top, where it cuts (`Model::shown_range`), and its crop the box's sides, within its own crop if it has
 one (`Model::shown_crop`). What a plan draws and snaps to reads those; `plan_range` and `crop_of` stay the plan's own, which commands
 (dimensions, joins, Duplicate View) and Properties use. A ceiling plan keeps its own range.
+Visibility/Graphics lists each tab's categories alphabetically by their translated display names. Projection and cut pattern
+cells edit independent foreground and background overrides, using the project's fill patterns (including imported PAT patterns),
+colours and a combined preview. Unchecked layers inherit; `<None>` explicitly hides a layer. OK/Apply submits the draft as one
+`graphics` command; Clear Overrides clears only that cell. Annotation categories expose projection patterns for filled regions.
+Styles hold `foreground` and `background` as optional `{pattern: name | null, color: [r,g,b]}` layers, alongside the existing
+`fill` colour. Element, filter and category precedence resolves each layer separately. Plans, reflected ceiling plans, section
+cuts and regions draw the layers with the same bounded pattern renderer as filled region types; the pattern's drafting/model
+target sets its scale. Pattern references follow library renames, save as GUIDs, and prevent deletion while used by a view or
+template. The 3D renderer continues to use the solid `fill` colour for shading; it does not draw hatch patterns.
 
 The 3D view can be drawn on the graphics card (File > Settings > Performance; off until asked for: `BimApp::card`, `settings.json`'s
 `gpu_3d`). `view3d::gpu::Mesh` is the triangles a view shows as f32 vertices relative to the middle of what is drawn (millimetres far
