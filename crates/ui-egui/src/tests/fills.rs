@@ -184,8 +184,9 @@ fn edit_type_during_a_region_sketch_creates_a_type_with_independent_fill_layers(
     shortcut(&mut h, "FR");
     press(&mut h, "Edit Type");
     assert!(h.query_by_label("Type Properties").is_some());
-    press(&mut h, "Duplicate");
-    type_into(&mut h, "Type Name", "Earth on gray");
+    press(&mut h, "Duplicate…");
+    type_into(&mut h, "New type", "Earth on gray");
+    press(&mut h, "Create");
     choose(&mut h, "Foreground Pattern", "Diagonal Up");
     choose(&mut h, "Background Pattern", "Solid fill");
     press(&mut h, "Masking");
@@ -213,7 +214,9 @@ filled_region {{"sketch": [[[4000,1000],[5000,1000]],[[5000,1000],[5000,2000]],[
     h.state_mut().selection = vec![regions[0]];
     h.run();
     press(&mut h, "Edit Type");
-    type_into(&mut h, "Type Name", "Shared fill");
+    press(&mut h, "Rename…");
+    type_into(&mut h, "New name", "Shared fill");
+    press(&mut h, "Rename");
     choose(&mut h, "Foreground Pattern", "<None>");
     choose(&mut h, "Background Pattern", "Crosshatch");
     h.get_all_by_label("Apply").max_by(|a, b| a.rect().left().total_cmp(&b.rect().left())).unwrap().click_accesskit();
@@ -224,8 +227,9 @@ filled_region {{"sketch": [[[4000,1000],[5000,1000]],[[5000,1000],[5000,2000]],[
     }
     assert_eq!(h.state().session.model.region_types["Shared fill"].background.as_deref(), Some("Crosshatch"));
     let before = h.state().session.model.to_json().unwrap();
-    press(&mut h, "Duplicate");
-    type_into(&mut h, "Type Name", "Discard me");
+    press(&mut h, "Duplicate…");
+    type_into(&mut h, "New type", "Discard me");
+    press(&mut h, "Create");
     press(&mut h, "Cancel");
     assert_eq!(h.state().session.model.to_json().unwrap(), before);
     key(&mut h, Key::Escape);
@@ -259,13 +263,18 @@ fn new_region_types_reject_duplicate_names_without_overwriting_existing_types() 
     shortcut(&mut h, "FR");
     press(&mut h, "Edit Type");
     let before = h.state().session.model.to_json().unwrap();
-    press(&mut h, "New Type");
-    type_into(&mut h, "Type Name", "Crosshatch");
+    // A copy under a name another type has is refused at once, in the dialog, with nothing done.
+    press(&mut h, "Duplicate…");
+    type_into(&mut h, "New type", "Crosshatch");
+    press(&mut h, "Create");
+    assert!(h.query_by_label_contains("already in use").is_some());
     press(&mut h, "OK");
-    assert!(h.state().fill_patterns_dialog.is_some());
-    assert!(h.state().status.text.contains("already in use"));
+    assert!(h.state().fill_patterns_dialog.is_none());
     assert_eq!(h.state().session.model.to_json().unwrap(), before);
-    type_into(&mut h, "Type Name", "My new region");
+    press(&mut h, "Edit Type");
+    press(&mut h, "Duplicate…");
+    type_into(&mut h, "New type", "My new region");
+    press(&mut h, "Create");
     choose(&mut h, "Foreground Pattern", "Sand");
     press(&mut h, "OK");
     assert!(h.state().fill_patterns_dialog.is_none(), "{}", h.state().status.text);
@@ -290,9 +299,10 @@ fn edit_type_keeps_annotation_boundary_styles_and_pattern_placement_and_imports_
     assert!(before.sketch.iter().any(|l| l.invisible));
     assert!(before.sketch.iter().any(|l| l.style.as_deref() == Some("Wide Lines")));
     press(&mut h, "Edit Type");
-    press(&mut h, "Duplicate");
-    type_into(&mut h, "Type Name", "Annotation Hatch");
-    press(&mut h, "Patterns");
+    press(&mut h, "Duplicate…");
+    type_into(&mut h, "New type", "Annotation Hatch");
+    press(&mut h, "Create");
+    press(&mut h, "Foreground Pattern: Edit Patterns");
     let dir = tempfile::tempdir().unwrap();
     let pat = dir.path().join("annotation.pat");
     std::fs::write(&pat, ";%UNITS=MM\n*Annotation Pattern\n;%TYPE=MODEL\n45,0,0,0,100\n").unwrap();
@@ -301,7 +311,7 @@ fn edit_type_keeps_annotation_boundary_styles_and_pattern_placement_and_imports_
     press(&mut h, "Annotation Pattern: Edit Lines");
     press(&mut h, "Add Family");
     type_into(&mut h, "Annotation Pattern family 2: Spacing", "200");
-    press(&mut h, "Region Types");
+    press(&mut h, "‹ Back");
     choose(&mut h, "Foreground Pattern", "Annotation Pattern");
     press(&mut h, "OK");
     assert!(h.state().fill_patterns_dialog.is_none(), "{}", h.state().status.text);

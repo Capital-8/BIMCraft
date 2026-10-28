@@ -53,6 +53,7 @@ mod style;
 #[cfg(test)]
 mod tests;
 mod titlebar;
+mod typeprops;
 mod updates;
 pub mod window;
 

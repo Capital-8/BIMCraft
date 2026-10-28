@@ -5204,6 +5204,7 @@ mod smallest;
 mod start;
 mod titlebar;
 mod tools;
+mod typeprops;
 mod window;
 
 #[test]

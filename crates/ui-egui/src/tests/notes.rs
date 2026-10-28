@@ -1,6 +1,6 @@
 //! Text written where it goes: the Text tool's click opens a note on the canvas, typing writes it, Shift+Enter breaks a
 //! line, Enter finishes; a double click on a note rewrites it; Override Formatting lets Ctrl+B, Ctrl+I and Ctrl+U make a
-//! part bold, italic or underlined, which a new type keeps; Edit Type opens Text Type Properties.
+//! part bold, italic or underlined, which a new type keeps; Edit Type opens Text Type Properties, where a type is renamed.
 
 use super::*;
 
@@ -108,8 +108,19 @@ fn edit_type_on_a_note_opens_text_type_properties_where_its_font_and_border_chan
     assert_eq!(h.state().selection, vec![id]);
     press(&mut h, "Edit Type");
     assert!(h.state().text_type_dialog.is_some());
+    // Where it is from its first frame, so a click lands on the row it was meant for.
+    let at = |h: &Harness<BimApp>| h.ctx.memory(|m| m.area_rect(egui::Id::new("text-type-properties")));
+    let first = at(&h);
+    h.step();
+    assert_eq!(at(&h), first, "the dialog doesn't move after it opens");
     pick(&mut h, Role::CheckBox, "Show Border");
+    // Rename, as Revit's: the note follows.
+    press(&mut h, "Rename…");
+    type_into(&mut h, "New name", "Small");
+    press(&mut h, "Rename");
+    assert!(h.state().text_type_dialog.as_ref().is_some_and(|d| d.error().is_none()));
     press(&mut h, "OK");
     assert!(h.state().text_type_dialog.is_none(), "{}", h.state().status.text);
-    assert!(h.state().session.model.text_types["2.5mm"].border);
+    assert!(h.state().session.model.text_types["Small"].border, "what was typed before the rename is kept, and applied");
+    assert!(matches!(h.state().session.model.elements.get(id), Some(Element::Text(n)) if n.type_name == "Small"));
 }

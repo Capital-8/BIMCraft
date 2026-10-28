@@ -124,6 +124,15 @@ is drawn in plans only (a door's in a box, a window's in a hexagon, any other's 
 with it. The Tag tool picks whatever `anchor` finds a point for, and the Options Bar's Label field is the `label` the click passes on; Tag All (`tag` without `ids`)
 still takes doors and windows unless given a `category`.
 
+Type Properties (`typeprops.rs`). Every kind of type opens in one dialog, after Revit's: `title`, then `head` (Family, shown and not picked, and
+Type, with Duplicate… and Rename… beside it; either opens a Name row under it, Enter or its button doing it), then `table` (Parameter and Value
+under group bars that fold, `Table::row` and its helpers for a field, a check box, a drop-down, a dragged number, a colour, a value worked out, and
+`Table::full` for what spans both columns, a type's layers or a sample), then `foot` (what stopped it, and OK, Cancel and Apply). Each dialog keeps its
+state and its commands: the project's own types and a family's in `properties.rs` (`type`, `family`, and `rename_type` for Rename), text types in
+`notes.rs` (`text_type`, with `rename`), filled region types in `fillpatterns.rs`, where Duplicate and Rename change the draft OK applies and a
+pattern's … opens the Patterns tab. The dialogs are one width, and the table's body one height where the window has room, known from the first frame:
+a body that fitted its rows grew over a few frames, and a click meant for one row landed on the next. A refusal is said in the dialog.
+
 The section box (`section_box.rs`). The 3D view's Properties have an Extents group: Section Box, a checkbox, and while it's on the
 West, East, South, North, Bottom and Top faces as lengths in the project's units; BX turns it on or off (opening the 3D view). They run
 `section_box`. In the view, `orbit.rs` draws the box's edges and, in Modify, an arrow on each face pointing out along its axis (a square

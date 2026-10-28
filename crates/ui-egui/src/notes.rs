@@ -11,14 +11,15 @@ use bimcraft_core::render::{self, Drawing};
 use bimcraft_core::text::{self, Format, Layout, Style, TextType};
 use bimcraft_i18n::msg;
 use egui::{
-    Button, ComboBox, Context, DragValue, Event, Grid, Id as UiId, Key, Modal, PointerButton, Pos2, Response, RichText, Shape, Stroke,
-    TextEdit, Ui, vec2,
+    Button, ComboBox, Context, DragValue, Event, Id as UiId, Key, Modal, PointerButton, Pos2, Response, RichText, Shape, Stroke, TextEdit,
+    Ui, vec2,
 };
 use serde_json::{Value, json};
 
 use crate::canvas::{Place, paint};
 use crate::lang::{t, tf};
-use crate::style::{canvas_pal, pal};
+use crate::style::canvas_pal;
+use crate::typeprops::{self, Head, Naming};
 use crate::{BimApp, Status};
 
 /// Which of a note's formatting a key or a button flips.
@@ -460,7 +461,7 @@ pub(crate) struct TextTypeDialog {
     name: String,
     t: TextType,
     elements: Vec<Id>,
-    duplicate: Option<String>,
+    naming: Naming,
     error: Option<String>,
     /// What the font list is narrowed to, typed: a system has hundreds.
     find: String,
@@ -469,7 +470,13 @@ pub(crate) struct TextTypeDialog {
 impl TextTypeDialog {
     pub(crate) fn new(m: &Model, name: String, elements: Vec<Id>) -> TextTypeDialog {
         let t = m.text_types.get(&name).cloned().unwrap_or_default();
-        TextTypeDialog { name, t, elements, duplicate: None, error: None, find: String::new() }
+        TextTypeDialog { name, t, elements, naming: Naming::None, error: None, find: String::new() }
+    }
+
+    /// What stopped OK, Apply, Duplicate or Rename, if anything did.
+    #[cfg(test)]
+    pub(crate) fn error(&self) -> Option<&str> {
+        self.error.as_deref()
     }
 
     /// The `text_type` command for the type as typed, under `name` (from the one shown, for a duplicate).
@@ -488,117 +495,74 @@ impl BimApp {
         let model = std::sync::Arc::clone(&self.session.model);
         let names: Vec<String> = model.text_types.keys().cloned().collect();
         let fonts = text::families();
-        let (mut ok, mut cancel, mut apply, mut switch, mut create) = (false, false, false, None, false);
+        let (mut ok, mut cancel, mut apply, mut asked) = (false, false, false, None);
         Modal::new(UiId::new("text-type-properties")).show(ctx, |ui| {
-            ui.set_width(380.0);
-            ui.label(RichText::new(t("Type Properties")).heading());
-            ui.add_space(6.0);
-            Grid::new("text-type").num_columns(2).spacing(vec2(12.0, 6.0)).show(ui, |ui| {
-                ui.label(t("Family:"));
-                ui.label(t("Text"));
-                ui.end_row();
-                let l = ui.label(t("Type:"));
-                ui.horizontal(|ui| {
-                    ComboBox::from_id_salt("text-type-name")
-                        .selected_text(&d.name)
-                        .width(160.0)
+            typeprops::title(ui);
+            asked = typeprops::head(ui, "text-type", &tf("System Family: {}", &[t("Text")]), &names, &d.name, &mut d.naming, true);
+            let below = typeprops::foot_height(ui, d.error.is_some());
+            typeprops::table(ui, "text-type", below, |tb| {
+                // As Revit's: how it's drawn, then its lettering.
+                tb.group("Graphics");
+                tb.color(t("Color"), &mut d.t.color);
+                tb.drag(t("Border Line Weight"), DragValue::new(&mut d.t.border_pen.0).range(0..=bimcraft_core::pen::MAX_PEN));
+                tb.check(t("Show Border"), &mut d.t.border);
+                tb.drag(
+                    t("Leader/Border Offset"),
+                    DragValue::new(&mut d.t.border_offset).range(0.0..=50.0).speed(0.1).max_decimals(2).suffix(" mm"),
+                );
+                tb.group("Text");
+                let font = &mut d.t.font;
+                let find = &mut d.find;
+                tb.row(t("Text Font"), |ui, l| {
+                    ComboBox::from_id_salt("text-type-font")
+                        .selected_text(font.as_str())
+                        .width(ui.available_width())
+                        .height(320.0)
                         .show_ui(ui, |ui| {
-                            for n in &names {
-                                if ui.selectable_label(*n == d.name, n).clicked() {
-                                    switch = Some(n.clone());
-                                }
+                            ui.add(TextEdit::singleline(find).hint_text(t("Search fonts")).desired_width(180.0));
+                            let find = find.trim().to_lowercase();
+                            for f in fonts.iter().filter(|f| f.to_lowercase().contains(&find)) {
+                                ui.selectable_value(font, f.clone(), f);
                             }
                         })
                         .response
-                        .labelled_by(l.id);
-                    if d.duplicate.is_none() && ui.button(t("Duplicate…")).clicked() {
-                        d.duplicate = Some(format!("{} 2", d.name));
-                    }
+                        .labelled_by(l)
                 });
-                ui.end_row();
-                if let Some(name) = &mut d.duplicate {
-                    let l = ui.label(t("Name:"));
-                    ui.horizontal(|ui| {
-                        ui.add(TextEdit::singleline(name).desired_width(160.0)).labelled_by(l.id);
-                        create = ui.button(t("Create")).clicked();
-                    });
-                    ui.end_row();
-                }
-                let l = ui.label(t("Text Font"));
-                ComboBox::from_id_salt("text-type-font")
-                    .selected_text(&d.t.font)
-                    .width(200.0)
-                    .height(320.0)
-                    .show_ui(ui, |ui| {
-                        ui.add(TextEdit::singleline(&mut d.find).hint_text(t("Search fonts")).desired_width(180.0));
-                        let find = d.find.trim().to_lowercase();
-                        for f in fonts.iter().filter(|f| f.to_lowercase().contains(&find)) {
-                            ui.selectable_value(&mut d.t.font, f.clone(), f);
-                        }
-                    })
-                    .response
-                    .labelled_by(l.id);
-                ui.end_row();
                 // What letters it on this system, where that is another font.
                 let drawn = text::resolve(&d.t.font, false, false);
                 if !drawn.family().eq_ignore_ascii_case(d.t.font.trim()) {
-                    ui.label("");
-                    ui.label(RichText::new(tf("Not on this system: drawn with {}", &[drawn.family()])).small().color(pal().muted));
-                    ui.end_row();
+                    tb.shown("", &tf("Not on this system: drawn with {}", &[drawn.family()]));
                 }
-                let l = ui.label(t("Text Size (mm)"));
-                ui.add(DragValue::new(&mut d.t.size).range(0.1..=100.0).speed(0.1).max_decimals(2)).labelled_by(l.id);
-                ui.end_row();
-                let l = ui.label(t("Width Factor"));
-                ui.add(DragValue::new(&mut d.t.width_factor).range(0.1..=10.0).speed(0.01).max_decimals(2)).labelled_by(l.id);
-                ui.end_row();
-                ui.label("");
-                ui.checkbox(&mut d.t.bold, t("Bold"));
-                ui.end_row();
-                ui.label("");
-                ui.checkbox(&mut d.t.italic, t("Italic"));
-                ui.end_row();
-                ui.label("");
-                ui.checkbox(&mut d.t.underline, t("Underline"));
-                ui.end_row();
-                ui.label(t("Color"));
-                ui.color_edit_button_srgb(&mut d.t.color);
-                ui.end_row();
-                ui.label("");
-                ui.checkbox(&mut d.t.border, t("Show Border"));
-                ui.end_row();
-                let l = ui.label(t("Leader/Border Offset (mm)"));
-                ui.add(DragValue::new(&mut d.t.border_offset).range(0.0..=50.0).speed(0.1).max_decimals(2)).labelled_by(l.id);
-                ui.end_row();
-                let l = ui.label(t("Border Line Weight"));
-                ui.add(DragValue::new(&mut d.t.border_pen.0).range(0..=bimcraft_core::pen::MAX_PEN)).labelled_by(l.id);
-                ui.end_row();
+                tb.drag(t("Text Size"), DragValue::new(&mut d.t.size).range(0.1..=100.0).speed(0.1).max_decimals(2).suffix(" mm"));
+                tb.check(t("Bold"), &mut d.t.bold);
+                tb.check(t("Italic"), &mut d.t.italic);
+                tb.check(t("Underline"), &mut d.t.underline);
+                tb.drag(t("Width Factor"), DragValue::new(&mut d.t.width_factor).range(0.1..=10.0).speed(0.01).max_decimals(2));
             });
-            if let Some(err) = &d.error {
-                ui.colored_label(pal().error, err);
-            }
-            ui.add_space(8.0);
-            ui.horizontal(|ui| {
-                ok = ui.button(t("OK")).clicked();
-                cancel = ui.button(t("Cancel")).clicked();
-                apply = ui.button(t("Apply")).clicked();
-            });
+            (ok, cancel, apply) = typeprops::foot(ui, d.error.as_deref());
         });
         if cancel || ctx.input(|i| i.key_pressed(Key::Escape)) {
             return;
         }
-        if let Some(name) = switch {
-            d = TextTypeDialog { elements: d.elements, ..TextTypeDialog::new(&model, name, Vec::new()) };
-        }
-        if create && let Some(name) = d.duplicate.take() {
-            let name = name.trim().to_string();
-            match self.session.execute("text_type", &d.params(&name)) {
+        match asked {
+            Some(Head::Switch(name)) => d = TextTypeDialog { elements: d.elements, ..TextTypeDialog::new(&model, name, Vec::new()) },
+            Some(Head::Duplicate(name)) => match self.session.execute("text_type", &d.params(&name)) {
                 Ok(_) => d = TextTypeDialog { elements: d.elements, ..TextTypeDialog::new(&self.session.model, name, Vec::new()) },
-                Err(e) => {
-                    d.duplicate = Some(name);
-                    d.error = Some(e);
+                Err(e) => d.error = Some(e),
+            },
+            Some(Head::Rename(to)) => match self.session.execute("text_type", &json!({"name": d.name, "rename": to})) {
+                Ok(_) => {
+                    if self.types.get("text") == Some(&d.name) {
+                        self.types.insert("text", to.clone());
+                    }
+                    // What was typed and not yet applied stays.
+                    let typed = d.t.clone();
+                    d = TextTypeDialog { elements: d.elements, ..TextTypeDialog::new(&self.session.model, to, Vec::new()) };
+                    d.t = typed;
                 }
-            }
+                Err(e) => d.error = Some(e),
+            },
+            None => {}
         }
         if ok || apply {
             let changed = model.text_types.get(&d.name) != Some(&d.t);

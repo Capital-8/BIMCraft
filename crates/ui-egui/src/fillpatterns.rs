@@ -23,6 +23,7 @@ use serde_json::{Value, json};
 use crate::lang::{t, tf};
 use crate::renames::{self, Row};
 use crate::style::{ERROR_HEIGHT, boxed_text, canvas_pal, dialog_room, dialog_row, pal};
+use crate::typeprops::{self, Head, Naming};
 use crate::{BimApp, Status};
 
 /// The dialog's tabs.
@@ -58,6 +59,8 @@ pub(crate) struct FillPatternsDialog {
     editing: Option<(usize, Vec<String>)>,
     /// Edit Type's current row and the instances to assign it to; None opens Manage's table.
     subject: Option<(usize, Vec<Id>)>,
+    /// Edit Type's new name being typed, for a duplicate or a rename.
+    naming: Naming,
     error: Option<String>,
     /// What the last import or export said, and whether something went wrong or was left out.
     note: Option<(String, bool)>,
@@ -93,7 +96,19 @@ impl FillPatternsDialog {
             .collect();
         let gone = vec![false; patterns.len()];
         let held = (m.fill_patterns.clone(), m.region_types.clone());
-        FillPatternsDialog { tab: 0, types, patterns, gone, editing: None, subject: None, error: None, note: None, replace: false, held }
+        FillPatternsDialog {
+            tab: 0,
+            types,
+            patterns,
+            gone,
+            editing: None,
+            subject: None,
+            naming: Naming::None,
+            error: None,
+            note: None,
+            replace: false,
+            held,
+        }
     }
 
     /// The patterns a PAT file held, added to the draft (one of a name it has already takes its place).
@@ -302,9 +317,9 @@ pub(crate) fn paint_pattern(ui: &Ui, rect: egui::Rect, p: Option<&FillPattern>, 
 }
 
 /// A drop-down of the patterns (or none), named `label`, `row` the one picked.
-fn pattern_pick(ui: &mut Ui, row: &mut Option<usize>, names: &[(usize, String)], label: String) {
+fn pattern_pick(ui: &mut Ui, row: &mut Option<usize>, names: &[(usize, String)], label: String, width: f32) {
     let shown = row.and_then(|p| names.iter().find(|(i, _)| *i == p)).map_or_else(|| t("<None>").to_string(), |(_, n)| n.clone());
-    let c = ComboBox::from_id_salt(&label).selected_text(shown).width(150.0).show_ui(ui, |ui| {
+    let c = ComboBox::from_id_salt(&label).selected_text(shown).width(width).show_ui(ui, |ui| {
         ui.selectable_value(row, None, t("<None>"));
         for (p, n) in names {
             ui.selectable_value(row, Some(*p), n);
@@ -333,7 +348,7 @@ fn types_tab(ui: &mut Ui, d: &mut FillPatternsDialog, below: f32) {
                 for (row, rgb, side) in
                     [(&mut r.foreground, &mut r.foreground_color, "Foreground"), (&mut r.background, &mut r.background_color, "Background")]
                 {
-                    pattern_pick(ui, row, &names, tf("{}: {}", &[&who, t(side)]));
+                    pattern_pick(ui, row, &names, tf("{}: {}", &[&who, t(side)]), 150.0);
                     colour_field(ui, rgb, tf("{}: {} Colour", &[&who, t(side)]));
                     // As the plan draws it, on its paper: black ink is light on a dark ground.
                     let ink = crate::canvas::color(bimcraft_core::render::Rgb(rgb[0], rgb[1], rgb[2]));
@@ -428,65 +443,69 @@ fn families(ui: &mut Ui, d: &mut FillPatternsDialog, room: f32) {
     }
 }
 
-/// Edit one region type, as in Revit's Type Properties; all edits stay in the draft until Apply or OK.
-fn edit_type(ui: &mut Ui, d: &mut FillPatternsDialog) {
+/// Edit one region type, as in Revit's Type Properties: Duplicate and Rename change the draft, which OK and Apply put in the
+/// project with the rest. A pattern's "…" opens the Patterns tab, to edit them.
+fn edit_type(ui: &mut Ui, d: &mut FillPatternsDialog, below: f32) {
     let Some(mut picked) = d.subject.as_ref().map(|(row, _)| *row) else { return };
-    ui.horizontal(|ui| {
-        ui.label(t("Type:"));
-        let c = ComboBox::from_id_salt("region-edit-type")
-            .selected_text(d.types.get(picked).map_or("", |r| r.name.as_str()))
-            .width(230.0)
-            .show_ui(ui, |ui| {
-                for (i, r) in d.types.iter().enumerate() {
-                    ui.selectable_value(&mut picked, i, &r.name);
-                }
-            });
-        c.response.widget_info(|| WidgetInfo::labeled(WidgetType::ComboBox, true, t("Region Type")));
-        if ui.button(t("Duplicate")).clicked()
-            && let Some(r) = d.types.get(picked)
-        {
-            let mut copy = r.clone();
-            copy.was = None;
-            copy.name = fresh(&r.name, &d.types.iter().map(|r| r.name.as_str()).collect::<Vec<_>>());
-            picked = d.types.len();
-            d.types.push(copy);
+    let names: Vec<String> = d.types.iter().map(|r| r.name.clone()).collect();
+    let current = names.get(picked).cloned().unwrap_or_default();
+    let family = tf("System Family: {}", &[t("Filled region")]);
+    match typeprops::head(ui, "region-type", &family, &names, &current, &mut d.naming, true) {
+        Some(Head::Switch(n)) => picked = names.iter().position(|x| *x == n).unwrap_or(picked),
+        // A name another type has is refused at once, the name left to change.
+        Some(Head::Duplicate(n) | Head::Rename(n)) if names.iter().enumerate().any(|(i, x)| *x == n && i != picked) => {
+            d.error = Some(tf("The name `{}` is already in use.", &[&n]));
         }
-        if ui.button(t("New Type")).clicked() {
-            picked = d.types.len();
-            d.types.push(d.new_type());
+        Some(Head::Duplicate(n)) => {
+            if let Some(r) = d.types.get(picked) {
+                let mut copy = r.clone();
+                copy.was = None;
+                copy.name = n;
+                picked = d.types.len();
+                d.types.push(copy);
+            }
+            (d.naming, d.error) = (Naming::None, None);
         }
-    });
+        Some(Head::Rename(n)) => {
+            if let Some(r) = d.types.get_mut(picked) {
+                r.name = n;
+            }
+            (d.naming, d.error) = (Naming::None, None);
+        }
+        None => {}
+    }
     if let Some((row, _)) = &mut d.subject {
         *row = picked;
     }
-    let names: Vec<(usize, String)> = d.live().map(|(i, p)| (i, p.name.clone())).collect();
+    let pattern_names: Vec<(usize, String)> = d.live().map(|(i, p)| (i, p.name.clone())).collect();
+    let mut open_patterns = false;
+    let patterns = &d.patterns;
     let Some(r) = d.types.get_mut(picked) else { return };
-    ui.add_space(6.0);
-    Grid::new("region-type-properties").num_columns(2).spacing(vec2(16.0, 8.0)).show(ui, |ui| {
-        ui.label(t("Name"));
-        name_field(ui, &mut r.name, t("Type Name").to_string());
-        ui.end_row();
+    typeprops::table(ui, "region-type", below + 22.0, |tb| {
+        tb.group("Graphics");
         for (row, rgb, label, colour) in [
             (&mut r.foreground, &mut r.foreground_color, msg!("Foreground Pattern"), msg!("Foreground Color")),
             (&mut r.background, &mut r.background_color, msg!("Background Pattern"), msg!("Background Color")),
         ] {
-            ui.label(t(label));
-            pattern_pick(ui, row, &names, t(label).to_string());
-            ui.end_row();
-            ui.label(t(colour));
-            colour_field(ui, rgb, t(colour).to_string());
-            ui.end_row();
+            tb.row(t(label), |ui, _| {
+                let width = ui.available_width() - 30.0;
+                ui.scope(|ui| {
+                    ui.set_width(width);
+                    pattern_pick(ui, row, &pattern_names, t(label).to_string(), width);
+                });
+                open_patterns |= named_button(ui, "…", tf("{}: Edit Patterns", &[t(label)]));
+            });
+            tb.row(t(colour), |ui, _| colour_field(ui, rgb, t(colour).to_string()));
         }
-        ui.label("");
-        ui.checkbox(&mut r.masking, t("Masking"));
-        ui.end_row();
+        tb.check(t("Masking"), &mut r.masking);
+        tb.group("Preview");
+        tb.full(|ui| preview(ui, r, patterns));
     });
-    ui.add_space(8.0);
-    ui.label(t("Preview"));
-    if let Some(r) = d.types.get(picked) {
-        preview(ui, r, &d.patterns);
+    ui.add_space(4.0);
+    ui.label(RichText::new(t("Changes to a type affect every filled region of that type.")).small().color(pal().muted));
+    if open_patterns {
+        d.tab = 1;
     }
-    ui.label(t("Changes to a type affect every filled region of that type."));
 }
 
 /// A type's sample as the plan draws a region of it, in the canvas's colours: a model line across the paper, which the
@@ -669,11 +688,25 @@ impl BimApp {
         let editing = d.subject.is_some();
         let (mut ok, mut apply, mut cancel, mut ask) = (false, false, false, None);
         let r = Modal::new(UiId::new("fill-patterns")).show(ctx, |ui| {
-            // One width for both tabs and both ways in, so the dialog doesn't jump as they change.
+            // Edit Type: Type Properties as every type's, its patterns a step away.
+            if editing && d.tab == 0 {
+                typeprops::title(ui);
+                let below = typeprops::foot_height(ui, d.error.is_some());
+                edit_type(ui, &mut d, below);
+                (ok, cancel, apply) = typeprops::foot(ui, d.error.as_deref());
+                return;
+            }
+            // One width for both tabs, so the dialog doesn't jump as they change.
             ui.set_width(860.0);
             ui.label(RichText::new(t(if editing { "Type Properties" } else { msg!("Fill Patterns") })).heading());
             ui.add_space(6.0);
             ui.horizontal(|ui| {
+                if editing {
+                    if ui.button(t("‹ Back")).on_hover_text(t("Back to the type")).clicked() {
+                        d.tab = 0;
+                    }
+                    return;
+                }
                 for (i, tab) in TABS.iter().enumerate() {
                     if ui.selectable_label(d.tab == i, t(tab)).clicked() {
                         d.tab = i;
@@ -686,8 +719,6 @@ impl BimApp {
             let below = messages_height(&d) + 8.0 + dialog_row(ui);
             if d.tab == 1 {
                 ask = patterns_tab(ui, &mut d, below);
-            } else if editing {
-                ScrollArea::vertical().id_salt("edit-type").max_height(dialog_room(ui, below)).show(ui, |ui| edit_type(ui, &mut d));
             } else {
                 types_tab(ui, &mut d, below);
             }

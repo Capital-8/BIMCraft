@@ -468,8 +468,9 @@ fn a_duplicate_made_in_edit_type_goes_to_the_regions_selected_and_not_to_the_oth
     h.state_mut().selection = vec![regions[0], regions[1]];
     h.run();
     press(&mut h, "Edit Type");
-    press(&mut h, "Duplicate");
-    type_into(&mut h, "Type Name", "Sand Two");
+    press(&mut h, "Duplicate…");
+    type_into(&mut h, "New type", "Sand Two");
+    press(&mut h, "Create");
     press(&mut h, "OK");
     assert!(h.state().fill_patterns_dialog.is_none(), "{}", h.state().status.text);
     let kinds: Vec<_> = regions.iter().map(|r| type_of(&h, *r)).collect();
@@ -478,8 +479,9 @@ fn a_duplicate_made_in_edit_type_goes_to_the_regions_selected_and_not_to_the_oth
     h.state_mut().selection = vec![regions[2]];
     h.run();
     press(&mut h, "Edit Type");
-    press(&mut h, "Duplicate");
-    type_into(&mut h, "Type Name", "Sand Three");
+    press(&mut h, "Duplicate…");
+    type_into(&mut h, "New type", "Sand Three");
+    press(&mut h, "Create");
     press(&mut h, "OK");
     let kinds: Vec<_> = regions.iter().map(|r| type_of(&h, *r)).collect();
     assert_eq!(kinds, [json!("Sand Two"), json!("Sand Two"), json!("Sand Three"), json!("Crosshatch")]);
