@@ -14,10 +14,10 @@
 //! Source: NBR 8160 is a paid ABNT standard. These are its numbers (units, DNs, lengths) transcribed from a licensed copy "as
 //! printed"; no clause text is copied. They are limits chosen by the standard's authors, tabulated per DN and slope, with no formula
 //! that yields them, so they stay tables. A blank cell of a table means "not allowed" and is kept as 0, never filled from another
-//! table. Tabela 7 here stops at DN 200; whether the standard continues past it is to be checked against the standard itself.
+//! table. Tabela 7 is complete, DN 100 to 400, as printed (checked against the standard's page).
 
 /// The DNs of the standard's tables, smallest first.
-pub const DNS: &[f64] = &[40.0, 50.0, 75.0, 100.0, 150.0, 200.0, 250.0, 300.0];
+pub const DNS: &[f64] = &[40.0, 50.0, 75.0, 100.0, 150.0, 200.0, 250.0, 300.0, 400.0];
 
 /// The smallest DN of a building drain ("coletor predial").
 pub const MAIN_MIN_DN: f64 = 100.0;
@@ -31,8 +31,14 @@ const BRANCH: &[(f64, f64)] = &[(40.0, 3.0), (50.0, 6.0), (75.0, 20.0), (100.0, 
 
 /// Tabela 7's slopes (fractions) and, by DN, the units a building drain carries at each (0: not allowed at that slope).
 const MAIN_SLOPES: [f64; 4] = [0.005, 0.01, 0.02, 0.04];
-const MAIN: &[(f64, [f64; 4])] =
-    &[(100.0, [0.0, 180.0, 216.0, 250.0]), (150.0, [0.0, 700.0, 840.0, 1000.0]), (200.0, [1400.0, 1600.0, 1920.0, 2300.0])];
+const MAIN: &[(f64, [f64; 4])] = &[
+    (100.0, [0.0, 180.0, 216.0, 250.0]),
+    (150.0, [0.0, 700.0, 840.0, 1000.0]),
+    (200.0, [1400.0, 1600.0, 1920.0, 2300.0]),
+    (250.0, [2500.0, 2900.0, 3500.0, 4200.0]),
+    (300.0, [3900.0, 4600.0, 5600.0, 6700.0]),
+    (400.0, [7000.0, 8300.0, 10000.0, 12000.0]),
+];
 
 /// Tabela 6: the units a stack of each DN carries: (DN, up to three floors, more than three).
 const STACK: &[(f64, f64, f64)] = &[
