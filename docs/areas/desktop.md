@@ -77,6 +77,29 @@ A selected column or component, and the Column and Component tools' sketches, sh
 line or grid east, north, west and south (`Model::clearances`, which finds them in the core; `standing_dimensions` draws them); a typed one runs
 `move` by the difference along that way.
 
+Align (AL) highlights the exact edge or axis under the cursor before either pick, leaving the selected reference as an
+extended dashed line. It searches the candidates under the pointer for a usable line rather than letting annotation mask
+one. `align::lines` in the core supplies wall faces and ends, opening jambs, grids, column faces and axes, structural and
+MEP runs, components, slab and roof boundaries, stairs, ramps, railings and detail geometry. Straight segments of a
+polyline or sketch are usable; curved edges are not replaced with straight chords. The `align` command turns the target
+by the smaller angle about the picked line's midpoint and translates it onto the reference, as one undo step through the
+usual transform and validation path. Hosted doors/windows can slide along their wall, and hosted railings follow their
+stair or ramp. A refusal keeps the reference selected. On the second pick a floor's or region's model pattern remains
+alignable when its line is closer than the boundary; picking the boundary aligns the element instead.
+
+While a sketch is active, Align takes its reference from either model geometry or another sketch line, with a coincident
+draft line taking priority over the saved boundary. Its second pick edits a sketch line. The same exact segment highlights
+on hover before either pick, including straight segments of polylines. `align::sketch_lines` applies the rigid alignment to
+the draft curve, keeps its id, GUID and style, and moves joined endpoints so a closed boundary stays connected. A sketch
+reference stays fixed. Changes use the sketch's Ctrl+Z history and reach the model only through Finish Edit Mode; Cancel
+leaves the model as it was. Invalid geometry leaves the draft and reference intact, and undo or Escape drops stale picks.
+
+The sketch's contextual ribbon includes Align, Trim/Extend to Corner, Trim/Extend Single/Multiple Elements, Split and
+Offset. Trim highlights sketch candidates and keeps its first pick lit; its prompt says which line to pick and to click
+the part to keep. A failed trim leaves that first pick available for another target; a successful edit clears the error.
+Multiple Trim keeps the boundary across successive target edits while that indexed line is unchanged, and drops it if
+another edit removes, renumbers or changes it. Escape clears the first pick; Ctrl+Z takes back each trim as one draft step.
+
 A point picked in a plan lands where `snap::snap` says, the core's so every front end agrees: on the end, middle or centre of
 what's drawn (`Scene::of`), a round detail line's quadrants (`rounds`: a circle's, an ellipse's or an arc's points along its axes),
 where two straight lines (walls, grids; not arcs) or a detail line's chords cross (never a line's chords with each other), where a
@@ -236,7 +259,7 @@ blues were 2.5:1 on white; `style`'s tests keep the two told apart and 3:1 on th
 second time.
 
 The Draw panel's tools leave nothing behind: `set_tool` drops Insulation and Revision Cloud (the Detail Line tool's) and the lines picked for Fillet Arc and
-Trim/Extend (`forget_picks`), a sketch's picks are dropped when its lines change (`track_sketch`, once a frame) and when it ends, and a shape's typed numbers are
+Trim/Extend (`forget_picks`), a sketch's picks are dropped when its lines change (`track_sketch`, once a frame), except an unchanged Multiple Trim boundary, and when it ends, and a shape's typed numbers are
 dropped when the shape changes. A fillet that does not fit keeps its two lines picked and spends the digits; a click that sizes the arc clears them. A number of the
 Options Bar that the shape in hand takes and cannot read (`options_error`) is red and makes nothing. A sketch keeps the lines as they were before each change
 (`Sketch::track`), so Ctrl+Z takes back a fillet, a trim or a grip move whole; it belongs to the plan it began in, and the window comes back to that plan until Finish or
