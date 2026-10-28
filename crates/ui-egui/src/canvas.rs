@@ -606,6 +606,44 @@ fn nearest_line(m: &Model, id: Id, p: P2) -> Option<(P2, P2)> {
     m.reference_at(id, p, |_| true).and_then(|(r, _)| m.reference_line(&r).ok())
 }
 
+/// The same candidate for hover and a click: a model edge/axis, or, on the second pick,
+/// a model pattern line when it is closer than the element's boundary.
+fn alignment_line(m: &Model, key: Id, id: Id, at: P2, reach: f64, pattern: bool) -> Option<(Line, bool)> {
+    let edge = bimcraft_core::align::nearest(m, id, at).filter(|(_, d)| *d <= reach);
+    let fill = pattern.then(|| render::pattern_line_at(m, key, id, at, reach)).flatten();
+    match (edge, fill) {
+        (Some((_, distance)), Some(fill)) if geom::dist_to_segment(at, fill.0, fill.1) + 1e-6 < distance => Some((fill, true)),
+        (Some((edge, _)), _) => Some((edge, false)),
+        (None, Some(fill)) => Some((fill, true)),
+        _ => None,
+    }
+}
+
+/// While sketching, references can come from either scene; only the active sketch is editable.
+/// Give a coincident draft line priority over the element whose boundary is being edited.
+fn alignment_pick(
+    m: &Model,
+    key: Id,
+    sketch: Option<&crate::sketch::Sketch>,
+    reference: Option<Line>,
+    hovered: Option<Id>,
+    at: P2,
+    reach: f64,
+) -> Option<(draw::Picked, Line, bool)> {
+    let draft = sketch.and_then(|sk| sk.alignment_at(at, reach));
+    let model = hovered
+        .filter(|_| sketch.is_none() || reference.is_none())
+        .and_then(|id| alignment_line(m, key, id, at, reach, reference.is_some()).map(|(line, pattern)| (id, line, pattern)));
+    match (draft, model) {
+        (Some((_, _, d)), Some((id, other, pattern))) if geom::dist_to_segment(at, other.0, other.1) + 1e-6 < d => {
+            Some((draw::Picked::Element(id), other, pattern))
+        }
+        (Some((i, line, _)), _) => Some((draw::Picked::Sketch(i), line, false)),
+        (None, Some((id, line, pattern))) => Some((draw::Picked::Element(id), line, pattern)),
+        _ => None,
+    }
+}
+
 /// Degrees from the ray `centre`→`from` to the ray `centre`→`to`, counter-clockwise, in
 /// (-180, 180]; each ray onto the nearest multiple of `inc` degrees when it's within a few
 /// degrees of one.
@@ -947,12 +985,13 @@ impl BimApp {
             }
             Tool::Door | Tool::Window => d.pick(q, PICK).filter(|id| model.wall(*id).is_some()),
             Tool::Demolish | Tool::Linework => d.pick(q, PICK),
-            // With a reference picked, a region's or a floor's pattern lines too.
-            Tool::Align(Some(_)) => d.pick(q, PICK).filter(|id| {
-                !model.reference_lines(*id).is_empty()
-                    || matches!(model.elements.get(*id), Some(Element::FilledRegion(_) | Element::Floor(_)))
+            // Search all candidates: a non-alignable annotation must not hide a model edge.
+            Tool::Align(Some(_)) if sketching => None,
+            Tool::Align(reference) => d.pick_all(q, PICK).into_iter().find(|id| {
+                (reference.is_none() || !bimcraft_core::link::is_linked(*id))
+                    && alignment_line(&model, key, *id, view.mm(q), near, reference.is_some()).is_some()
             }),
-            Tool::Align(None) | Tool::Mirror { draw: false, .. } => d.pick(q, PICK).filter(|id| !model.reference_lines(*id).is_empty()),
+            Tool::Mirror { draw: false, .. } => d.pick(q, PICK).filter(|id| !model.reference_lines(*id).is_empty()),
             // Something to measure to: with a line parallel to the first one picked, or for an angle,
             // one across it.
             Tool::Dimension(refs) => d
@@ -1057,10 +1096,12 @@ impl BimApp {
             draw::Picked::Element(id) => Some(*id),
             draw::Picked::Sketch(_) => None,
         }));
-        paint(&p, Place::at(rect.min), &d, &marked, hovered, self.thin, &pictures);
+        let sketch_trim = self.sketch.is_some() && matches!(self.tool, Tool::Trim(_) | Tool::TrimTo { .. });
+        let painted_hover = if matches!(self.tool, Tool::Align(_)) || sketch_trim { None } else { hovered };
+        paint(&p, Place::at(rect.min), &d, &marked, painted_hover, self.thin, &pictures);
         if let Some(sk) = &self.sketch {
             let over = local
-                .filter(|_| self.tool == Tool::Modify && sk.drag.is_none())
+                .filter(|_| matches!(self.tool, Tool::Modify | Tool::Trim(_) | Tool::TrimTo { .. }) && sk.drag.is_none())
                 .and_then(|q| sk.line_at(view.mm(q), f64::from(PICK) / view.scale));
             let from: &[P2] = match &self.tool {
                 Tool::SketchLine(chain) if self.shape() == draw::Shape::Line || chain.len() < 2 => chain,
@@ -1438,17 +1479,17 @@ impl BimApp {
                     Some(a) => self.reflect((a, p)),
                 }
             }
-            // A model pattern's line, picked second, moves the pattern onto the reference.
-            &Tool::Align(Some(r))
-                if let Some(id) =
-                    hovered.filter(|id| matches!(m.elements.get(*id), Some(Element::FilledRegion(_) | Element::Floor(_))))
-                    && let Some(line) = render::pattern_line_at(m, key, id, v.mm(at), 2.0 * f64::from(PICK) / v.scale) =>
-            {
-                self.align_pattern(m, r, id, line)
-            }
-            &Tool::Align(reference) => match (reference, hovered.and_then(|id| Some((id, nearest_line(m, id, v.mm(at))?)))) {
-                (None, Some((_, line))) => self.tool = Tool::Align(Some(line)),
-                (Some(r), Some((id, line))) => self.align(r, id, line),
+            &Tool::Align(reference) => match (
+                reference,
+                alignment_pick(m, key, self.sketch.as_ref(), reference, hovered, v.mm(at), 2.0 * f64::from(PICK) / v.scale),
+            ) {
+                (None, Some((picked, line, _))) => {
+                    self.drawing.align_reference = Some(picked);
+                    self.tool = Tool::Align(Some(line));
+                }
+                (Some(r), Some((draw::Picked::Sketch(i), line, _))) => self.align_sketch(r, i, line),
+                (Some(r), Some((draw::Picked::Element(id), line, true))) => self.align_pattern(m, r, id, line),
+                (Some(r), Some((draw::Picked::Element(id), line, false))) => self.align(r, id, line),
                 _ => {}
             },
             &Tool::Trim(first) => match (first, hovered) {
@@ -2054,18 +2095,15 @@ impl BimApp {
         self.tool = Tool::Modify;
     }
 
-    /// Align's second pick: element `id` moved across so its `line` lies on the reference line.
+    /// Align's second pick: turn and move the element so its picked line lies on the reference.
     fn align(&mut self, reference: (P2, P2), id: Id, line: (P2, P2)) {
-        if !geom::parallel(reference.0, reference.1, line.0, line.1) {
-            self.status = Status { text: t("align: the lines aren't parallel").into(), error: true };
-            return;
+        if self
+            .run("align", json!({"id": id, "reference": [point(reference.0), point(reference.1)], "line": [point(line.0), point(line.1)]}))
+            .is_some()
+        {
+            self.tool = Tool::Align(None);
+            self.drawing.align_reference = None;
         }
-        let n = (reference.1 - reference.0).unit().perp();
-        let by = micron(n * (reference.0 - line.0).dot(n));
-        if by.length() > 1e-6 {
-            self.run("move", json!({"ids": [id], "by": point(by)}));
-        }
-        self.tool = Tool::Align(None);
     }
 
     /// Align on a pattern: element `id`'s pattern moved across so its `line` lies on `reference`. The core says where the
@@ -2073,8 +2111,10 @@ impl BimApp {
     fn align_pattern(&mut self, m: &Model, reference: (P2, P2), id: Id, line: (P2, P2)) {
         match m.align_pattern(id, reference, line) {
             Ok(to) => {
-                self.run("modify", json!({"id": id, "pattern_origin": point(to)}));
-                self.tool = Tool::Align(None);
+                if self.run("modify", json!({"id": id, "pattern_origin": point(to)})).is_some() {
+                    self.tool = Tool::Align(None);
+                    self.drawing.align_reference = None;
+                }
             }
             Err(e) => self.status = Status { text: t(&e).into(), error: true },
         }
@@ -2748,6 +2788,11 @@ impl BimApp {
                     let (a, b) = (sc.screen(*a), sc.screen(*b));
                     let u = (b - a).normalized() * 2000.0;
                     dashed(a - u, b + u);
+                }
+                if let Some((_, line, _)) =
+                    alignment_pick(m, key, self.sketch.as_ref(), *reference, hovered, v.mm(q), 2.0 * f64::from(PICK) / v.scale)
+                {
+                    p.line_segment([sc.screen(line.0), sc.screen(line.1)], Stroke::new(4.0, canvas_pal().hover));
                 }
                 return;
             }

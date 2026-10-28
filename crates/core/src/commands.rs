@@ -778,6 +778,15 @@ pub static ALL: &[Command] = &[
         match_properties,
     ),
     edit(
+        "align",
+        ui_msg!("Align"),
+        &["AL"],
+        "{id, reference: [[x,y],[x,y]], line: [[x,y],[x,y]]} aligns an element's picked line with a reference in plan: \
+         turns by the smaller angle about the picked line's midpoint, then moves it onto the reference, keeping its size. \
+         Doors and windows slide along their host wall; they cannot turn independently. Returns {aligned, angle, by}",
+        align_element,
+    ),
+    edit(
         "move",
         ui_msg!("Move"),
         &["MV"],
@@ -7013,6 +7022,34 @@ fn duplicate(c: &str, s: &mut Session, ids: &[Id], mo: &Motion) -> R {
         made.push(id);
     }
     Ok(json!({"ids": made}))
+}
+
+fn align_element(s: &mut Session, p: &Value) -> R {
+    let c = "align";
+    let id = id_opt(c, p, "id")?.ok_or_else(|| bad(c, "`id` is required"))?;
+    let line = |name| -> Result<Line, String> {
+        match points(c, p, name)?.as_slice() {
+            [a, b] => Ok((*a, *b)),
+            _ => Err(bad(c, format!("`{name}` must contain two points"))),
+        }
+    };
+    let placement = crate::align::Placement::new(line("reference")?, line("line")?)?;
+    let id = s.model.elements.id(id).ok_or_else(|| bad(c, format!("no element {id}")))?;
+    if crate::align::lines(&s.model, id).is_empty() {
+        return Err(bad(c, format!("element {id} has no straight alignment line in plan")));
+    }
+    if s.model.elements.get(id).and_then(|e| s.model.run_geom(e)).is_some_and(|g| g.vertical()) && placement.angle.abs() > 1e-9 {
+        return Err(bad(c, "an upright run has no plan rotation; choose a parallel reference"));
+    }
+    if let Some(Element::Door(o) | Element::Window(o)) = s.model.elements.get(id)
+        && let Some(w) = s.model.wall(o.host)
+        && (placement.angle.abs() > 1e-9 || placement.by.cross((w.end - w.start).unit()).abs() > TOL)
+    {
+        return Err(bad(c, "a door or window can only slide along its host wall; align its jambs, or align the wall"));
+    }
+    let mo = Motion { map: &|q| placement.map(q), slide: (placement.angle.abs() <= 1e-9).then_some(placement.by), mirror: false };
+    relocate(c, s, &[id], &mo, None)?;
+    Ok(json!({"aligned": id, "angle": placement.angle, "by": placement.by}))
 }
 
 fn move_elements(s: &mut Session, p: &Value) -> R {

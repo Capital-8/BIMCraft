@@ -2143,7 +2143,10 @@ impl BimApp {
             Tool::Grid(Some(_)) => Tool::Grid(None),
             Tool::Run(c, Some(_)) => Tool::Run(c, None),
             Tool::Mirror { draw, start: Some(_) } => Tool::Mirror { draw, start: None },
-            Tool::Align(Some(_)) => Tool::Align(None),
+            Tool::Align(Some(_)) => {
+                self.drawing.align_reference = None;
+                Tool::Align(None)
+            }
             Tool::Trim(Some(_)) => Tool::Trim(None),
             Tool::TrimTo { boundary: Some(_), many } => Tool::TrimTo { boundary: None, many },
             Tool::Dimension(refs) if !refs.is_empty() => Tool::Dimension(Vec::new()),
@@ -3409,6 +3412,7 @@ impl BimApp {
         self.select_panel(ui);
         if self.sketch.is_some() {
             self.sketch_draw(ui);
+            self.sketch_modify_panel(ui);
             self.mode_panel(ui);
             return;
         }
@@ -3954,8 +3958,8 @@ impl BimApp {
             Tool::Mirror { draw: false, .. } => msg!("Pick a wall or grid to mirror across."),
             Tool::Mirror { draw: true, start: None } => msg!("Click the start of the mirror axis."),
             Tool::Mirror { draw: true, start: Some(_) } => msg!("Click the end of the mirror axis."),
-            Tool::Align(None) => msg!("Pick a reference line: a grid, or a wall's face or centre line."),
-            Tool::Align(Some(_)) => msg!("Pick the wall or grid to line up with the reference."),
+            Tool::Align(None) => msg!("Pick a reference edge or centre line; the line under the cursor is highlighted."),
+            Tool::Align(Some(_)) => msg!("Pick the element's highlighted edge to move and turn onto the reference."),
             Tool::Trim(None) => msg!("Pick the first wall or line, on the part to keep."),
             Tool::Trim(Some(_)) => msg!("Pick the second wall or line, on the part to keep."),
             Tool::TrimTo { boundary: None, .. } => msg!("Pick the line to trim or extend to: a line, a wall or a grid."),
