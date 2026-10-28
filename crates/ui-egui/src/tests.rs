@@ -2613,7 +2613,7 @@ mass {"boundary": [[1000, 1000], [3000, 1000], [3000, 2000], [1000, 2000]], "nam
         pick(&mut h, Role::Button, &over);
         missed.extend(english(&h, l));
         press(&mut h, tr("Cancel"));
-        for tab in ["Annotation Categories", "Filters", "Elements", "Design Options"] {
+        for tab in ["Annotation Categories", "Imported Categories", "Filters", "Elements", "Design Options"] {
             press(&mut h, tr(tab));
             missed.extend(english(&h, l));
         }
@@ -5171,6 +5171,7 @@ fn the_massing_tab_makes_floors_walls_a_floor_and_a_roof_from_the_selected_mass(
 
 mod autosave;
 mod browser;
+mod cad;
 mod chinese;
 mod clouds;
 mod control;

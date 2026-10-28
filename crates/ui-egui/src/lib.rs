@@ -6,6 +6,7 @@
 //! (plans, the 3D view, schedules), and the tool's prompt in the status bar.
 
 mod browser;
+mod cad;
 mod canvas;
 mod clouds;
 mod context;
@@ -540,6 +541,10 @@ pub struct BimApp {
     cloud_dialog: bool,
     /// Bringing scan files in: the box, while it's open.
     cloud_box: Option<clouds::CloudBox>,
+    /// Insert > Import CAD (false) or Link CAD (true) was pressed: its file dialog opens this frame.
+    cad_dialog: Option<bool>,
+    /// Bringing a CAD drawing in: the box, while it's open.
+    cad_box: Option<cad::CadBox>,
     /// A selected element's temporary dimension being typed: the element, which of its dimensions (a wall has one, a
     /// door or window two: from its wall's start, from its end), the length so far.
     dim_edit: Option<(Id, usize, String)>,
@@ -991,6 +996,8 @@ impl BimApp {
             link_dialog: false,
             cloud_dialog: false,
             cloud_box: None,
+            cad_dialog: None,
+            cad_box: None,
             tab_cycle: false,
             held: Vec::new(),
             show_shortcuts: false,
@@ -1665,7 +1672,7 @@ impl BimApp {
             }
             "EU" | "UE" => {
                 if self.hidden_selection().0.is_empty() {
-                    self.open_graphics(3);
+                    self.open_graphics(graphics::ELEMENTS_TAB);
                 } else {
                     self.unhide_selection(false);
                 }
@@ -3215,6 +3222,17 @@ impl BimApp {
             if big_button(ui, Icon::PointCloud, "Point Cloud", self.cloud_box.is_some(), tip).clicked() {
                 self.cloud_dialog = true;
             }
+            let tip =
+                "Link CAD: a DXF drawing shown in the plans of a level, read again from its file on Reload and when the project opens";
+            if big_button(ui, Icon::LinkCad, "Link CAD", self.cad_box.as_ref().is_some_and(|b| b.linked()), tip).clicked() {
+                self.cad_dialog = Some(true);
+            }
+        });
+        panel(ui, "Import", |ui| {
+            let tip = "Import CAD: a DXF drawing brought into the project, drawn under the model in the plans of a level, its layers, colours and linetypes kept, and snapped to";
+            if big_button(ui, Icon::ImportCad, "Import CAD", self.cad_box.as_ref().is_some_and(|b| !b.linked()), tip).clicked() {
+                self.cad_dialog = Some(false);
+            }
         });
     }
 
@@ -4182,6 +4200,10 @@ impl BimApp {
             self.point_cloud_dialog(ctx);
         }
         self.point_cloud_window(ctx);
+        if let Some(link) = self.cad_dialog.take() {
+            self.import_cad_dialog(ctx, link);
+        }
+        self.import_cad_window(ctx);
         self.select_by_id_window(ctx);
         self.ids_of_selection_window(ctx);
         self.selection_filter_window(ctx);

@@ -750,7 +750,7 @@ pub(crate) fn plan_extent(m: &Model, level: impl Key) -> Vec<P2> {
 }
 
 /// Everything a plan of `level` shows, uncropped: its walls, floors, rooms, dimensions, tags,
-/// notes and spot elevations, the grids, and the marks of the sections and elevations.
+/// notes and spot elevations, the grids, the marks of the sections and elevations, and its CAD imports.
 pub(crate) fn plan_shows(m: &Model, plan: impl Key) -> Vec<P2> {
     // The plan's own guid says what it is: its graphics, range and annotation; its level is what it shows of the model.
     let key = m.guid(plan);
@@ -760,8 +760,11 @@ pub(crate) fn plan_shows(m: &Model, plan: impl Key) -> Vec<P2> {
     let index = walls::Index::new(m);
     let mut extent: Vec<P2> = cut_outlines(m, r.cut, &look, &index).into_iter().flat_map(|(_, o)| o).collect();
     extent.extend(seen_below(m, &r, &look, &index).into_iter().flat_map(|(_, o, _)| o));
-    for (_, e) in m.elements.iter().filter(|(id, _)| look.shows(**id)) {
+    for (id, e) in m.elements.iter().filter(|(id, _)| look.shows(**id)) {
         match e {
+            Element::CadImport(ci) if ci.level == level && ci.view.is_none_or(|v| v == key) => {
+                extent.extend(m.cad_box(*id).into_iter().flatten())
+            }
             Element::Floor(Floor { level: l, boundary, .. })
             | Element::Ceiling(Ceiling { level: l, boundary, .. })
             | Element::Shaft(Shaft { level: l, boundary, .. })
@@ -1395,6 +1398,84 @@ fn scans(d: &mut Drawing, m: &Model, range: &PlanRange, look: &Look) {
     d.own(None);
 }
 
+/// The CAD drawings a plan shows, under all the rest but its scans, as Revit draws an import in the background: those placed on
+/// its level, in each of its plans or in this one only, of the layers the import and the view show. Each entity is drawn in its
+/// colour (the view's ink where it has none, or the import draws in black), its pen and its linetype; a solid hatch filled, a
+/// patterned one as a pale fill of its colour; text lettered at its height, turned and aligned as the drawing has it.
+fn cad_imports(d: &mut Drawing, m: &Model, key: crate::ids::Guid, level: crate::ids::Guid, look: &Look) {
+    use crate::dxf::{Horizontal, Shape, Vertical};
+    // The view in model mm, to leave out what lies outside it.
+    let (w, h) = (d.view.width as f32, d.view.height as f32);
+    let view = [d.view.mm((0.0, 0.0)), d.view.mm((w, 0.0)), d.view.mm((w, h)), d.view.mm((0.0, h))];
+    for (&id, e) in &m.elements {
+        let Element::CadImport(ci) = e else { continue };
+        if ci.level != level || ci.view.is_some_and(|v| v != key) || !look.shows(id) {
+            continue;
+        }
+        let Some(cad) = m.cads.get(&ci.cad) else { continue };
+        let place = crate::model::cad_place(ci);
+        let Some([lo, hi]) = crate::dxf::union(view.map(|q| {
+            let p = crate::model::cad_unplace(ci, q);
+            [p, p]
+        })) else {
+            continue;
+        };
+        let seen = |b: [P2; 2]| b[0].0 <= hi.0 && b[1].0 >= lo.0 && b[0].1 <= hi.1 && b[1].1 >= lo.1;
+        // Pixels to each of the drawing's units.
+        let k = ci.scale * d.view.scale;
+        let in_view = look.hidden_layers(&ci.cad);
+        d.own(Some(id));
+        for ent in &cad.dxf().entities {
+            if !cad.shows(ent, &ci.hidden) || in_view.is_some_and(|l| l.contains(&ent.layer)) || !seen(ent.shape.bounds()) {
+                continue;
+            }
+            let color = cad.color(ent, ci.colors).unwrap_or(INK);
+            match &ent.shape {
+                Shape::Text { at, height, angle, text, align } => {
+                    let px = (height * k) as f32;
+                    if px < 1.0 {
+                        continue;
+                    }
+                    let wide = f64::from(font::width(text, px)) / k;
+                    let (u, v) =
+                        (P2(angle.to_radians().cos(), angle.to_radians().sin()), P2(-angle.to_radians().sin(), angle.to_radians().cos()));
+                    let left = match align.h {
+                        Horizontal::Left => *at,
+                        Horizontal::Center => *at - u * (wide / 2.0),
+                        Horizontal::Right => *at - u * wide,
+                    };
+                    let base = match align.v {
+                        Vertical::Baseline | Vertical::Bottom => left,
+                        Vertical::Middle => left - v * (height / 2.0),
+                        Vertical::Top => left - v * *height,
+                    };
+                    let middle = d.view.px(place(base + u * (wide / 2.0) + v * (height / 2.0)));
+                    d.text_turned(text, middle, px, -((angle + ci.angle).to_radians()) as f32, color);
+                }
+                Shape::Point(_) => {}
+                Shape::Fill { rings, solid } => {
+                    let rings: Vec<Vec<P2>> = rings.iter().map(|r| r.iter().map(|p| place(*p)).collect()).collect();
+                    let fill = if *solid { color } else { Rgb(pale(color.0), pale(color.1), pale(color.2)) };
+                    d.fill(&rings, fill);
+                }
+                shape => {
+                    let dash = cad.dash(ent).map(|[a, b]| [(a * k) as f32, (b * k) as f32]).filter(|[a, b]| *a >= 1.0 && *b >= 1.0);
+                    for (pts, closed) in crate::cad::paths(shape) {
+                        let px = pts.iter().map(|p| d.view.px(place(*p))).collect();
+                        d.stroke(px, cad.pen(ent), color, dash.map(|d| d.to_vec()), closed);
+                    }
+                }
+            }
+        }
+    }
+    d.own(None);
+}
+
+/// A channel of a colour most of the way to the paper: a patterned hatch's fill.
+fn pale(v: u8) -> u8 {
+    v + (255 - v) / 4 * 3
+}
+
 /// A floor plan of `plan`, or `up`, its reflected ceiling plan; `titled`, with its name lettered at its bottom left (an image of
 /// it has it; a window shows the name in the view's tab, and a sheet under its viewport). Its annotation `k` times the size it
 /// is laid out at, its pens the line weights' at 1 : `n`.
@@ -1414,9 +1495,10 @@ fn draw_plan(m: &Model, plan: impl Key, view: View, up: bool, k: f32, n: f64, ti
         range.cut = m.elevation(level) + CEILING_CUT;
         range.top = range.top.max(range.cut);
     }
-    // The scans it sees, under all the rest.
+    // The scans it sees, under all the rest; then its CAD drawings.
     if !up {
         scans(&mut d, m, &range, &look);
+        cad_imports(&mut d, m, key, level, &look);
     }
     // Floors whose tops it sees, from the cut plane down to the view depth: their outlines and their
     // openings', the holes shafts cut in them, and a sloped one's slope arrow.

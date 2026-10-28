@@ -29,6 +29,8 @@ pub enum Kind {
     Picture,
     /// A scan point clouds place.
     Cloud,
+    /// A CAD drawing imports place.
+    Cad,
     Family,
     Parameter,
     ViewFilter,
@@ -57,6 +59,7 @@ impl Kind {
             Kind::Material => "material".into(),
             Kind::Picture => "picture".into(),
             Kind::Cloud => "scan".into(),
+            Kind::Cad => "CAD drawing".into(),
             Kind::Family => "family".into(),
             Kind::Parameter => "parameter".into(),
             Kind::ViewFilter => "view filter".into(),
@@ -80,6 +83,7 @@ impl Kind {
             "material" => Kind::Material,
             "picture" => Kind::Picture,
             "cloud" => Kind::Cloud,
+            "cad" => Kind::Cad,
             "family" => Kind::Family,
             "parameter" => Kind::Parameter,
             "view-filter" => Kind::ViewFilter,
@@ -107,6 +111,7 @@ impl fmt::Display for Kind {
             Kind::Material => f.write_str("material"),
             Kind::Picture => f.write_str("picture"),
             Kind::Cloud => f.write_str("cloud"),
+            Kind::Cad => f.write_str("cad"),
             Kind::Family => f.write_str("family"),
             Kind::Parameter => f.write_str("parameter"),
             Kind::ViewFilter => f.write_str("view-filter"),
@@ -506,6 +511,7 @@ impl Model {
         add(Kind::Material, &mut self.materials.keys());
         add(Kind::Picture, &mut self.images.keys());
         add(Kind::Cloud, &mut self.clouds.keys());
+        add(Kind::Cad, &mut self.cads.keys());
         add(Kind::Family, &mut self.families.keys());
         add(Kind::Parameter, &mut self.parameters.keys());
         add(Kind::ViewFilter, &mut self.view_filters.keys());
@@ -793,7 +799,7 @@ impl Model {
 }
 
 /// Each name `g` holds of a library entry, given to `f` with what it names, which may put another in its place: a view's
-/// template, filters, phase, phase filter, design options and its linework's line styles.
+/// template, filters, phase, phase filter, design options, its linework's line styles and the CAD drawings whose layers it hides.
 fn graphics_refs(g: &mut crate::graphics::Graphics, f: &mut dyn FnMut(&Kind, &mut String)) {
     for o in g.categories.values_mut().chain(g.elements.values_mut()).chain(g.filters.iter_mut().map(|a| &mut a.over)) {
         for name in o.patterns_mut() {
@@ -823,6 +829,13 @@ fn graphics_refs(g: &mut crate::graphics::Graphics, f: &mut dyn FnMut(&Kind, &mu
             let option = option_ref(&set, &option, f);
             f(&Kind::OptionSet, &mut set);
             (set, option)
+        })
+        .collect();
+    g.layers = std::mem::take(&mut g.layers)
+        .into_iter()
+        .map(|(mut cad, layers)| {
+            f(&Kind::Cad, &mut cad);
+            (cad, layers)
         })
         .collect();
 }
@@ -909,6 +922,7 @@ impl crate::model::Element {
                     f(&Kind::LineStyle, st);
                 }
             }
+            Element::CadImport(ci) => f(&Kind::Cad, &mut ci.cad),
             Element::Schedule(sc) => {
                 let mut fields: Vec<&mut String> =
                     sc.fields.iter_mut().map(|x| &mut x.name).chain(sc.sort.iter_mut().map(|x| &mut x.field)).collect();
