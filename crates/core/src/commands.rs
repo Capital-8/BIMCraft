@@ -2,12 +2,15 @@
 //! millimetres. Commands build elements; [`Model::check`] then validates the whole model, so a
 //! command only has to read its parameters carefully.
 
+use bimcraft_i18n::{msg, ui_msg};
+
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use serde_json::{Map, Value, json};
 
+use crate::cad::{Cad, Colors};
 use crate::cloud::{self, Cloud};
 use crate::engine::{Command, Run, Session};
 use crate::favorites::{self, FamilyEntry, Favorites, MaterialEntry};
@@ -19,11 +22,12 @@ use crate::library::Kind as LibKind;
 use crate::lines::{DetailLine, LineStyle};
 use crate::massing;
 use crate::model::{
-    CEILING_HEIGHT, Ceiling, CeilingType, Column, ColumnType, Component, DEFAULT_HEIGHT, DimKind, Dimension, Element, Extrusion, Face,
-    Facing, Floor, FloorType, Grid, Guid, Id, Key, Landing, Layer, Level, Line, Location, MAX_COORD, MAX_POINTS, MAX_SLOPE, MAX_TEXT, Mass,
-    Model, NOTE_SIZE, Note, Opening, OpeningType, PARAMETER_CATEGORIES, ParameterKind, Pattern, PlanView, PointCloud, ProjectParameter,
-    RAMP_SLOPE, RAMP_WIDTH, RISER, Railing, RailingType, Ramp, Reference, Roof, RoofType, Room, RoomArea, RoomSeparator, STAIR_WIDTH,
-    Schedule, Section, SectionBox, Shaft, Sheet, Side, Spot, Stair, TOL, TREAD, Tag, View3D, Viewport, Wall, WallType, heading, paper,
+    CEILING_HEIGHT, CadImport, Ceiling, CeilingType, Column, ColumnType, Component, DEFAULT_HEIGHT, DimKind, Dimension, Element, Extrusion,
+    Face, Facing, Floor, FloorType, Grid, Guid, Id, Key, Landing, Layer, Level, Line, Location, MAX_COORD, MAX_POINTS, MAX_SLOPE, MAX_TEXT,
+    Mass, Model, NOTE_SIZE, Note, Opening, OpeningType, PARAMETER_CATEGORIES, ParameterKind, Pattern, PlanView, PointCloud,
+    ProjectParameter, RAMP_SLOPE, RAMP_WIDTH, RISER, Railing, RailingType, Ramp, Reference, Roof, RoofType, Room, RoomArea, RoomSeparator,
+    STAIR_WIDTH, Schedule, Section, SectionBox, Shaft, Sheet, Side, Spot, Stair, TOL, TREAD, Tag, View3D, Viewport, Wall, WallType,
+    heading, paper,
 };
 use crate::paint;
 use crate::phasing;
@@ -55,7 +59,12 @@ pub static ALL: &[Command] = &[
     ),
     other("open", "Open", "{path} a .bimcraft project", open),
     other("highrise", "Synthetic Highrise", "{storeys?: 20} replace the project with an original 1–80 storey performance sample", highrise),
-    other("autosave", "Autosave", "{path} atomically write a recovery snapshot, keeping the project path and undo history", autosave),
+    other(
+        "autosave",
+        ui_msg!("Autosave"),
+        "{path} atomically write a recovery snapshot, keeping the project path and undo history",
+        autosave,
+    ),
     other(
         "recover",
         "Recover Autosave",
@@ -106,14 +115,14 @@ pub static ALL: &[Command] = &[
     other("redo", "Redo", "{count?} does again the last `count` steps undone (1 by default)", redo),
     edit(
         "level",
-        "Level",
+        ui_msg!("Level"),
         &["LL"],
         "{elevation, name?, extent?: [[x,y],[x,y]]} a level at an elevation in mm; `extent`, the rectangle in plan its \
          plane stretches over (south-west corner, then north-east), where sections, elevations and the 3D view show it \
          (without one, the model's, a metre past it)",
         level,
     ),
-    edit("grid", "Grid", &["GR"], "{start: [x,y], end: [x,y], name?} names follow the last grid: 1, 2… or A, B…", grid),
+    edit("grid", ui_msg!("Grid"), &["GR"], "{start: [x,y], end: [x,y], name?} names follow the last grid: 1, 2… or A, B…", grid),
     edit(
         "point_cloud",
         "Point Cloud",
@@ -127,8 +136,47 @@ pub static ALL: &[Command] = &[
         point_cloud,
     ),
     edit(
+        "import_cad",
+        "Import CAD",
+        &[],
+        "{path | cad, name?, level?, view?, at?: [x, y], position?, units?, scale?, angle?, layers?, colors?, link?} brings in a \
+         DXF drawing (`path`: an ASCII DXF of any version; save a DWG as DXF first) or places one the project holds again (`cad`, \
+         its name), as an element in every plan of `level`, or with `view` (a plan) in that view only. `units` of the drawing: \
+         auto (the default: what its file says, else mm), mm, cm, m, in or ft; or `scale`, mm to each of its units. `position`: \
+         center (the default: the middle of the drawing on `at`, the origin unless given) or origin (its origin on `at`); \
+         `angle` turns it about `at`, degrees. `layers`: visible (the default: those its file has on and thawed), all, or a list \
+         of those to show. `colors`: preserve (the default), invert or black. `link: true` remembers the file, so `reload_cad` \
+         and opening the project read it again. Returns its id, the drawing's name, its unit, entities and layers, its extents \
+         in the model, how many entities lie far from the rest (they're left out of its extents) and what was left out",
+        import_cad,
+    ),
+    edit(
+        "cad_layers",
+        "CAD Layers",
+        &[],
+        "{id, hide?: [layer, …], show?: [layer, …], view?} a CAD import's layers, each with its colour and linetype and whether \
+         it's shown; `hide` and `show` change which it shows in every view, or with `view` in that view only (its \
+         Visibility/Graphics, by the drawing's name)",
+        cad_layers,
+    ),
+    edit(
+        "reload_cad",
+        "Reload CAD",
+        &[],
+        "{cad} reads a linked CAD drawing's file again, so every import of it shows what the file holds now (opening the project \
+         does too). Returns whether it changed",
+        reload_cad,
+    ),
+    other(
+        "cad_query",
+        "Query",
+        "{id, at: [x, y], reach?} what of a CAD import lies nearest `at`, within `reach` mm (100 unless given): its kind, layer, \
+         colour, linetype and weight, as Revit's Query",
+        cad_query,
+    ),
+    edit(
         "wall",
-        "Wall",
+        msg!("Wall"),
         &["WA"],
         "{points: [[x,y],…], closed?, type?, level?, top_level?, height?, base_offset?, arc?, location?, attach_top?, \
          attach_base?} one wall per segment of its location line; up to the next level, or `height` mm tall (unconnected), or up \
@@ -141,7 +189,7 @@ pub static ALL: &[Command] = &[
     ),
     edit(
         "door",
-        "Door",
+        ui_msg!("Door"),
         &["DR"],
         "{at: [x,y] | wall: id, offset?, type?, family?, level?, mark?, flip_facing?, flip_hand?} in the wall under `at`, \
          or in `wall` centred `offset` mm from its start; with `family`, a door family's `type` (its first by default), \
@@ -158,7 +206,7 @@ pub static ALL: &[Command] = &[
     ),
     edit(
         "floor",
-        "Floor",
+        ui_msg!("Floor"),
         &[],
         "{boundary?: [[x,y],…], openings?: [[[x,y],…],…] | sketch?: [[[x,y],[x,y]],…], level?, type?, offset?, slope?, arrow?: \
          [[x,y],[x,y]], structural?} a slab (a structural one with `structural`, as Revit's Floor: Structural), its top at the level, or `offset` mm above it, open through `openings` (holes inside it, apart); no boundary = the outline \
@@ -173,7 +221,7 @@ pub static ALL: &[Command] = &[
     ),
     edit(
         "ceiling",
-        "Ceiling",
+        ui_msg!("Ceiling"),
         &[],
         "{point: [x,y] | boundary: [[x,y],…], openings?: [[[x,y],…],…] | sketch: [[[x,y],[x,y]],…], level?, type?, offset?} a ceiling, its underside \
          `offset` mm (2600) above the level, open through `openings` (holes inside it, apart): in the room around `point`, out \
@@ -231,7 +279,7 @@ pub static ALL: &[Command] = &[
     ),
     edit(
         "mass_floors",
-        "Mass Floors",
+        ui_msg!("Mass Floors"),
         &["MF"],
         "{mass?, type?, prune?} a floor of the footprint at each level the mass crosses, from the one at its base up to, not \
          including, the one at its top; every mass when no `mass`. The floors it makes hold their mass and level (`Mass Floor`), \
@@ -243,7 +291,7 @@ pub static ALL: &[Command] = &[
     ),
     edit(
         "wall_by_face",
-        "Wall by Face",
+        ui_msg!("Wall by Face"),
         &["WB"],
         "{mass, faces?: [edge, …], type?, location?} a wall on each edge of the mass's footprint (numbered from its first \
          point), or the `faces` given, as tall as the mass; its exterior finish on the edge, facing out (`location` changes \
@@ -252,7 +300,7 @@ pub static ALL: &[Command] = &[
     ),
     edit(
         "floor_by_face",
-        "Floor by Face",
+        ui_msg!("Floor by Face"),
         &["FB"],
         "{mass, type?} a floor on the mass's top face: its top at the mass's top level, or `height` over its base. An ordinary \
          floor from then on",
@@ -260,7 +308,7 @@ pub static ALL: &[Command] = &[
     ),
     edit(
         "roof_by_face",
-        "Roof by Face",
+        ui_msg!("Roof by Face"),
         &["RB"],
         "{mass, type?, slope?, overhang?} a roof on the mass's top face, flat unless it has a `slope` (degrees), over the mass's \
          top level or `height` over its base. An ordinary roof from then on",
@@ -268,7 +316,7 @@ pub static ALL: &[Command] = &[
     ),
     edit(
         "update_by_face",
-        "Update to Face",
+        ui_msg!("Update to Face"),
         &["UF"],
         "{mass?, ids?} rebuilds what `wall_by_face`, `floor_by_face` and `roof_by_face` made from the mass as it is now (Revit's \
          Update to Face): the walls on its edges, as tall as it is, a floor and a roof on its top face. The ones of `mass`, or the \
@@ -288,7 +336,7 @@ pub static ALL: &[Command] = &[
     ),
     edit(
         "room",
-        "Room",
+        ui_msg!("Room"),
         &["RM"],
         "{point: [x,y], level?, name?, number?} bounded by the walls and the room separation lines around the point",
         room,
@@ -304,7 +352,7 @@ pub static ALL: &[Command] = &[
     ),
     edit(
         "column",
-        "Column",
+        ui_msg!("Column"),
         &["CL"],
         "{at: [x,y], type?, angle?, level?, top_level?, height?, base_offset?} a column, its width along `angle` degrees; up to \
          the next level, or `height` mm tall, or up to `top_level`",
@@ -312,7 +360,7 @@ pub static ALL: &[Command] = &[
     ),
     edit(
         "structural_column",
-        "Structural Column",
+        ui_msg!("Structural Column"),
         &["CL"],
         "{at: [x,y], type?, angle?, level?, top_level?, height?, base_offset?} a column of the structure, as `column` makes one but \
          in its own category with its own types (`type` with category structural column): up to the next level, or `height` mm \
@@ -321,7 +369,7 @@ pub static ALL: &[Command] = &[
     ),
     edit(
         "footing",
-        "Isolated Footing",
+        ui_msg!("Isolated Footing"),
         &["FI"],
         "{at: [x,y], type?, thickness?, offset?, angle?, level?} an isolated (pad) footing, its plan the type's (category \
          footing), `thickness` mm thick (400) with its top `offset` mm over the level (0: at it), so it hangs below",
@@ -329,7 +377,7 @@ pub static ALL: &[Command] = &[
     ),
     edit(
         "beam",
-        "Beam",
+        ui_msg!("Beam"),
         &["BM"],
         "{points: [[x,y],…], closed?, type?, level?, offset?, end_offset?, justify?: top|centre|bottom, system?} a beam for each \
          segment of the points: its section the type's (category beam: `width` across, `depth` deep, or round), its `justify` \
@@ -339,7 +387,7 @@ pub static ALL: &[Command] = &[
     ),
     edit(
         "strip_footing",
-        "Wall Footing",
+        ui_msg!("Wall Footing"),
         &["FW"],
         "{points: [[x,y],…], closed?, type?, level?, offset?, system?} a continuous footing under a wall for each segment of the \
          points, its section the type's (category stripfooting), its top `offset` mm over the level (0: at it)",
@@ -347,7 +395,7 @@ pub static ALL: &[Command] = &[
     ),
     edit(
         "pipe",
-        "Pipe",
+        ui_msg!("Pipe"),
         &["PI"],
         "{points: [[x,y],…], closed?, type?, level?, offset?, end_offset?, justify?: top|centre|bottom, system?} a pipe for each \
          segment of the points: its section the type's (category pipe: round, `width` the outside diameter), its `justify` line \
@@ -358,7 +406,7 @@ pub static ALL: &[Command] = &[
     ),
     edit(
         "conduit",
-        "Conduit",
+        ui_msg!("Conduit"),
         &["CN"],
         "{points: [[x,y],…], closed?, type?, level?, offset?, end_offset?, justify?: top|centre|bottom, system?} a conduit (eletroduto) \
          for each segment of the points, as `pipe` lays them: round, `width` its outside diameter; `system` names its circuit",
@@ -366,7 +414,7 @@ pub static ALL: &[Command] = &[
     ),
     edit(
         "cable_tray",
-        "Cable Tray",
+        ui_msg!("Cable Tray"),
         &["CT"],
         "{points: [[x,y],…], closed?, type?, level?, offset?, end_offset?, justify?: top|centre|bottom, system?} a cable tray (eletrocalha) \
          for each segment of the points, as `pipe` lays them: its section the type's `width` across by `depth` deep",
@@ -374,7 +422,7 @@ pub static ALL: &[Command] = &[
     ),
     edit(
         "wire",
-        "Wire",
+        ui_msg!("Wire"),
         &["EW"],
         "{points: [[x,y],…], closed?, type?, level?, offset?, end_offset?, justify?: top|centre|bottom, system?} a wire (condutor) for \
          each segment of the points, as `pipe` lays them: round, `width` its outside diameter; `system` names its circuit",
@@ -382,7 +430,7 @@ pub static ALL: &[Command] = &[
     ),
     edit(
         "down_conductor",
-        "Down Conductor",
+        ui_msg!("Down Conductor"),
         &["DC"],
         "{points: [[x,y],…], closed?, type?, level?, offset?, end_offset?, justify?: top|centre|bottom, system?} a down conductor \
          (condutor de descida, NBR 5419) for each segment of the points, as `pipe` lays them: round, or a flat strip; the same point \
@@ -391,7 +439,7 @@ pub static ALL: &[Command] = &[
     ),
     edit(
         "ground_conductor",
-        "Earthing Conductor",
+        ui_msg!("Earthing Conductor"),
         &["GC"],
         "{points: [[x,y],…], closed?, type?, level?, offset?, end_offset?, justify?: top|centre|bottom, system?} an earthing conductor \
          (condutor de aterramento, the ring or mesh of NBR 5419) for each segment of the points, as `pipe` lays them, usually under \
@@ -400,7 +448,7 @@ pub static ALL: &[Command] = &[
     ),
     edit(
         "cabling",
-        "Cabling",
+        ui_msg!("Cabling"),
         &["CB"],
         "{points: [[x,y],…], closed?, type?, level?, offset?, end_offset?, justify?: top|centre|bottom, system?} structured cabling \
          (cabeamento estruturado, NBR 14565) for each segment of the points, as `pipe` lays them: round, `width` the cable's outside \
@@ -409,7 +457,7 @@ pub static ALL: &[Command] = &[
     ),
     edit(
         "stair",
-        "Stair",
+        ui_msg!("Stair"),
         &[],
         "{start: [x,y], end?: [x,y] | angle?, level?, top_level?, height?, width?, riser?, tread?, landings?: [{at, turn?}, …], \
          railings?} a stair from the middle of its first riser at `start`, climbing toward `end` (or `angle` degrees) up to the next level: \
@@ -421,7 +469,7 @@ pub static ALL: &[Command] = &[
     ),
     edit(
         "ramp",
-        "Ramp",
+        ui_msg!("Ramp"),
         &[],
         "{start: [x,y], end?: [x,y] | angle?, level?, top_level?, height?, width?, slope?, landings?: [{at, turn?}, …], railings?} a ramp \
          from the middle of its foot at `start`, climbing toward `end` (or `angle` degrees) up to the next level, or `height` mm, \
@@ -431,7 +479,7 @@ pub static ALL: &[Command] = &[
     ),
     edit(
         "railing",
-        "Railing",
+        ui_msg!("Railing"),
         &[],
         "{host: a stair or a ramp, side?: left|right, type?} | {path: [[x,y],…], level?, base_offset?, type?} a railing along \
          the stair's or the ramp's sides (both, or the one going up it on `side`), 50 mm in from its edges and climbing with it, \
@@ -441,7 +489,7 @@ pub static ALL: &[Command] = &[
     ),
     edit(
         "roof",
-        "Roof",
+        ui_msg!("Roof"),
         &[],
         "{level?, boundary?: [[x,y],…], courtyards?: [[[x,y],…],…] | sketch?: [[[x,y],[x,y]],…], slope?, overhang?, gables?: [edge, …], gable?, offset?, \
          extrusion?, openings?: [[[x,y],…],…], join?, type?} a roof on `level` (by default the one above the lowest), its \
@@ -458,7 +506,7 @@ pub static ALL: &[Command] = &[
     ),
     edit(
         "dormer",
-        "Dormer",
+        ui_msg!("Dormer"),
         &[],
         "{host, at: [x, y], width?, height?, slope?, window?, type?} a dormer on roof `host`, its front wall across the \
          slope through `at`: walls of `type` `width` mm (1600) apart, standing on the roof and `height` mm (1200) tall at \
@@ -468,7 +516,7 @@ pub static ALL: &[Command] = &[
     ),
     edit(
         "dimension",
-        "Aligned Dimension",
+        ui_msg!("Aligned Dimension"),
         &["DI"],
         "{refs: [ref, …], at: [x, y], level?, kind?: aligned|angular|radial} aligned (the default): the distances between \
          parallel references, along a line through `at`; angular: the angle between two references that meet, on the side \
@@ -480,7 +528,7 @@ pub static ALL: &[Command] = &[
     ),
     edit(
         "text",
-        "Text",
+        ui_msg!("Text"),
         &["TX"],
         "{text, at: [x, y], view?, size?, angle?, leader?: [x, y]} a text note, its first line's top left at `at`, in a view \
          by name or id: a level's plan (the lowest by default; `at` in plan mm), a section or an elevation (`at` along its \
@@ -490,7 +538,7 @@ pub static ALL: &[Command] = &[
     ),
     edit(
         "spot",
-        "Spot Elevation",
+        ui_msg!("Spot Elevation"),
         &["EL"],
         "{at: [x, y], view?, host?} a spot elevation: in a level's plan (the lowest by default), the height of the top of \
          what stands on the level at `at` (or of `host`), following it; in a section or an elevation, of its point `at`, \
@@ -695,7 +743,7 @@ pub static ALL: &[Command] = &[
     ),
     edit(
         "component",
-        "Component",
+        ui_msg!("Component"),
         &["CM"],
         "{family, type?, at: [x,y], level?, angle?, offset?, mirrored?, params?: {parameter: value}} a family's type placed, its \
          first by default: at a point on a level, turned `angle` degrees counter-clockwise, `offset` mm up from the level, and \
@@ -724,7 +772,7 @@ pub static ALL: &[Command] = &[
     ),
     edit(
         "match_properties",
-        "Match Properties",
+        ui_msg!("Match Properties"),
         &["MA"],
         "{from: id, ids: [id,…]} gives the elements in `ids` the type of `from` (and, for components, its family), as Revit's Match \
          Properties does; only elements of `from`'s category take it, the rest come back in `skipped`. Returns {modified, skipped}",
@@ -732,7 +780,7 @@ pub static ALL: &[Command] = &[
     ),
     edit(
         "move",
-        "Move",
+        ui_msg!("Move"),
         &["MV"],
         "{ids: [id,…], by: [dx, dy], end?: start|end} moves elements in plan; walls joined to a moved wall stretch to stay \
          joined, and doors and windows slide along their walls. With `end`, only that end of one wall moves",
@@ -740,14 +788,14 @@ pub static ALL: &[Command] = &[
     ),
     edit(
         "copy",
-        "Copy",
+        msg!("Copy"),
         &["CO"],
         "{ids: [id,…], by: [dx, dy]} copies elements, with the doors and windows of copied walls; returns the copies' ids",
         copy,
     ),
     edit(
         "rotate",
-        "Rotate",
+        ui_msg!("Rotate"),
         &["RO"],
         "{ids: [id,…], about: [x, y], angle, copy?} turns elements about a point by `angle` degrees, counter-clockwise; walls \
          joined to them stay joined, and doors and windows turn with their walls",
@@ -763,7 +811,7 @@ pub static ALL: &[Command] = &[
     ),
     edit(
         "corner",
-        "Trim/Extend to Corner",
+        ui_msg!("Trim/Extend to Corner"),
         &["TR"],
         "{ids: [a, b], keep?: [[x, y], [x, y]]} trims or extends two walls, or two detail lines (lines or arcs), to meet where \
          their lines (or circles) cross; `keep` is a point on the part of each to keep",
@@ -789,7 +837,7 @@ pub static ALL: &[Command] = &[
     ),
     edit(
         "split",
-        "Split",
+        ui_msg!("Split"),
         &["SL"],
         "{id, at: [x, y]} splits a wall or a detail line in two at `at`: a wall's doors and windows go with their part; a \
          detail line of any shape splits where it passes nearest `at` (a spline by its control points exactly, one through \
@@ -809,7 +857,7 @@ pub static ALL: &[Command] = &[
     ),
     edit(
         "fillet",
-        "Fillet Arc",
+        ui_msg!("Fillet Arc"),
         &["FL"],
         "{ids: [a, b], radius} rounds the corner where two straight detail lines, or two straight walls, meet (or would, \
          extended) with an arc of `radius` mm, in the first's line style or of the first's type: each is cut back to the arc",
@@ -1093,7 +1141,7 @@ pub static ALL: &[Command] = &[
     ),
     edit(
         "schedule",
-        "Schedule",
+        ui_msg!("Schedule"),
         &[],
         "{name?, category?, fields?, filters?, sort?, grouped?, path?} a schedule view, as Revit's View > Schedules makes one, \
          and its table: columns, rows, the `elements` each row lists, and totals (and a .csv file with a path). A new one needs `name` and `category`: rooms, \
@@ -1119,12 +1167,16 @@ pub static ALL: &[Command] = &[
         "{view?: a level's, section's or elevation's name or id, or {3D} (the lowest level's plan unless given), hide?: [category, \
          …], show?: […], hide_elements?: [id, …], show_elements?: […], categories?: {category: override | null, …}, elements?: \
          {id: override | null, …}, filters?: [{filter, hidden?, projection?, cut?, halftone?, transparency?}, …], phase?: name \
-         | null, phase_filter?: name | null, options?: {set: option | null, …}, template?: name | null, reset?: true} what a view hides and how it draws the rest, as Revit's Visibility/Graphics does; with \
+         | null, phase_filter?: name | null, options?: {set: option | null, …}, layers?: {drawing: [layer, …] | null, …}, template?: name | null, \
+         reset?: true} what a view hides and how it draws the rest, as Revit's Visibility/Graphics does; with \
          none of those, the view's settings as they are. A category hidden (walls, floors, rooms, grids, dimensions, levels…, \
          in any case, singular or plural) leaves all its elements out of that view, and `hide_elements` the elements given. An \
          override is {hidden?, projection?: style, cut?: style, halftone?, transparency?}, a style {color?, weight? (a pen, \
          0 to 16: 0 a hairline, the thinnest line the screen or printer draws at any scale; 1 to 16 widths on paper from 0.10 to \
-         4 mm, 4 being 0.18 mm and 10 0.35 mm, a cut wall's outline), dash? (solid, dashed, dotted), fill?}, a colour [r, g, b] or \"#rrggbb\". \
+         4 mm, 4 being 0.18 mm and 10 0.35 mm, a cut wall's outline), dash? (solid, dashed, dotted), fill?, foreground?, background?}, a colour [r, g, b] or \"#rrggbb\". \
+         Foreground and background override independent pattern layers: {pattern: a fill pattern's name | null, color?: [r,g,b]}; \
+         a null pattern hides that layer; a null foreground or background restores inheritance. They draw in plans, ceiling \
+         plans, section cuts and filled regions, using drafting patterns at paper scale and model patterns at model size. \
          Projection is what a plan sees below its cut plane, a section beyond its line and the annotation; cut is what the view \
          cuts; `fill` is the cut's poché, or a 3D view's surface; in a 3D view, and in what a section sees beyond its line, a \
          projection's `color` is the colour of the edges (weight and dash draw lines, and those are vectors). Halftone draws it \
@@ -1133,7 +1185,8 @@ pub static ALL: &[Command] = &[
          beats the filters applied (the first prevailing), which beat the category's. `filters` replaces the list applied; \
          `template` follows a view template; `reset` takes away all of the view's own settings. `phase` is the phase the view \
          shows (the project's last unless it says) and `phase_filter` how it shows each status of what's in it (see `phase`); \
-         `options` chooses the design option it shows of a set (the set's primary unless it says; see `option`)",
+         `options` chooses the design option it shows of a set (the set's primary unless it says; see `option`); `layers` the \
+         layers of each CAD drawing it hides, by the drawing's name (null shows them all again)",
         view_graphics,
     ),
     edit(
@@ -1225,7 +1278,7 @@ pub static ALL: &[Command] = &[
     ),
     Command {
         id: "measure",
-        label: "Measure",
+        label: ui_msg!("Measure"),
         aliases: &["ME"],
         params: "{from: [x, y], to: [x, y]} what a ruler laid between two points reads (mm): its `length`, its parts `dx` and `dy`, \
                  and its `angle` in degrees from east, counter-clockwise; it changes nothing",
@@ -1261,8 +1314,18 @@ pub static ALL: &[Command] = &[
         ids_of,
     ),
     other(
+        "filter_selection",
+        "Filter",
+        "{ids: [id or GUID, …], by?, keep?: [value, …]} Revit's Filter on a selection: `groups` [{value, count, ids}, …], \
+         the values `by` takes among the elements (by default `Category`, whose values are categories' keys: wall, door, \
+         detail_line…; else a parameter as `fields` lists them, values as schedules show them, `\"\"` for none), and \
+         `fields`, the parameters every one of them has, to filter by. With `keep`, `ids`: those holding one of its values, \
+         the selection to keep; it selects nothing itself, a front end does",
+        filter_selection,
+    ),
+    other(
         "elements",
-        "Elements",
+        ui_msg!("Elements"),
         "{category?, level?, limit?, offset?} elements with their `id` (six digits, what commands take) and `guid` (made once, \
          never changed), fields and derived values (length, height, area_m2…); what an element points at (its level, host, \
          view…) it holds by GUID. Wherever a command takes an element, its id or its GUID will do",
@@ -1630,6 +1693,20 @@ pub fn element_json(m: &Model, id: Id) -> Value {
         }
     });
     match e {
+        Element::CadImport(ci) => {
+            if let Some(cad) = m.cads.get(&ci.cad) {
+                extra.insert("source".into(), json!(cad.source()));
+                extra.insert("entities".into(), json!(cad.dxf().entities.len()));
+                extra.insert("layers".into(), json!(cad.dxf().layers.len()));
+                extra.insert("unit".into(), json!(cad.dxf().unit));
+                if let Some(path) = cad.path() {
+                    extra.insert("linked".into(), json!(path));
+                }
+            }
+            if let Some(b) = m.cad_box(id) {
+                extra.insert("extents".into(), json!(b));
+            }
+        }
         Element::RoomSeparator(rs) => {
             extra.insert("length".into(), json!(hundredth(rs.start.dist(rs.end))));
         }
@@ -1890,6 +1967,10 @@ fn with_links(s: &mut Session, mut reply: Value) -> Value {
     if !failed.is_empty() {
         reply["links_not_loaded"] = json!(failed);
     }
+    let failed = relink_cads(s);
+    if !failed.is_empty() {
+        reply["cads_not_reloaded"] = json!(failed);
+    }
     reply
 }
 
@@ -1971,6 +2052,40 @@ fn select_by_id(s: &mut Session, p: &Value) -> R {
     }))
 }
 
+fn filter_selection(s: &mut Session, p: &Value) -> R {
+    let c = "filter_selection";
+    let m = &s.model;
+    let ids = ids_param(c, m, p)?;
+    let fields = crate::selection::common(m, &ids);
+    let by = string(c, p, "by")?.unwrap_or_else(|| crate::selection::CATEGORY.into());
+    if !fields.iter().any(|(n, _)| *n == by) {
+        let names: Vec<&str> = fields.iter().map(|(n, _)| n.as_str()).collect();
+        return Err(bad(c, format!("`{by}` isn't a parameter every element has; they share: {}", names.join(", "))));
+    }
+    let groups = crate::selection::groups(m, &ids, &by);
+    let mut reply = json!({
+        "by": by,
+        "fields": fields.iter().map(|(n, _)| n).collect::<Vec<_>>(),
+        "groups": groups.iter().map(|g| json!({"value": g.value, "count": g.ids.len(), "ids": g.ids})).collect::<Vec<_>>(),
+    });
+    match p.get("keep") {
+        v if absent(v) => {}
+        Some(Value::Array(a)) if a.len() <= MAX_POINTS => {
+            let keep = a
+                .iter()
+                .map(|v| match v {
+                    Value::String(t) if t.chars().count() <= MAX_TEXT => Ok(t.clone()),
+                    v => Err(bad(c, format!("`keep` holds values as text of at most {MAX_TEXT} characters, got {v}"))),
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            reply["ids"] = json!(crate::selection::kept(m, &ids, &by, &keep));
+        }
+        Some(v) => return Err(bad(c, format!("`keep` must be a list of values, got {v}"))),
+        None => {}
+    }
+    Ok(reply)
+}
+
 fn library(s: &mut Session, p: &Value) -> R {
     let c = "library";
     let kind = string(c, p, "kind")?;
@@ -2038,11 +2153,7 @@ fn insert_from(s: &mut Session, p: &Value) -> R {
 
 /// The project a link's `path` names, read as `open` reads it: its own links are not followed.
 fn read_link(s: &Session, path: &str) -> Result<Arc<Model>, String> {
-    let at = PathBuf::from(path);
-    let full = match (&s.path, at.is_relative()) {
-        (Some(project), true) => project.parent().map_or(at.clone(), |dir| dir.join(&at)),
-        _ => at,
-    };
+    let full = beside(s, path);
     let mut other = Session::new();
     open_file(&mut other, &json!({"path": full})).map_err(|e| e.trim_start_matches("open: ").to_string())?;
     Ok(other.model)
@@ -2405,7 +2516,14 @@ fn drawn_category(c: &str, given: &str) -> Result<String, String> {
             c,
             format!(
                 "`{given}` isn't a category views draw; there are: {}",
-                graphics::MODEL.iter().chain(&graphics::ANNOTATION).chain(&graphics::SCANS).copied().collect::<Vec<_>>().join(", ")
+                graphics::MODEL
+                    .iter()
+                    .chain(&graphics::ANNOTATION)
+                    .chain(&graphics::SCANS)
+                    .chain(&graphics::IMPORTED)
+                    .copied()
+                    .collect::<Vec<_>>()
+                    .join(", ")
             ),
         ))
     }
@@ -2452,7 +2570,7 @@ fn merged_override(c: &str, what: &str, from: Option<&Override>, patch: &Value) 
 /// categories' and its filters' alone.
 fn edit_graphics(c: &str, m: &Model, p: &Value, g: &mut Graphics, of_template: bool) -> Result<(), String> {
     let given = |k: &str| !absent(p.get(k));
-    let views_own = ["hide_elements", "show_elements", "elements"];
+    let views_own = ["hide_elements", "show_elements", "elements", "layers"];
     if of_template && let Some(k) = views_own.iter().find(|k| given(k)).or(p.get("template").map(|_| &"template")) {
         return Err(bad(c, format!("`{k}` is a view's own; a template holds categories, filters, a phase and design options")));
     }
@@ -2522,6 +2640,36 @@ fn edit_graphics(c: &str, m: &Model, p: &Value, g: &mut Graphics, of_template: b
             }
         }
         Some(v) => return Err(bad(c, format!("`categories` is {{category: override}}, not {v}"))),
+        None => {}
+    }
+    match p.get("layers") {
+        v if absent(v) => {}
+        Some(Value::Object(o)) if o.len() <= crate::cad::MAX_CADS => {
+            for (cad, hidden) in o {
+                let Some(drawing) = m.cads.get(cad) else {
+                    return Err(bad(c, format!("`layers`: the project has no CAD drawing `{cad}` (see `elements` of category cadimport)")));
+                };
+                let names: BTreeSet<String> = match hidden {
+                    Value::Null => BTreeSet::new(),
+                    Value::Array(a) if a.len() <= crate::model::MAX_HIDDEN => a
+                        .iter()
+                        .map(|v| {
+                            v.as_str().map(str::to_string).ok_or_else(|| bad(c, format!("`layers`: `{cad}` lists layers by name, not {v}")))
+                        })
+                        .collect::<Result<_, _>>()?,
+                    v => return Err(bad(c, format!("`layers`: `{cad}` is a list of the layers to hide, or null, not {v}"))),
+                };
+                if let Some(n) = names.iter().find(|n| !drawing.dxf().layers.iter().any(|l| &l.name == *n)) {
+                    return Err(bad(c, format!("`layers`: `{cad}` has no layer `{n}` (see `cad_layers`)")));
+                }
+                if names.is_empty() {
+                    g.layers.remove(cad);
+                } else {
+                    g.layers.insert(cad.clone(), names);
+                }
+            }
+        }
+        Some(v) => return Err(bad(c, format!("`layers` is {{drawing: [layer, …] | null}}, not {v}"))),
         None => {}
     }
     match p.get("elements") {
@@ -2603,7 +2751,7 @@ fn edit_graphics(c: &str, m: &Model, p: &Value, g: &mut Graphics, of_template: b
 fn graphics_reply(g: &Graphics) -> Value {
     let hidden: Vec<&String> = g.categories.iter().filter(|(_, o)| o.hidden).map(|(k, _)| k).collect();
     json!({
-        "hidden": hidden, "categories": g.categories, "filters": g.filters,
+        "hidden": hidden, "categories": g.categories, "filters": g.filters, "layers": g.layers,
         "phase": g.phase, "phase_filter": g.phase_filter, "options": g.options,
         "scale": g.scale, "detail": g.detail, "visual_style": g.style,
     })
@@ -3447,6 +3595,342 @@ fn point_cloud(s: &mut Session, p: &Value) -> R {
     }
     let id = m.insert(Element::PointCloud(PointCloud { cloud: name.clone(), level, at, offset, angle }));
     Ok(json!({"id": id, "cloud": name, "points": points, "read": read, "origin": origin}))
+}
+
+// ---------- CAD drawings ----------
+
+/// The file `path` names, a relative one beside the project's file: where a link or a linked drawing is read from.
+fn beside(s: &Session, path: &str) -> PathBuf {
+    let at = PathBuf::from(path);
+    match (&s.path, at.is_relative()) {
+        (Some(project), true) => project.parent().map_or(at.clone(), |dir| dir.join(&at)),
+        _ => at,
+    }
+}
+
+/// The bytes of the DXF file `path`, or why it can't be brought in.
+fn read_dxf_file(s: &Session, path: &str) -> Result<Vec<u8>, String> {
+    let full = beside(s, path);
+    match ext(&full).as_str() {
+        "dxf" => {}
+        "dwg" => {
+            return Err(format!(
+                "{}: BIMCraft doesn't read DWG yet; save it as DXF (any version, ASCII) from the program that made it, \
+                 or convert it with a DWG to DXF converter, and bring that in",
+                full.display()
+            ));
+        }
+        other => return Err(format!("{}: a .{other} file isn't a CAD drawing BIMCraft reads; it reads DXF", full.display())),
+    }
+    let len = std::fs::metadata(&full).map_err(|e| format!("{}: {e}", full.display()))?.len();
+    if len > crate::dxf::MAX_BYTES as u64 {
+        return Err(format!("{} is too large ({len} bytes; up to {})", full.display(), crate::dxf::MAX_BYTES));
+    }
+    std::fs::read(&full).map_err(|e| format!("{}: {e}", full.display()))
+}
+
+/// The CAD import `id` names, by id or GUID.
+fn cad_import<'m>(c: &str, m: &'m Model, p: &Value) -> Result<(Id, &'m CadImport), String> {
+    let v = p.get("id").filter(|v| !v.is_null()).ok_or_else(|| bad(c, "`id`, a CAD import's id or GUID, is required"))?;
+    let id = element_id(c, m, v)?;
+    match m.elements.get(id) {
+        Some(Element::CadImport(ci)) => Ok((id, ci)),
+        Some(e) => Err(bad(c, format!("{} {id} isn't a CAD import", e.category()))),
+        None => Err(bad(c, format!("no element {id}"))),
+    }
+}
+
+/// `key`, a list of a drawing's layer names, each one it has.
+fn layer_list(c: &str, p: &Value, key: &str, cad: &Cad) -> Result<Vec<String>, String> {
+    match p.get(key) {
+        v if absent(v) => Ok(Vec::new()),
+        Some(Value::Array(a)) if a.len() <= crate::model::MAX_HIDDEN => a
+            .iter()
+            .map(|v| {
+                let n = v.as_str().ok_or_else(|| bad(c, format!("`{key}` lists layers by name, not {v}")))?;
+                if cad.dxf().layer(n).is_none() {
+                    let names: Vec<&str> = cad.dxf().layers.iter().take(20).map(|l| l.name.as_str()).collect();
+                    let more = if cad.dxf().layers.len() > 20 { "…" } else { "" };
+                    return Err(bad(c, format!("the drawing has no layer `{n}` (it has: {}{more})", names.join(", "))));
+                }
+                Ok(n.to_string())
+            })
+            .collect(),
+        Some(v) => Err(bad(c, format!("`{key}` is a list of layer names, of up to {}, not {v}", crate::model::MAX_HIDDEN))),
+        None => Ok(Vec::new()),
+    }
+}
+
+/// A drawing's layers as a reply lists them: each with its colour, its linetype, and whether it shows.
+fn layers_json(cad: &Cad, hidden: &BTreeSet<String>, in_view: Option<&BTreeSet<String>>) -> Value {
+    let rows: Vec<Value> = cad
+        .dxf()
+        .layers
+        .iter()
+        .map(|l| {
+            let color = l.color.rgb().map(|c| json!([c.0, c.1, c.2]));
+            let mut row = json!({"name": l.name, "color": color, "linetype": l.linetype, "shown": !hidden.contains(&l.name)});
+            if let Some(v) = in_view {
+                row["shown_in_view"] = json!(!hidden.contains(&l.name) && !v.contains(&l.name));
+            }
+            row
+        })
+        .collect();
+    json!(rows)
+}
+
+/// The layers a drawing's file has off or frozen: those an import of only its visible layers hides.
+fn off_layers(cad: &Cad) -> BTreeSet<String> {
+    cad.dxf().layers.iter().filter(|l| l.off || l.frozen).map(|l| l.name.clone()).collect()
+}
+
+/// A DXF drawing brought in, or one the project holds placed again, as an element: Revit's Import CAD (and Link CAD).
+fn import_cad(s: &mut Session, p: &Value) -> R {
+    let c = "import_cad";
+    let m = &s.model;
+    let (level, view) = if absent(p.get("view")) {
+        (level_param(c, m, p, "level")?, None)
+    } else {
+        let (level, plan) = plan_param(c, m, p, "view")?;
+        if !absent(p.get("level")) && level_param(c, m, p, "level")? != level {
+            return Err(bad(c, "`view` is a plan of another level than `level`; give the one, or a plan of the other"));
+        }
+        (level, Some(plan.unwrap_or(level)))
+    };
+    let link = flag(c, p, "link")?;
+    let (name, cad, new) = match (string(c, p, "path")?, string(c, p, "cad")?) {
+        (Some(_), Some(_)) => return Err(bad(c, "give `path`, a DXF file to bring in, or `cad`, a drawing the project holds; not both")),
+        (None, None) => return Err(bad(c, "give `path`, a DXF file to bring in, or `cad`, the name of a drawing the project holds")),
+        (None, Some(n)) => {
+            let cad = m.cads.get(&n).cloned().ok_or_else(|| {
+                let names: Vec<&str> = m.cads.keys().map(String::as_str).collect();
+                let held = if names.is_empty() { "none".into() } else { names.join(", ") };
+                bad(c, format!("the project holds no CAD drawing named `{n}` (it holds: {held})"))
+            })?;
+            (n, cad, false)
+        }
+        (Some(path), None) => {
+            let source = Path::new(&path).file_name().map_or_else(|| path.clone(), |f| f.to_string_lossy().into_owned());
+            let stem =
+                Path::new(&path).file_stem().map_or_else(|| "Drawing".into(), |f| f.to_string_lossy().chars().take(MAX_TEXT).collect());
+            let name = string(c, p, "name")?.unwrap_or(stem);
+            if name.trim().is_empty() {
+                return Err(bad(c, "a CAD drawing needs a `name`"));
+            }
+            if m.cads.contains_key(&name) {
+                return Err(bad(
+                    c,
+                    format!(
+                        "the project already holds a CAD drawing named `{name}`: place it again with `cad`, or bring this file in under another `name`"
+                    ),
+                ));
+            }
+            if m.cads.len() >= crate::cad::MAX_CADS {
+                return Err(bad(
+                    c,
+                    format!("the project holds {} CAD drawings already; delete the imports of one first", crate::cad::MAX_CADS),
+                ));
+            }
+            let bytes = read_dxf_file(s, &path).map_err(|e| bad(c, e))?;
+            let held: usize = m.cads.values().map(Cad::len).sum();
+            if held + bytes.len() > crate::cad::MAX_HELD {
+                return Err(bad(
+                    c,
+                    format!("the project's CAD drawings would hold {} bytes; it holds up to {}", held + bytes.len(), crate::cad::MAX_HELD),
+                ));
+            }
+            let cad = Cad::new(&source, link.then_some(path.clone()), bytes).map_err(|e| bad(c, format!("{path}: {e}")))?;
+            (name, cad, true)
+        }
+    };
+    if link && !new {
+        return Err(bad(c, "`link` is for a file brought in by `path`; a drawing the project holds stays as it's held"));
+    }
+    let dxf = cad.dxf();
+    let scale = match (string(c, p, "units")?.as_deref(), num(c, p, "scale")?) {
+        (Some(_), Some(_)) => return Err(bad(c, "give `units` or `scale`, not both")),
+        (_, Some(k)) if crate::model::CAD_SCALE.contains(&k) => k,
+        (_, Some(k)) => {
+            let (lo, hi) = (crate::model::CAD_SCALE.start(), crate::model::CAD_SCALE.end());
+            return Err(bad(c, format!("`scale` is mm to each of the drawing's units, from {lo} to {hi}, not {k}")));
+        }
+        (None | Some("auto"), None) => dxf.scale.unwrap_or(1.0),
+        (Some(u), None) => cloud::unit(u).ok_or_else(|| bad(c, format!("`units` is auto, mm, cm, m, in or ft, not {u}")))?,
+    };
+    let bulk = cad.bulk().unwrap_or_default();
+    let origin = match string(c, p, "position")?.as_deref() {
+        None | Some("center" | "centre") => (bulk[0] + bulk[1]) * 0.5,
+        Some("origin") => P2(0.0, 0.0),
+        Some(o) => {
+            return Err(bad(
+                c,
+                format!("`position` is center (the middle of the drawing on `at`) or origin (its origin on `at`), not {o}"),
+            ));
+        }
+    };
+    let at = point_opt(c, p, "at")?.unwrap_or(P2(0.0, 0.0));
+    let angle = num(c, p, "angle")?.unwrap_or(0.0);
+    let hidden: BTreeSet<String> = match p.get("layers") {
+        None | Some(Value::Null) => off_layers(&cad),
+        Some(Value::String(w)) if w == "visible" => off_layers(&cad),
+        Some(Value::String(w)) if w == "all" => BTreeSet::new(),
+        Some(Value::Array(_)) => {
+            let keep: BTreeSet<String> = layer_list(c, p, "layers", &cad)?.into_iter().collect();
+            dxf.layers.iter().filter(|l| !keep.contains(&l.name)).map(|l| l.name.clone()).collect()
+        }
+        Some(v) => {
+            return Err(bad(
+                c,
+                format!("`layers` is visible (those the file has on and thawed), all, or a list of the layers to show, not {v}"),
+            ));
+        }
+    };
+    let colors = match string(c, p, "colors")? {
+        None => Colors::Preserve,
+        Some(n) => Colors::from_name(&n).ok_or_else(|| bad(c, format!("`colors` is preserve, invert or black, not {n}")))?,
+    };
+    // The unit it was read in: the one given, else its file's.
+    let unit = match string(c, p, "units")?.filter(|u| u != "auto") {
+        Some(u) => format!("{u} (its file says {})", dxf.unit),
+        None if p.get("scale").is_some_and(|v| !v.is_null()) => format!("a scale of its own (its file says {})", dxf.unit),
+        None if dxf.scale.is_some() => dxf.unit.clone(),
+        None => format!("{} (read as mm unless `units` says)", dxf.unit),
+    };
+    let (entities, layers, far, left_out) = (dxf.entities.len(), dxf.layers.len(), cad.far(), dxf.left_out.clone());
+    let source = cad.source().to_string();
+    let m = s.model_mut();
+    if new {
+        m.cads.insert(name.clone(), cad);
+    }
+    let id = m.insert(Element::CadImport(CadImport { cad: name.clone(), level, at, origin, scale, angle, view, hidden, colors }));
+    let extents = m.cad_box(id);
+    let mut reply = json!({
+        "id": id, "cad": name, "source": source, "unit": unit, "scale": scale, "entities": entities, "layers": layers,
+        "extents": extents, "far": far, "left_out": left_out,
+    });
+    if far > 0 {
+        reply["warning"] = json!(format!(
+            "{far} of its entities lie far from the rest of the drawing: they're drawn where they are, and left out of its extents. \
+             Delete them in the program that made the drawing, or hide their layers"
+        ));
+    }
+    Ok(reply)
+}
+
+/// An import's layers, and which it shows: in every view, or in one (its Visibility/Graphics' Imported Categories).
+fn cad_layers(s: &mut Session, p: &Value) -> R {
+    let c = "cad_layers";
+    let m = &s.model;
+    let (id, ci) = cad_import(c, m, p)?;
+    let cad = m.cads.get(&ci.cad).ok_or_else(|| bad(c, format!("the project holds no CAD drawing named `{}`", ci.cad)))?.clone();
+    let (hide, show) = (layer_list(c, p, "hide", &cad)?, layer_list(c, p, "show", &cad)?);
+    if let Some(both) = hide.iter().find(|h| show.contains(h)) {
+        return Err(bad(c, format!("layer `{both}` is in `hide` and in `show`; give it in one")));
+    }
+    let name = ci.cad.clone();
+    let mut hidden = ci.hidden.clone();
+    let view = if absent(p.get("view")) { None } else { Some(view_param(c, m, p, false)?) };
+    let in_view = match view {
+        None => {
+            hidden.extend(hide);
+            for l in &show {
+                hidden.remove(l);
+            }
+            if hidden != ci.hidden
+                && let Some(Element::CadImport(ci)) = s.model_mut().elements.get_mut(id)
+            {
+                ci.hidden = hidden.clone();
+            }
+            None
+        }
+        Some(v) => {
+            let mut g = graphics::graphics_of(m, v)
+                .cloned()
+                .ok_or_else(|| bad(c, format!("{} isn't a plan, a section, an elevation or a 3D view", view_title(m, v))))?;
+            let was = g.layers.get(&name).cloned().unwrap_or_default();
+            let mut now = was.clone();
+            now.extend(hide);
+            for l in &show {
+                now.remove(l);
+            }
+            if now != was {
+                not_dependent(c, m, v, "graphics")?;
+                if now.is_empty() {
+                    g.layers.remove(&name);
+                } else {
+                    g.layers.insert(name.clone(), now.clone());
+                }
+                g.check(m).map_err(|e| bad(c, e))?;
+                set_graphics(s.model_mut(), v, g);
+            }
+            Some(now)
+        }
+    };
+    Ok(json!({"id": id, "cad": name, "layers": layers_json(&cad, &hidden, in_view.as_ref())}))
+}
+
+/// A linked drawing read again from its file.
+fn reload_cad(s: &mut Session, p: &Value) -> R {
+    let c = "reload_cad";
+    let name = string(c, p, "cad")?.ok_or_else(|| bad(c, "`cad`, the name of a linked CAD drawing, is required"))?;
+    let cad = s.model.cads.get(&name).cloned().ok_or_else(|| bad(c, format!("the project holds no CAD drawing named `{name}`")))?;
+    let path = cad
+        .path()
+        .map(str::to_string)
+        .ok_or_else(|| bad(c, format!("CAD drawing `{name}` isn't linked; bring it in again with `import_cad` and `link`")))?;
+    let bytes = read_dxf_file(s, &path).map_err(|e| bad(c, e))?;
+    if cad.same_bytes(&bytes) {
+        return Ok(json!({"cad": name, "changed": false}));
+    }
+    let new = Cad::new(cad.source(), Some(path.clone()), bytes).map_err(|e| bad(c, format!("{path}: {e}")))?;
+    let entities = new.dxf().entities.len();
+    s.model_mut().cads.insert(name.clone(), new);
+    Ok(json!({"cad": name, "changed": true, "entities": entities}))
+}
+
+/// Every linked drawing read again, as opening a project does; those that couldn't be, as `{cad, error}`. A drawing whose file
+/// is gone keeps what the project holds of it.
+fn relink_cads(s: &mut Session) -> Vec<Value> {
+    let linked: Vec<(String, String)> = s.model.cads.iter().filter_map(|(n, cad)| Some((n.clone(), cad.path()?.to_string()))).collect();
+    let mut failed = Vec::new();
+    for (name, path) in linked {
+        let read = read_dxf_file(s, &path).and_then(|bytes| {
+            let held = s.model.cads.get(&name);
+            if held.is_some_and(|h| h.same_bytes(&bytes)) {
+                return Ok(None);
+            }
+            let source = held.map_or(name.as_str(), |h| h.source());
+            Cad::new(source, Some(path.clone()), bytes).map(Some)
+        });
+        match read {
+            Ok(Some(cad)) => {
+                Arc::make_mut(&mut s.model).cads.insert(name, cad);
+            }
+            Ok(None) => {}
+            Err(error) => failed.push(json!({"cad": name, "error": error})),
+        }
+    }
+    failed
+}
+
+/// What of an import lies nearest a point: Revit's Query.
+fn cad_query(s: &mut Session, p: &Value) -> R {
+    let c = "cad_query";
+    let m = &s.model;
+    let (id, ci) = cad_import(c, m, p)?;
+    let at = point_req(c, p, "at")?;
+    let reach = num(c, p, "reach")?.unwrap_or(100.0);
+    if reach <= 0.0 {
+        return Err(bad(c, format!("`reach` is how far from `at` to look, mm, above 0, not {reach}")));
+    }
+    let cad = m.cads.get(&ci.cad).ok_or_else(|| bad(c, format!("the project holds no CAD drawing named `{}`", ci.cad)))?;
+    let Some((e, d)) = crate::cad::nearest(cad, ci, at, reach) else { return Ok(json!({"id": id, "found": false})) };
+    let color = cad.color(e, Colors::Preserve).map(|c| json!([c.0, c.1, c.2]));
+    let linetype = e.linetype.clone().or_else(|| cad.dxf().layer(&e.layer).map(|l| l.linetype.clone()));
+    Ok(json!({
+        "id": id, "found": true, "kind": crate::cad::kind(&e.shape), "layer": e.layer, "color": color,
+        "linetype": linetype, "weight": e.weight, "distance": hundredth(d),
+    }))
 }
 
 fn grid(s: &mut Session, p: &Value) -> R {
@@ -5106,7 +5590,7 @@ fn duplicate_view(s: &mut Session, p: &Value) -> R {
     let name = match string(c, p, "name")? {
         Some(n) => n,
         None => {
-            let word = m.language.word(if mode == "dependent" { "Dependent" } else { "Copy" });
+            let word = m.language.word(if mode == "dependent" { msg!("Dependent") } else { "Copy" });
             m.free_view_name(&format!("{} {word}", view_title(m, view)), true)
         }
     };
@@ -5247,7 +5731,7 @@ fn new_sheet(s: &mut Session, p: &Value) -> R {
             (101..).map(|n| format!("A{n}")).find(|n| !taken.contains(n.as_str())).unwrap_or_default()
         }
     };
-    let name = string(c, p, "name")?.unwrap_or_else(|| m.language.word("Unnamed").into());
+    let name = string(c, p, "name")?.unwrap_or_else(|| m.language.word(msg!("Unnamed")).into());
     let size = string(c, p, "size")?.map_or_else(|| "A3".into(), |z| z.trim().to_ascii_uppercase());
     let id = s.model_mut().insert(Element::Sheet(Sheet { number: number.clone(), name, size }));
     Ok(json!({"id": id, "number": number}))
@@ -6195,6 +6679,15 @@ pub(crate) fn transform(c: &str, m: &Model, mut e: Element, id: Id, mo: &Motion,
         Element::Sheet(_) => return Err(bad(c, format!("sheet {id} has no place in plan; move the views on it"))),
         Element::Schedule(_) | Element::View3D(_) | Element::PlanView(_) => {
             return Err(bad(c, format!("{category} {id} has no place in plan; move its viewport on its sheet")));
+        }
+        Element::CadImport(ci) => {
+            if mo.mirror {
+                return Err(bad(
+                    c,
+                    format!("CAD import {id} can't be mirrored; mirror it in the program that made the drawing, or turn it"),
+                ));
+            }
+            (ci.at, ci.angle) = turned(f, ci.at, ci.angle);
         }
         Element::PointCloud(pc) => {
             if mo.mirror {
@@ -7180,6 +7673,8 @@ fn delete(s: &mut Session, p: &Value) -> R {
                         Element::DetailGroup(g) => gone.contains(&g.view),
                         Element::RepeatingDetail(r) => gone.contains(&r.view),
                         Element::Spot(sp) => gone.contains(&sp.view) || sp.host.is_some_and(|h| gone.contains(&h)),
+                        // An import in one view only goes with it.
+                        Element::CadImport(ci) => ci.view.is_some_and(|v| gone.contains(&v)),
                         _ => false,
                     }
             })

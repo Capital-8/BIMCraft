@@ -5,12 +5,15 @@
 //! a section or an elevation, millimetres along its line from its start, and up; on a sheet,
 //! millimetres of paper from its bottom left corner.
 
+use bimcraft_i18n::{msg, ui_msg};
+
 use std::collections::{BTreeMap, BTreeSet};
 use std::f64::consts::{PI, TAU};
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 
+use crate::cad::{Cad, Colors};
 use crate::cloud::Cloud;
 use crate::family::{Family, Piece};
 pub use crate::fills::FilledRegion;
@@ -66,7 +69,9 @@ pub const CEILING_CUT: f64 = 2300.0;
 pub const CEILING_HEIGHT: f64 = 2600.0;
 /// The steepest slope a floor or a roof may have, degrees.
 pub const MAX_SLOPE: f64 = 75.0;
-/// The version of the project file this build writes, and the newest it reads. 6: a project holds detailing (library kinds
+/// The version of the project file this build writes, and the newest it reads. 7: a project holds CAD drawings (`cads`,
+/// library entries of kind `Cad`) and imports place them; nothing in a file of 6 changes, but a build that reads up to 6 would
+/// answer one of 7 with a serde error, not "saved by a newer BIMCraft". 6: a project holds detailing (library kinds
 /// `line-pattern`, `line-style`, `fill-pattern`, `filled-region-type` and `detail-group`; the elements `line`, `region`,
 /// `detailgroup` and `repeatingdetail`; sketch parts; the model keys `line_styles`, `fill_patterns` and `region_types`);
 /// nothing in a file of 5 changes, but a build that reads up to 5 would answer one of 6 with a serde error ("isn't a kind of
@@ -78,7 +83,7 @@ pub const MAX_SLOPE: f64 = 75.0;
 /// 2: the library has ids and GUIDs too
 /// (`library`), and what names a library entry holds its GUID. 1: elements have GUIDs, ids six digits, and what points at
 /// an element holds its GUID. None (0): a file from before.
-pub const FORMAT: u32 = 6;
+pub const FORMAT: u32 = 7;
 /// How far past the model a level reaches without an extent of its own, mm.
 pub const LEVEL_PAST: f64 = 1000.0;
 
@@ -208,6 +213,14 @@ fn is_zero(x: &f64) -> bool {
     *x == 0.0
 }
 
+fn is_origin(p: &P2) -> bool {
+    *p == P2(0.0, 0.0)
+}
+
+fn is_preserve(c: &Colors) -> bool {
+    *c == Colors::Preserve
+}
+
 fn is_centre(l: &Location) -> bool {
     *l == Location::Centre
 }
@@ -253,12 +266,12 @@ impl Location {
     /// As a menu names it.
     pub fn label(self) -> &'static str {
         match self {
-            Location::Centre => "Wall Centreline",
-            Location::CoreCentre => "Core Centreline",
-            Location::ExteriorFinish => "Finish Face: Exterior",
-            Location::InteriorFinish => "Finish Face: Interior",
-            Location::ExteriorCore => "Core Face: Exterior",
-            Location::InteriorCore => "Core Face: Interior",
+            Location::Centre => ui_msg!("Wall Centreline"),
+            Location::CoreCentre => ui_msg!("Core Centreline"),
+            Location::ExteriorFinish => ui_msg!("Finish Face: Exterior"),
+            Location::InteriorFinish => ui_msg!("Finish Face: Interior"),
+            Location::ExteriorCore => ui_msg!("Core Face: Exterior"),
+            Location::InteriorCore => ui_msg!("Core Face: Interior"),
         }
     }
 
@@ -667,6 +680,50 @@ pub struct PointCloud {
     pub angle: f64,
 }
 
+/// A CAD drawing placed, Revit's import: the project's `cad`, its point `origin` (in its own units) on `at` on `level`, each of
+/// its units `scale` mm, turned `angle` degrees (counter-clockwise) about `at`. With a `view`, only that plan shows it (Revit's
+/// Current view only); without, every plan of its level does. `hidden` are layers it doesn't show in any view, and `colors`
+/// says how it draws its colours. It holds no `params`: phases and paint don't reach it.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CadImport {
+    pub cad: String,
+    pub level: Guid,
+    pub at: P2,
+    #[serde(default, skip_serializing_if = "is_origin")]
+    pub origin: P2,
+    pub scale: f64,
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub angle: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub view: Option<Guid>,
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub hidden: BTreeSet<String>,
+    #[serde(default, skip_serializing_if = "is_preserve")]
+    pub colors: Colors,
+}
+
+/// Where a placed drawing's point `p`, in its own units, is in plan, mm.
+pub fn cad_place(ci: &CadImport) -> impl Fn(P2) -> P2 + use<> {
+    let (sin, cos) = ci.angle.to_radians().sin_cos();
+    let (at, origin, k) = (ci.at, ci.origin, ci.scale);
+    move |p: P2| {
+        let (x, y) = ((p.0 - origin.0) * k, (p.1 - origin.1) * k);
+        P2(at.0 + x * cos - y * sin, at.1 + x * sin + y * cos)
+    }
+}
+
+/// The point of a placed drawing, in its own units, at `q` in plan: [`cad_place`] undone.
+pub fn cad_unplace(ci: &CadImport, q: P2) -> P2 {
+    let (sin, cos) = ci.angle.to_radians().sin_cos();
+    let (x, y) = (q.0 - ci.at.0, q.1 - ci.at.1);
+    P2(ci.origin.0 + (x * cos + y * sin) / ci.scale, ci.origin.1 + (-x * sin + y * cos) / ci.scale)
+}
+
+/// The most layers an import may hide, and a drawing's mm to its unit at most and at least.
+pub const MAX_HIDDEN: usize = 10_000;
+pub const CAD_SCALE: std::ops::RangeInclusive<f64> = 1e-6..=1e7;
+
 /// A spot elevation in a view: in a level's plan, the height of the top of `host` at `at`; in a
 /// section or an elevation, of its point `at`, along and up.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -809,9 +866,9 @@ impl Tag {
     /// The field a tag of category `cat` shows unless it names one: a door's or window's mark, a room's name, else the type.
     pub fn usual(cat: &str) -> &'static str {
         match cat {
-            "door" | "window" => "Mark",
-            "room" => "Name",
-            _ => "Type",
+            "door" | "window" => msg!("Mark"),
+            "room" => msg!("Name"),
+            _ => msg!("Type"),
         }
     }
 }
@@ -1145,10 +1202,10 @@ impl Facing {
 
     pub fn name(self) -> &'static str {
         match self {
-            Facing::North => "North",
-            Facing::South => "South",
-            Facing::East => "East",
-            Facing::West => "West",
+            Facing::North => msg!("North"),
+            Facing::South => msg!("South"),
+            Facing::East => msg!("East"),
+            Facing::West => msg!("West"),
         }
     }
 
@@ -1283,6 +1340,10 @@ macro_rules! visit_refs {
                 if let Some(g) = & $($m)? s.host { f(g) }
             }
             Element::PointCloud(pc) => f(& $($m)? pc.level),
+            Element::CadImport(ci) => {
+                f(& $($m)? ci.level);
+                if let Some(g) = & $($m)? ci.view { f(g) }
+            }
             Element::RoomSeparator(rs) => f(& $($m)? rs.level),
         }
     }};
@@ -1349,6 +1410,8 @@ pub enum Element {
     Link(Link),
     /// A scan placed in the model.
     PointCloud(PointCloud),
+    /// A CAD drawing placed in the model.
+    CadImport(CadImport),
 }
 
 impl Element {
@@ -1517,6 +1580,7 @@ impl Element {
             Element::Spot(_) => "spot",
             Element::Link(_) => "link",
             Element::PointCloud(_) => "pointcloud",
+            Element::CadImport(_) => "cadimport",
             Element::Schedule(_) => "schedule",
             Element::View3D(_) => "view3d",
             Element::PlanView(_) => "planview",
@@ -1686,12 +1750,12 @@ impl Operation {
     /// Its name in English, as schedules head it; `Language::word` says it in another language.
     pub fn label(self) -> &'static str {
         match self {
-            Operation::Swing => "Swing",
-            Operation::DoubleSwing => "Double Swing",
-            Operation::Sliding => "Sliding",
-            Operation::DoubleSliding => "Double Sliding",
-            Operation::Folding => "Folding",
-            Operation::Fixed => "Fixed",
+            Operation::Swing => msg!("Swing"),
+            Operation::DoubleSwing => msg!("Double Swing"),
+            Operation::Sliding => msg!("Sliding"),
+            Operation::DoubleSliding => msg!("Double Sliding"),
+            Operation::Folding => msg!("Folding"),
+            Operation::Fixed => msg!("Fixed"),
         }
     }
 
@@ -1888,6 +1952,9 @@ pub struct Model {
     /// The scans its point clouds place, by name.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty", deserialize_with = "crate::cloud::deserialize_scans")]
     pub clouds: BTreeMap<String, Cloud>,
+    /// The CAD drawings its imports place, by name.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty", deserialize_with = "crate::cad::deserialize_cads")]
+    pub cads: BTreeMap<String, Cad>,
     /// Its families, by name: what components place.
     #[serde(default)]
     pub families: BTreeMap<String, Family>,
@@ -1975,6 +2042,7 @@ impl Model {
             materials: BTreeMap::new(),
             images: BTreeMap::new(),
             clouds: BTreeMap::new(),
+            cads: BTreeMap::new(),
             families: BTreeMap::new(),
             parameters: BTreeMap::new(),
             view_filters: BTreeMap::new(),
@@ -1996,23 +2064,23 @@ impl Model {
         };
         // A library to start from: each material its colour, its cut's pattern and its surface's, and the texture it has.
         for (name, color, cut, surface, texture) in [
-            ("Brick", [178, 92, 70], Pattern::Brick, Pattern::Brick, Some(Kind::Brick)),
+            (msg!("Brick"), [178, 92, 70], Pattern::Brick, Pattern::Brick, Some(Kind::Brick)),
             ("Insulation", [232, 214, 140], Pattern::Insulation, Pattern::None, Some(Kind::Insulation)),
-            ("Concrete block", [176, 176, 170], Pattern::Crosshatch, Pattern::None, Some(Kind::Block)),
+            (msg!("Concrete block"), [176, 176, 170], Pattern::Crosshatch, Pattern::None, Some(Kind::Block)),
             ("Plaster", [238, 234, 224], Pattern::None, Pattern::None, Some(Kind::Plaster)),
             ("Concrete", [188, 188, 182], Pattern::Concrete, Pattern::None, Some(Kind::Concrete)),
-            ("Screed", [206, 200, 188], Pattern::Concrete, Pattern::None, Some(Kind::Concrete)),
+            (msg!("Screed"), [206, 200, 188], Pattern::Concrete, Pattern::None, Some(Kind::Concrete)),
             ("Timber", [196, 154, 102], Pattern::Diagonal, Pattern::Horizontal, Some(Kind::Boards)),
-            ("Gypsum board", [242, 242, 238], Pattern::None, Pattern::None, None),
-            ("Ceramic tile", [222, 220, 210], Pattern::Solid, Pattern::Grid, Some(Kind::Tile)),
-            ("Roof tiles", [170, 86, 64], Pattern::Solid, Pattern::Horizontal, Some(Kind::Roof)),
+            (msg!("Gypsum board"), [242, 242, 238], Pattern::None, Pattern::None, None),
+            (msg!("Ceramic tile"), [222, 220, 210], Pattern::Solid, Pattern::Grid, Some(Kind::Tile)),
+            (msg!("Roof tiles"), [170, 86, 64], Pattern::Solid, Pattern::Horizontal, Some(Kind::Roof)),
             ("Membrane", [70, 70, 74], Pattern::Solid, Pattern::None, None),
             ("Fabric", [176, 160, 136], Pattern::None, Pattern::None, Some(Kind::Fabric)),
             ("Porcelain", [244, 244, 240], Pattern::None, Pattern::None, None),
             ("Glass", [166, 200, 228], Pattern::None, Pattern::None, None),
             ("Metal", [150, 152, 158], Pattern::Solid, Pattern::None, Some(Kind::Metal)),
             ("PVC", [226, 226, 214], Pattern::Solid, Pattern::None, None),
-            ("Copper", [184, 115, 51], Pattern::Solid, Pattern::None, Some(Kind::Metal)),
+            (msg!("Copper"), [184, 115, 51], Pattern::Solid, Pattern::None, Some(Kind::Metal)),
         ] {
             let texture = texture.map(Texture::new);
             m.materials.insert(language.word(name).into(), Material { color, cut, surface, texture, ..Material::default() });
@@ -2431,6 +2499,7 @@ impl Model {
         // 4 to 5 (scans, and the point clouds that place them) has no step: a file of 4 holds none of it, or holds it as 5 does.
         // 5 to 6 (detailing: lines, regions, groups, repeating details, line and fill styles) has none either: a file of 5 holds
         // none of it, so reading it as 6 changes nothing.
+        // 6 to 7 (CAD drawings, and the imports that place them) has none either.
         self.format = FORMAT;
     }
 
@@ -2538,6 +2607,7 @@ impl Model {
             .chain(self.elements.iter().flat_map(|(id, e)| match e {
                 Element::Grid(g) => vec![g.start, g.end],
                 Element::PointCloud(_) => self.cloud_box(*id).map_or(Vec::new(), |(lo, hi)| vec![P2(lo[0], lo[1]), P2(hi[0], hi[1])]),
+                Element::CadImport(_) => self.cad_box(*id).map_or(Vec::new(), |b| b.to_vec()),
                 _ => Vec::new(),
             }))
             .collect::<Vec<_>>();
@@ -2636,6 +2706,37 @@ impl Model {
             }
         }
         Some((min, max))
+    }
+
+    /// Forget the layers each view and view template hides of the CAD drawings `gone`.
+    pub fn forget_cad_layers(&mut self, gone: &[String]) {
+        let views = self.elements.values_mut().filter_map(graphics::graphics_mut);
+        for g in views.chain(self.view_templates.values_mut().map(|t| &mut t.graphics)) {
+            g.layers.retain(|cad, _| !gone.contains(cad));
+        }
+    }
+
+    /// The CAD drawings no import places.
+    pub fn unplaced_cads(&self) -> Vec<String> {
+        if self.cads.is_empty() {
+            return Vec::new();
+        }
+        let placed: BTreeSet<&str> =
+            self.elements.values().filter_map(|e| if let Element::CadImport(ci) = e { Some(ci.cad.as_str()) } else { None }).collect();
+        self.cads.keys().filter(|n| !placed.contains(n.as_str())).cloned().collect()
+    }
+
+    /// The box round a placed drawing's bulk in plan, mm, south-west corner first (what lies far from the rest left out); none
+    /// if `id` places no drawing.
+    pub fn cad_box(&self, id: impl Key) -> Option<[P2; 2]> {
+        let Some(Element::CadImport(ci)) = self.elements.get(id) else { return None };
+        let [lo, hi] = self.cads.get(&ci.cad)?.bulk()?;
+        let place = cad_place(ci);
+        let corners = [lo, P2(hi.0, lo.1), hi, P2(lo.0, hi.1)].map(|p| {
+            let q = place(p);
+            [q, q]
+        });
+        crate::dxf::union(corners)
     }
 
     /// The next level up from `level`.
@@ -2997,6 +3098,7 @@ impl Model {
         let wall_level = |o: &Opening| self.wall(o.host).map(|w| w.level);
         match e {
             Element::PointCloud(pc) => Some(pc.level),
+            Element::CadImport(ci) => Some(ci.level),
             Element::Wall(w) => Some(w.level),
             Element::Floor(f) => Some(f.level),
             Element::Ceiling(c) => Some(c.level),
@@ -3849,7 +3951,11 @@ impl Model {
     pub fn room_lines(&self, level: impl Key, at: RoomArea) -> Vec<(P2, P2)> {
         match at {
             RoomArea::Centre => self.bounding_lines(level),
-            RoomArea::Finish => self.face_lines(level),
+            RoomArea::Finish => {
+                let mut lines = self.face_lines(level);
+                lines.extend(self.separators(level));
+                lines
+            }
         }
     }
 
@@ -3985,6 +4091,16 @@ impl Model {
         }
         for name in self.clouds.keys() {
             text(&format!("scan `{name}`"), "name", name)?;
+        }
+        if self.cads.len() > crate::cad::MAX_CADS {
+            return Err(format!("the project has {} CAD drawings; it holds up to {}", self.cads.len(), crate::cad::MAX_CADS));
+        }
+        let held: usize = self.cads.values().map(Cad::len).sum();
+        if held > crate::cad::MAX_HELD {
+            return Err(format!("the project's CAD drawings hold {held} bytes; it holds up to {}", crate::cad::MAX_HELD));
+        }
+        for name in self.cads.keys() {
+            text(&format!("CAD drawing `{name}`"), "name", name)?;
         }
         for (n, x) in &self.materials {
             text(&format!("material `{n}`"), "name", n)?;
@@ -4407,6 +4523,49 @@ impl Model {
                     point(&format!("{who} at"), pc.at)?;
                     coord(&format!("{who} offset"), pc.offset)?;
                     coord(&format!("{who} angle"), pc.angle)?;
+                }
+                Element::CadImport(ci) => {
+                    if !self.cads.contains_key(&ci.cad) {
+                        return Err(format!("{who}: the project holds no CAD drawing named `{}`", ci.cad));
+                    }
+                    level_ok(ci.level)?;
+                    point(&format!("{who} at"), ci.at)?;
+                    coord(&format!("{who} angle"), ci.angle)?;
+                    if !(ci.origin.is_finite()
+                        && ci.origin.0.abs() <= crate::dxf::MAX_FILE_COORD
+                        && ci.origin.1.abs() <= crate::dxf::MAX_FILE_COORD)
+                    {
+                        return Err(format!("{who}: origin {:?} is past what a drawing holds", ci.origin));
+                    }
+                    if !CAD_SCALE.contains(&ci.scale) {
+                        return Err(format!(
+                            "{who}: a scale of {} mm to the drawing's unit isn't one; give one from {} to {}",
+                            ci.scale,
+                            CAD_SCALE.start(),
+                            CAD_SCALE.end()
+                        ));
+                    }
+                    if let Some(v) = ci.view
+                        && !(matches!(self.elements.get(v), Some(Element::Level(_) | Element::PlanView(_)))
+                            && self.plan_level(v).map(|l| self.guid(l)) == Some(ci.level))
+                    {
+                        return Err(format!(
+                            "{who}: view {} isn't a plan of its level; an import shows in one of its level's plans",
+                            self.shown(v)
+                        ));
+                    }
+                    if ci.hidden.len() > MAX_HIDDEN {
+                        return Err(format!("{who}: it hides {} layers; up to {MAX_HIDDEN}", ci.hidden.len()));
+                    }
+                    for layer in &ci.hidden {
+                        text(&format!("{who} hidden layer"), "name", layer)?;
+                    }
+                    if let Some(b) = self.cad_box(id) {
+                        for p in b {
+                            point(&format!("{who}: the drawing, placed,"), p)
+                                .map_err(|e| format!("{e}; place it nearer the origin (`position`: center), or at another `scale`"))?;
+                        }
+                    }
                 }
                 Element::Spot(sp) => {
                     view_ok(sp.view, false)?;

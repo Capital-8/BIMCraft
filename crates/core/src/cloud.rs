@@ -414,7 +414,7 @@ struct CloudFile {
     colours: Option<String>,
 }
 
-fn deflate(bytes: &[u8]) -> Vec<u8> {
+pub(crate) fn deflate(bytes: &[u8]) -> Vec<u8> {
     let mut z = ZlibEncoder::new(Vec::new(), Compression::fast());
     // Writing to a Vec doesn't fail.
     let _ = z.write_all(bytes);
@@ -423,14 +423,19 @@ fn deflate(bytes: &[u8]) -> Vec<u8> {
 
 /// The bytes base64 and zlib hide, if they're no more than `most`.
 fn inflate(text: &str, most: usize) -> Result<Vec<u8>, String> {
-    let packed = crate::texture::unbase64(text).ok_or("a cloud's data isn't base64")?;
+    inflate_of("a cloud", text, most)
+}
+
+/// [`inflate`] of `what`'s data, saying whose it is when it isn't what it should be.
+pub(crate) fn inflate_of(what: &str, text: &str, most: usize) -> Result<Vec<u8>, String> {
+    let packed = crate::texture::unbase64(text).ok_or_else(|| format!("{what}'s data isn't base64"))?;
     let mut out = Vec::new();
     ZlibDecoder::new(packed.as_slice())
         .take(most as u64 + 1)
         .read_to_end(&mut out)
-        .map_err(|e| format!("a cloud's data isn't zlib: {e}"))?;
+        .map_err(|e| format!("{what}'s data isn't zlib: {e}"))?;
     if out.len() > most {
-        return Err(format!("a cloud's data holds more than {most} bytes"));
+        return Err(format!("{what}'s data holds more than {most} bytes"));
     }
     Ok(out)
 }

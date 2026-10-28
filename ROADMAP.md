@@ -20,8 +20,8 @@ The README lists what the engine, the desktop, the CLI and the MCP server do. Wh
   Editor), textures by material or from a picture, Paint, favorites kept for every project, and packages for Windows,
   Linux (AppImage, Flatpak, deb, rpm, Arch, tarball, riscv64) and macOS. Auto-update from GitHub releases is done for the Windows installer's copy, an AppImage and the macOS app, though none of it has run on a real system yet.
 - **The file** is `.bimcraft` JSON with a `format` version (6 now): an older file is migrated on open, and a newer one is
-  refused, saying so. Every save is format 6, with or without the detailing features, so an earlier build (0.8.0 reads up to 4)
-  refuses even a plain project saved by this one ("saved by a newer BIMCraft (file format 6; this one reads up to 4)"): the
+  refused, saying so. Every save is format 7, with or without the detailing and CAD features, so an earlier build (0.8.0 reads up to 4)
+  refuses even a plain project saved by this one ("saved by a newer BIMCraft (file format 7; this one reads up to 4)"): the
   release notes say so. A field this version doesn't know (a newer one's, in the same format) is left out and named, and the
   rest opens; commands still refuse a key they don't know.
 - **Ids and GUIDs**, as Revit's ElementId and UniqueId: every element, every library entry (types, materials, families,
@@ -151,7 +151,7 @@ The goal is that BIMCraft fits into a mixed-software office.
 
 | Item | Size | Notes |
 |---|---|---|
-| DXF import (as a link or underlay in a view) and DXF export of views and sheets | L | Use the public DXF reference. Native DWG needs a licensed SDK or a GPL library, which conflicts with MIT or Apache, so DXF comes first and DWG is decided separately |
+| ~~DXF import (as a link or underlay in a view)~~ and DXF export of views and sheets | L | Import done: `import_cad`, `cad_layers`, `reload_cad` and `cad_query`, Insert > Import CAD and Link CAD, Visibility/Graphics' Imported Categories ([docs/areas/cad-import.md](docs/areas/cad-import.md)). Export, exploding an import into detail lines, and images and PDFs as underlays are still to come. Use the public DXF reference. Native DWG needs a licensed SDK or a GPL library, which conflicts with MIT or Apache, so DXF comes first and DWG is decided separately |
 | Revit `.rvt` reader, in three parts, all done: the container, metadata and element inventory (`bimcraft-cli info`); the elements into the model (levels, walls, floors, ceilings, doors, windows, columns, rooms and roofs, through `run`, `convert` and the MCP `open`); File > Open in the desktop (a thread of its own, a report of what was left out) | L | Read only under the fence in [docs/rvt-provenance.md](docs/rvt-provenance.md); `crates/rvt`, Apache-2.0 only. IFC stays the way out. Left in the import: curtain walls, sloped floors and roofs by footprint, roofs by extrusion that are not a straight-line profile, a column's section shape, stairs and railings, groups, door swings, the join lists, and names for the categories `info` prints as bare ids (no table of Autodesk's `BuiltInCategory` values to check against a file was found). The desktop cannot cancel an import in flight |
 | ~~Linked models: other `.bimcraft` and IFC files as references, positioned shared or origin to origin~~ | L | Done, origin to origin: `link` and `reload`, Manage > Link Model, a Linked Models group in the Project Browser. Shared coordinates, links in sections' cut poché by category, a link's own view overrides, hiding or unloading one in a view, and nested links are still to come (issue #36) |
 | IFC export completeness: `Pset_*Common`, `Qto_*BaseQuantities`, space boundaries, classification references, an IFC4x3 option | L | Keep validating with IfcOpenShell |
@@ -178,7 +178,8 @@ The goal is that someone could run a real small project on it.
 | A file-format stability promise, with 1.x files opening in every later 1.x | S |
 | Signed installers on all three operating systems (macOS signing is wired up and waits for a Developer ID) | M |
 | A documentation site: user guide, command reference generated from `catalog()`, API guide | M |
-| More interface and project languages, through community translation of `lang.rs` and `language.rs` | S each |
+| ~~Move interface and project translations into separate `.po` catalogs with English fallback~~ | S |
+| More interface and project languages, through community translation of the `.po` catalogs ([workflow](docs/areas/translations.md)) | S each |
 
 **Exit criteria**: performance budgets met on a 50k-element model; no data-loss bugs open; the release passes a scripted
 end-to-end project (model, document, print, IFC) on all three operating systems.

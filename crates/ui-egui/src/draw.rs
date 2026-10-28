@@ -2,6 +2,8 @@
 //! the Options Bar's Sides, Radius and Offset, what a click makes, and the preview under the cursor. Also Join into
 //! Polyline and Explode Polyline on detail lines and sketch lines.
 
+use bimcraft_i18n::msg;
+
 use bimcraft_core::curves::{self, Curve, Fields};
 use bimcraft_core::draw::{self, Options};
 pub(crate) use bimcraft_core::draw::{Shape, element_curve};
@@ -134,22 +136,22 @@ pub fn icon(s: Shape) -> Icon {
 /// What a shape's button says it does.
 pub fn tip(s: Shape) -> &'static str {
     match s {
-        Shape::Line => "Line: a line between each two points clicked",
-        Shape::Rectangle => "Rectangle: four lines between two opposite corners",
-        Shape::Inscribed => "Inscribed Polygon: click its centre, then a corner; Sides on the Options Bar",
-        Shape::Circumscribed => "Circumscribed Polygon: click its centre, then the middle of a side; Sides on the Options Bar",
-        Shape::Circle => "Circle: click its centre, then a point on it (or only its centre, with Radius)",
-        Shape::Arc => "Start-End-Radius Arc: click its start, its end, then a point it passes through",
-        Shape::CentreArc => "Center-ends Arc: click its centre, its start, then where it ends",
-        Shape::TangentArc => "Tangent End Arc: click the end of a line, then where the arc ends; it leaves the way the line ran",
-        Shape::Fillet => "Fillet Arc: pick two lines, then click to size the arc (or set its Radius); the lines are cut back to it",
-        Shape::Spline => "Spline: click its control points; Enter finishes it",
-        Shape::FitSpline => "Spline Through Points: click the points it passes through; Enter finishes it",
-        Shape::Ellipse => "Ellipse: click its centre, the end of one axis, then how far the other reaches",
-        Shape::PartialEllipse => "Partial Ellipse: click the ends of its axis, then how far it bulges",
-        Shape::Polyline => "Polyline: one line through every point clicked; Enter finishes it, the first point again closes it",
-        Shape::PickLines => "Pick Lines: click a line, a wall or a grid to draw along it (beside it, with Offset)",
-        Shape::PickFaces => "Pick Faces: click a face of a mass for a wall on it, as tall as the mass",
+        Shape::Line => msg!("Line: a line between each two points clicked"),
+        Shape::Rectangle => msg!("Rectangle: four lines between two opposite corners"),
+        Shape::Inscribed => msg!("Inscribed Polygon: click its centre, then a corner; Sides on the Options Bar"),
+        Shape::Circumscribed => msg!("Circumscribed Polygon: click its centre, then the middle of a side; Sides on the Options Bar"),
+        Shape::Circle => msg!("Circle: click its centre, then a point on it (or only its centre, with Radius)"),
+        Shape::Arc => msg!("Start-End-Radius Arc: click its start, its end, then a point it passes through"),
+        Shape::CentreArc => msg!("Center-ends Arc: click its centre, its start, then where it ends"),
+        Shape::TangentArc => msg!("Tangent End Arc: click the end of a line, then where the arc ends; it leaves the way the line ran"),
+        Shape::Fillet => msg!("Fillet Arc: pick two lines, then click to size the arc (or set its Radius); the lines are cut back to it"),
+        Shape::Spline => msg!("Spline: click its control points; Enter finishes it"),
+        Shape::FitSpline => msg!("Spline Through Points: click the points it passes through; Enter finishes it"),
+        Shape::Ellipse => msg!("Ellipse: click its centre, the end of one axis, then how far the other reaches"),
+        Shape::PartialEllipse => msg!("Partial Ellipse: click the ends of its axis, then how far it bulges"),
+        Shape::Polyline => msg!("Polyline: one line through every point clicked; Enter finishes it, the first point again closes it"),
+        Shape::PickLines => msg!("Pick Lines: click a line, a wall or a grid to draw along it (beside it, with Offset)"),
+        Shape::PickFaces => msg!("Pick Faces: click a face of a mass for a wall on it, as tall as the mass"),
     }
 }
 
@@ -285,7 +287,7 @@ impl BimApp {
             Target::Wall => self.drawing.wall,
         };
         let picking_walls = matches!(self.tool, Tool::SketchPick);
-        panel(ui, "Draw", |ui| {
+        panel(ui, msg!("Draw"), |ui| {
             ui.vertical(|ui| {
                 ui.spacing_mut().item_spacing.y = 2.0;
                 let half = shapes.len().div_ceil(2).max(1);
@@ -299,7 +301,7 @@ impl BimApp {
                             }
                         }
                         if target == Target::Sketch && k == 1 {
-                            let tip = "Pick Walls: a boundary line along each wall clicked";
+                            let tip = msg!("Pick Walls: a boundary line along each wall clicked");
                             if small_button(ui, Icon::Wall, "Pick Walls", picking_walls, tip).clicked() {
                                 self.tool = Tool::SketchPick;
                             }
@@ -556,40 +558,40 @@ impl BimApp {
         let radius = self.draw_options().radius.is_some();
         Some(match (shape, n) {
             (Shape::Line, _) => return None,
-            (Shape::Rectangle, 0) => "Click a corner of the rectangle.",
-            (Shape::Rectangle, _) => "Click the opposite corner. Esc cancels.",
-            (Shape::Inscribed | Shape::Circumscribed | Shape::Circle, 0) => "Click the centre.",
-            (Shape::Inscribed, _) => "Click where a corner goes. Esc cancels.",
-            (Shape::Circumscribed, _) => "Click where the middle of a side goes. Esc cancels.",
-            (Shape::Circle, _) if !radius => "Click a point on the circle. Esc cancels.",
+            (Shape::Rectangle, 0) => msg!("Click a corner of the rectangle."),
+            (Shape::Rectangle, _) => msg!("Click the opposite corner. Esc cancels."),
+            (Shape::Inscribed | Shape::Circumscribed | Shape::Circle, 0) => msg!("Click the centre."),
+            (Shape::Inscribed, _) => msg!("Click where a corner goes. Esc cancels."),
+            (Shape::Circumscribed, _) => msg!("Click where the middle of a side goes. Esc cancels."),
+            (Shape::Circle, _) if !radius => msg!("Click a point on the circle. Esc cancels."),
             (Shape::Circle, _) => "Click the centre.",
-            (Shape::Arc, 0) => "Click where the arc starts.",
-            (Shape::Arc, 1) => "Click where the arc ends.",
-            (Shape::Arc, _) => "Click a point the arc passes through. Esc cancels.",
-            (Shape::CentreArc, 0) => "Click the arc's centre.",
+            (Shape::Arc, 0) => msg!("Click where the arc starts."),
+            (Shape::Arc, 1) => msg!("Click where the arc ends."),
+            (Shape::Arc, _) => msg!("Click a point the arc passes through. Esc cancels."),
+            (Shape::CentreArc, 0) => msg!("Click the arc's centre."),
             (Shape::CentreArc, 1) => "Click where the arc starts.",
-            (Shape::CentreArc, _) => "Click where the arc ends, the shorter way round. Esc cancels.",
-            (Shape::TangentArc, 0) => "Click the end of a line: the arc leaves it the way the line ran.",
-            (Shape::TangentArc, _) => "Click where the arc ends. Esc cancels.",
+            (Shape::CentreArc, _) => msg!("Click where the arc ends, the shorter way round. Esc cancels."),
+            (Shape::TangentArc, 0) => msg!("Click the end of a line: the arc leaves it the way the line ran."),
+            (Shape::TangentArc, _) => msg!("Click where the arc ends. Esc cancels."),
             (Shape::Fillet, _) => match self.drawing.fillet.len() {
-                0 => "Pick the first line to round.",
-                1 => "Pick the second line.",
-                _ => "Click to size the arc. Esc cancels.",
+                0 => msg!("Pick the first line to round."),
+                1 => msg!("Pick the second line."),
+                _ => msg!("Click to size the arc. Esc cancels."),
             },
-            (Shape::Spline, 0) => "Click the spline's first control point.",
-            (Shape::Spline, _) => "Click its next control point; Enter finishes it. Esc cancels.",
-            (Shape::FitSpline, 0) => "Click the first point the spline passes through.",
-            (Shape::FitSpline, _) => "Click the next point it passes through; Enter finishes it. Esc cancels.",
-            (Shape::Ellipse, 0) => "Click the ellipse's centre.",
-            (Shape::Ellipse, 1) => "Click the end of its first axis.",
-            (Shape::Ellipse, _) => "Click how far its other axis reaches. Esc cancels.",
-            (Shape::PartialEllipse, 0) => "Click one end of its axis.",
-            (Shape::PartialEllipse, 1) => "Click the other end.",
-            (Shape::PartialEllipse, _) => "Click how far it bulges, on the side it goes. Esc cancels.",
-            (Shape::Polyline, 0) => "Click where the polyline starts.",
-            (Shape::Polyline, _) => "Click its next point; Enter finishes it, the first point again closes it. Esc cancels.",
-            (Shape::PickLines, _) => "Click a line, a wall or a grid to draw along it.",
-            (Shape::PickFaces, _) => "Click a face of a mass: a wall stands on it.",
+            (Shape::Spline, 0) => msg!("Click the spline's first control point."),
+            (Shape::Spline, _) => msg!("Click its next control point; Enter finishes it. Esc cancels."),
+            (Shape::FitSpline, 0) => msg!("Click the first point the spline passes through."),
+            (Shape::FitSpline, _) => msg!("Click the next point it passes through; Enter finishes it. Esc cancels."),
+            (Shape::Ellipse, 0) => msg!("Click the ellipse's centre."),
+            (Shape::Ellipse, 1) => msg!("Click the end of its first axis."),
+            (Shape::Ellipse, _) => msg!("Click how far its other axis reaches. Esc cancels."),
+            (Shape::PartialEllipse, 0) => msg!("Click one end of its axis."),
+            (Shape::PartialEllipse, 1) => msg!("Click the other end."),
+            (Shape::PartialEllipse, _) => msg!("Click how far it bulges, on the side it goes. Esc cancels."),
+            (Shape::Polyline, 0) => msg!("Click where the polyline starts."),
+            (Shape::Polyline, _) => msg!("Click its next point; Enter finishes it, the first point again closes it. Esc cancels."),
+            (Shape::PickLines, _) => msg!("Click a line, a wall or a grid to draw along it."),
+            (Shape::PickFaces, _) => msg!("Click a face of a mass: a wall stands on it."),
         })
     }
 
@@ -626,19 +628,23 @@ impl BimApp {
     /// groups.
     pub(crate) fn detail_panel(&mut self, ui: &mut Ui) {
         let drawing = matches!(self.tool, Tool::DetailLine(_));
-        panel(ui, "Detail", |ui| {
-            let tip = "Detail Line (DL): each click makes a line from the one before, in the Options Bar's line style; the Draw panel has the other shapes";
+        panel(ui, msg!("Detail"), |ui| {
+            let tip = msg!(
+                "Detail Line (DL): each click makes a line from the one before, in the Options Bar's line style; the Draw panel has the other shapes"
+            );
             let plain = self.drawing.insulation.is_none() && self.drawing.cloud.is_none();
             if crate::big_button(ui, Icon::Line, "Detail Line", drawing && plain, tip).clicked() {
                 self.set_tool(Tool::DetailLine(Vec::new()));
                 (self.drawing.insulation, self.drawing.cloud) = (None, None);
             }
-            let tip = "Insulation: batt insulation drawn along each line, its width on the Options Bar";
+            let tip = msg!("Insulation: batt insulation drawn along each line, its width on the Options Bar");
             if crate::big_button(ui, Icon::Insulation, "Insulation", drawing && self.drawing.insulation.is_some(), tip).clicked() {
                 self.set_tool(Tool::DetailLine(Vec::new()));
                 (self.drawing.insulation, self.drawing.cloud) = (Some("100".into()), None);
             }
-            let tip = "Revision Cloud: a cloud round what changed, of the revision on the Options Bar; a rectangle by default, any shape from the Draw panel";
+            let tip = msg!(
+                "Revision Cloud: a cloud round what changed, of the revision on the Options Bar; a rectangle by default, any shape from the Draw panel"
+            );
             if crate::big_button(ui, Icon::RevisionCloud, "Revision Cloud", drawing && self.drawing.cloud.is_some(), tip).clicked() {
                 self.set_tool(Tool::DetailLine(Vec::new()));
                 (self.drawing.insulation, self.drawing.cloud) = (None, Some(("500".into(), String::new())));
@@ -646,16 +652,16 @@ impl BimApp {
             }
             // Groups, stacked three high as Revit's small buttons are.
             crate::stacked(ui, |ui| {
-                let tip = "Detail Group: click to place the group on the Options Bar";
-                if crate::stacked_button(ui, Icon::DetailGroup, "Detail Group", self.tool == Tool::DetailGroup, tip).clicked() {
+                let tip = msg!("Detail Group: click to place the group on the Options Bar");
+                if crate::stacked_button(ui, Icon::DetailGroup, msg!("Detail Group"), self.tool == Tool::DetailGroup, tip).clicked() {
                     self.set_tool(Tool::DetailGroup);
                 }
-                let tip = "Repeating Detail: click its start and end; the group on the Options Bar repeats along it every spacing";
+                let tip = msg!("Repeating Detail: click its start and end; the group on the Options Bar repeats along it every spacing");
                 let on = matches!(self.tool, Tool::RepeatingDetail(_));
-                if crate::stacked_button(ui, Icon::RepeatingDetail, "Repeating Detail", on, tip).clicked() {
+                if crate::stacked_button(ui, Icon::RepeatingDetail, msg!("Repeating Detail"), on, tip).clicked() {
                     self.set_tool(Tool::RepeatingDetail(None));
                 }
-                let tip = "Create Group (GP): the selected detail lines, filled regions and text made one detail group";
+                let tip = msg!("Create Group (GP): the selected detail lines, filled regions and text made one detail group");
                 if crate::stacked_button(ui, Icon::CreateGroup, "Create Group", false, tip).clicked() {
                     self.create_group();
                 }
@@ -940,7 +946,7 @@ impl BimApp {
                     }
                     sk.changed();
                 }
-                None => status = Some("Split between the line's ends."),
+                None => status = Some(msg!("Split between the line's ends.")),
             },
             Tool::Trim(_) => match self.drawing.trim.take() {
                 Some((first, keep)) if first != i => match sk.lines.get(first).and_then(|f| draw::corner(&f.curve, keep, &l.curve, raw)) {
@@ -985,7 +991,7 @@ impl BimApp {
                     }
                     sk.changed();
                 }
-                None => status = Some("It can't be offset: give a distance, and pick a line, an arc, a polyline or a circle."),
+                None => status = Some(msg!("It can't be offset: give a distance, and pick a line, an arc, a polyline or a circle.")),
             },
             _ => {}
         }
@@ -1036,11 +1042,16 @@ impl BimApp {
         for (icon, label, tip, delete) in [
             (
                 Icon::AddVertex,
-                "Add Vertex",
-                "Add Vertex: click a polyline or a spline where a vertex goes; a spline keeps its shape",
+                msg!("Add Vertex"),
+                msg!("Add Vertex: click a polyline or a spline where a vertex goes; a spline keeps its shape"),
                 false,
             ),
-            (Icon::DeleteVertex, "Delete Vertex", "Delete Vertex: click a polyline's corner or a spline's point to take it out", true),
+            (
+                Icon::DeleteVertex,
+                msg!("Delete Vertex"),
+                msg!("Delete Vertex: click a polyline's corner or a spline's point to take it out"),
+                true,
+            ),
         ] {
             let on = self.tool == Tool::Vertex { delete };
             if crate::big_button(ui, icon, label, on, tip).clicked() {
@@ -1055,7 +1066,9 @@ impl BimApp {
             (None, &[id]) => spline(element_curve(&self.session.model, id)),
             _ => false,
         };
-        let tip = "Convert Spline: a spline through points becomes the same curve by its control points, or one by its control points a spline through points";
+        let tip = msg!(
+            "Convert Spline: a spline through points becomes the same curve by its control points, or one by its control points a spline through points"
+        );
         if ui.add_enabled_ui(one, |ui| crate::big_button(ui, Icon::ConvertSpline, "Convert Spline", false, tip)).inner.clicked() {
             self.convert_spline();
         }

@@ -4,6 +4,8 @@
 //! edited as Revit's simple pattern: its angle, its spacing, crosshatched or not; any pattern's families, one by one, with
 //! Edit Lines (Revit's custom patterns, which it only imports). Patterns come in from a PAT file and go out to one.
 
+use bimcraft_i18n::msg;
+
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
@@ -24,7 +26,7 @@ use crate::style::{ERROR_HEIGHT, boxed_text, canvas_pal, dialog_room, dialog_row
 use crate::{BimApp, Status};
 
 /// The dialog's tabs.
-const TABS: [&str; 2] = ["Region Types", "Patterns"];
+const TABS: [&str; 2] = [msg!("Region Types"), "Patterns"];
 
 /// A pattern as edited: the name it had (none, new), the name it has, what it is.
 struct PatternRow {
@@ -134,11 +136,17 @@ impl FillPatternsDialog {
         // The reply names the first few it left out and counts them all.
         let left = reply["left_out_count"].as_u64().map_or(0, |c| usize::try_from(c).unwrap_or(usize::MAX)).max(out.len());
         Ok(match left {
-            0 => (tf(if one { "{} pattern imported." } else { "{} patterns imported." }, &[&n]), false),
+            0 => (tf(if one { msg!("{} pattern imported.") } else { msg!("{} patterns imported.") }, &[&n]), false),
             k => {
                 let list = out.iter().take(LEFT_OUT_SHOWN).cloned().collect::<Vec<_>>().join("; ");
                 let list = if k > LEFT_OUT_SHOWN { tf("{}; and {} more", &[&list, &(k - LEFT_OUT_SHOWN).to_string()]) } else { list };
-                (tf(if one { "{} pattern imported; left out: {}" } else { "{} patterns imported; left out: {}" }, &[&n, &list]), true)
+                (
+                    tf(
+                        if one { msg!("{} pattern imported; left out: {}") } else { msg!("{} patterns imported; left out: {}") },
+                        &[&n, &list],
+                    ),
+                    true,
+                )
             }
         })
     }
@@ -268,7 +276,7 @@ pub(crate) fn swatch(ui: &mut Ui, p: Option<&FillPattern>, width: f32, colour: C
     ui.painter().rect_stroke(rect, 2.0, Stroke::new(1.0, ui.visuals().widgets.noninteractive.bg_stroke.color), egui::StrokeKind::Inside);
 }
 
-fn paint_pattern(ui: &Ui, rect: egui::Rect, p: Option<&FillPattern>, colour: Color32) {
+pub(crate) fn paint_pattern(ui: &Ui, rect: egui::Rect, p: Option<&FillPattern>, colour: Color32) {
     // Off the screen (a scroll area's rows past its edge) there is nothing to paint, and a long list is not worked out each frame.
     if !ui.is_rect_visible(rect) {
         return;
@@ -315,7 +323,7 @@ fn types_tab(ui: &mut Ui, d: &mut FillPatternsDialog, below: f32) {
     let mut delete = None;
     ScrollArea::vertical().max_height(dialog_room(ui, below + dialog_row(ui))).show(ui, |ui| {
         Grid::new("region-types").striped(true).num_columns(9).show(ui, |ui| {
-            for h in ["Name", "Foreground", "", "", "Background", "", "", "Masking", ""] {
+            for h in ["Name", msg!("Foreground"), "", "", msg!("Background"), "", "", "Masking", ""] {
                 ui.label(RichText::new(t(h)).strong());
             }
             ui.end_row();
@@ -367,7 +375,7 @@ fn families(ui: &mut Ui, d: &mut FillPatternsDialog, room: f32) {
     let rows = (room - 2.0 * dialog_row(ui) - 6.0).max(60.0);
     ScrollArea::vertical().id_salt("pattern-families-rows").max_height(rows).show(ui, |ui| {
         Grid::new("pattern-families").striped(true).num_columns(8).show(ui, |ui| {
-            for h in ["", "Angle", "X", "Y", "Shift", "Spacing", "Dashes", ""] {
+            for h in ["", "Angle", msg!("X"), msg!("Y"), msg!("Shift"), msg!("Spacing"), msg!("Dashes"), ""] {
                 ui.label(RichText::new(t(h)).strong());
             }
             ui.end_row();
@@ -459,8 +467,8 @@ fn edit_type(ui: &mut Ui, d: &mut FillPatternsDialog) {
         name_field(ui, &mut r.name, t("Type Name").to_string());
         ui.end_row();
         for (row, rgb, label, colour) in [
-            (&mut r.foreground, &mut r.foreground_color, "Foreground Pattern", "Foreground Color"),
-            (&mut r.background, &mut r.background_color, "Background Pattern", "Background Color"),
+            (&mut r.foreground, &mut r.foreground_color, msg!("Foreground Pattern"), msg!("Foreground Color")),
+            (&mut r.background, &mut r.background_color, msg!("Background Pattern"), msg!("Background Color")),
         ] {
             ui.label(t(label));
             pattern_pick(ui, row, &names, t(label).to_string());
@@ -517,7 +525,7 @@ fn patterns_tab(ui: &mut Ui, d: &mut FillPatternsDialog, below: f32) -> Option<F
     let editor = if d.editing.is_some() { room / 2.0 } else { 0.0 };
     ScrollArea::vertical().max_height(room - editor).show(ui, |ui| {
         Grid::new("fill-patterns").striped(true).num_columns(8).show(ui, |ui| {
-            for h in ["Name", "Type", "Sample", "Angle", "Spacing", "Crosshatch", "", ""] {
+            for h in ["Name", "Type", msg!("Sample"), "Angle", "Spacing", "Crosshatch", "", ""] {
                 ui.label(RichText::new(t(h)).strong());
             }
             ui.end_row();
@@ -663,7 +671,7 @@ impl BimApp {
         let r = Modal::new(UiId::new("fill-patterns")).show(ctx, |ui| {
             // One width for both tabs and both ways in, so the dialog doesn't jump as they change.
             ui.set_width(860.0);
-            ui.label(RichText::new(t(if editing { "Type Properties" } else { "Fill Patterns" })).heading());
+            ui.label(RichText::new(t(if editing { "Type Properties" } else { msg!("Fill Patterns") })).heading());
             ui.add_space(6.0);
             ui.horizontal(|ui| {
                 for (i, tab) in TABS.iter().enumerate() {

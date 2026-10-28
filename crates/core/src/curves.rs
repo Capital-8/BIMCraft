@@ -20,6 +20,8 @@
 //! `centre` and `radius`, `centre` and `radii` (with `angle` and `span`), `control` (with `knots`), or `fit` (with
 //! `start_tangent` and `end_tangent`).
 
+use bimcraft_i18n::ui_msg;
+
 use std::f64::consts::TAU;
 
 use serde::{Deserialize, Serialize};
@@ -120,17 +122,17 @@ impl Curve {
         match self {
             Curve::Poly { points, arcs, closed: false } if points.len() == 2 => {
                 if arcs.first().is_some_and(|a| *a != 0.0) {
-                    "arc"
+                    ui_msg!("arc")
                 } else {
-                    "line"
+                    ui_msg!("line")
                 }
             }
-            Curve::Poly { .. } => "polyline",
-            Curve::Circle { .. } => "circle",
-            Curve::Ellipse { span: None, .. } => "ellipse",
-            Curve::Ellipse { .. } => "partial ellipse",
-            Curve::Spline { .. } => "spline",
-            Curve::Fit { .. } => "fitted spline",
+            Curve::Poly { .. } => ui_msg!("polyline"),
+            Curve::Circle { .. } => ui_msg!("circle"),
+            Curve::Ellipse { span: None, .. } => ui_msg!("ellipse"),
+            Curve::Ellipse { .. } => ui_msg!("partial ellipse"),
+            Curve::Spline { .. } => ui_msg!("spline"),
+            Curve::Fit { .. } => ui_msg!("fitted spline"),
         }
     }
 
@@ -1792,6 +1794,17 @@ mod tests {
     /// The furthest any point of `part` lies from `whole`.
     fn strays(part: &Curve, whole: &Curve) -> f64 {
         part.points().iter().map(|p| whole.nearest(*p).1).fold(0.0, f64::max)
+    }
+
+    #[test]
+    fn an_arc_ends_exactly_where_it_was_drawn_to() {
+        // Worked out again along the arc, an end lands a rounding off its point, by how the platform rounds sines.
+        for k in 1..60 {
+            let (a, b) = (P2(3000.0 + 7.3 * k as f64, -1.1 * k as f64), P2(5000.0 - 3.7 * k as f64, 13.9 * k as f64));
+            let sweep = -179.0 + 6.1 * k as f64;
+            let c = Curve::arc(a, b, sweep);
+            assert_eq!((c.start(), c.end()), (a, b), "sweep {sweep}");
+        }
     }
 
     #[test]

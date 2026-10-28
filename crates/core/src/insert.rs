@@ -235,6 +235,7 @@ fn copy_definition(to: &mut Model, from: &Model, kind: &Kind, name: &str) -> boo
         Kind::Material => one(&mut to.materials, Some(&from.materials), name),
         Kind::Picture => one(&mut to.images, Some(&from.images), name),
         Kind::Cloud => one(&mut to.clouds, Some(&from.clouds), name),
+        Kind::Cad => one(&mut to.cads, Some(&from.cads), name),
         Kind::Family => one(&mut to.families, Some(&from.families), name),
         Kind::Parameter => one(&mut to.parameters, Some(&from.parameters), name),
         Kind::LinePattern => one(&mut to.line_patterns, Some(&from.line_patterns), name),

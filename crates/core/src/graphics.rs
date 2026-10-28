@@ -7,6 +7,8 @@
 //! what a view's graphics come to for each element: the drawing code asks it what to leave out and
 //! how to draw the rest, and it dresses the finished drawing.
 
+use bimcraft_i18n::ui_msg;
+
 use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
@@ -15,6 +17,9 @@ use crate::model::{Element, Guid, Id, Key, MAX_TEXT, Model, ViewRange};
 use crate::pen::{MAX_PEN, Pen};
 use crate::render::{Drawing, Part, Prim, Rgb};
 use crate::schedule;
+
+#[cfg(test)]
+mod fill_tests;
 
 /// The categories a plan, a section or a 3D view draws, and so may hide and override: those of the
 /// model, then those of the annotation.
@@ -50,10 +55,12 @@ pub const ANNOTATION: [&str; 10] = ["dimension", "tag", "text", "line", "region"
 /// The point clouds, which views hide and override as Revit's Visibility/Graphics does on a tab of their own: not a model
 /// category, so Object Styles has no row for them.
 pub const SCANS: [&str; 1] = ["pointcloud"];
+/// The CAD imports, which views hide and override on a tab of their own too, as Revit's Imported Categories.
+pub const IMPORTED: [&str; 1] = ["cadimport"];
 
 /// Whether views draw elements of `category`.
 pub fn drawn(category: &str) -> bool {
-    MODEL.contains(&category) || ANNOTATION.contains(&category) || SCANS.contains(&category)
+    MODEL.contains(&category) || ANNOTATION.contains(&category) || SCANS.contains(&category) || IMPORTED.contains(&category)
 }
 
 /// How much of a mass a 3D view sees through, percent, unless its graphics say otherwise.
@@ -86,9 +93,9 @@ impl Detail {
     /// What it is called, in English.
     pub fn name(self) -> &'static str {
         match self {
-            Detail::Coarse => "Coarse",
-            Detail::Medium => "Medium",
-            Detail::Fine => "Fine",
+            Detail::Coarse => ui_msg!("Coarse"),
+            Detail::Medium => ui_msg!("Medium"),
+            Detail::Fine => ui_msg!("Fine"),
         }
     }
 
@@ -115,9 +122,9 @@ impl VisualStyle {
     /// What it is called, in English.
     pub fn name(self) -> &'static str {
         match self {
-            VisualStyle::Shaded => "Shaded",
-            VisualStyle::HiddenLine => "Hidden Line",
-            VisualStyle::Wireframe => "Wireframe",
+            VisualStyle::Shaded => ui_msg!("Shaded"),
+            VisualStyle::HiddenLine => ui_msg!("Hidden Line"),
+            VisualStyle::Wireframe => ui_msg!("Wireframe"),
         }
     }
 
@@ -174,7 +181,15 @@ mod rgb {
     }
 }
 
-/// How lines and fills draw: a colour, a weight, a dash for lines, a colour for fills.
+/// One overridden pattern layer. No pattern explicitly hides the layer; no layer override inherits it.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct PatternFill {
+    pub pattern: Option<String>,
+    pub color: [u8; 3],
+}
+
+/// How lines and fills draw: line settings, the solid fill colour, and independent pattern layers.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Style {
@@ -186,6 +201,10 @@ pub struct Style {
     pub dash: Option<Dash>,
     #[serde(with = "rgb", skip_serializing_if = "Option::is_none")]
     pub fill: Option<[u8; 3]>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub foreground: Option<PatternFill>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub background: Option<PatternFill>,
 }
 
 impl Style {
@@ -200,6 +219,8 @@ impl Style {
             weight: self.weight.or(base.weight),
             dash: self.dash.or(base.dash),
             fill: self.fill.or(base.fill),
+            foreground: self.foreground.clone().or_else(|| base.foreground.clone()),
+            background: self.background.clone().or_else(|| base.background.clone()),
         }
     }
 
@@ -248,6 +269,25 @@ pub struct Override {
 }
 
 impl Override {
+    pub(crate) fn check_patterns(&self, m: &Model) -> Result<(), String> {
+        for s in [&self.projection, &self.cut] {
+            for name in [&s.foreground, &s.background].into_iter().flatten().filter_map(|p| p.pattern.as_ref()) {
+                if !m.fill_patterns.contains_key(name) {
+                    return Err(format!("there's no fill pattern `{name}`"));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    pub(crate) fn patterns_mut(&mut self) -> impl Iterator<Item = &mut String> {
+        [&mut self.projection, &mut self.cut]
+            .into_iter()
+            .flat_map(|s| [&mut s.foreground, &mut s.background])
+            .flatten()
+            .filter_map(|p| p.pattern.as_mut())
+    }
+
     pub fn is_empty(&self) -> bool {
         *self == Override::default()
     }
@@ -348,6 +388,9 @@ pub struct Graphics {
     /// Revit's Linework: an edge of an element drawn in a line style of the view's own, or not at all.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub linework: Vec<Linework>,
+    /// The layers of each CAD drawing it hides, by the drawing's name: Revit's Imported Categories, layer by layer.
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub layers: BTreeMap<String, BTreeSet<String>>,
 }
 
 /// An edge of `element` as the view draws it, from `from` to `to` (mm in the view's terms), in line style `style` instead
@@ -436,7 +479,7 @@ impl Graphics {
             if !drawn(c) {
                 return Err(format!(
                     "`{c}` isn't a category views draw; there are: {}",
-                    MODEL.iter().chain(&ANNOTATION).chain(&SCANS).copied().collect::<Vec<_>>().join(", ")
+                    MODEL.iter().chain(&ANNOTATION).chain(&SCANS).chain(&IMPORTED).copied().collect::<Vec<_>>().join(", ")
                 ));
             }
             o.check(&format!("category `{c}`"))?;
@@ -459,6 +502,21 @@ impl Graphics {
                 && !m.line_styles.contains_key(st)
             {
                 return Err(format!("Linework edge {i}: there's no line style `{st}`{}", known(m.line_styles.keys())));
+            }
+        }
+        for o in self.categories.values().chain(self.elements.values()).chain(self.filters.iter().map(|a| &a.over)) {
+            o.check_patterns(m)?;
+        }
+        if self.layers.len() > crate::cad::MAX_CADS || self.layers.values().any(|l| l.len() > crate::model::MAX_HIDDEN) {
+            return Err(format!(
+                "it hides layers of more than {} CAD drawings, or more than {} of one",
+                crate::cad::MAX_CADS,
+                crate::model::MAX_HIDDEN
+            ));
+        }
+        for (cad, layers) in &self.layers {
+            if let Some(n) = std::iter::once(cad).chain(layers).find(|n| n.chars().count() > crate::model::MAX_TEXT) {
+                return Err(format!("the layer or drawing `{n}` is longer than {} characters", crate::model::MAX_TEXT));
             }
         }
         let mut seen = BTreeSet::new();
@@ -617,11 +675,11 @@ pub(crate) fn check_project(m: &Model) -> Result<(), String> {
         }
     };
     for (n, f) in &m.view_filters {
-        named("view filter", n)?;
+        named(ui_msg!("view filter"), n)?;
         f.check(m).map_err(|e| format!("view filter `{n}`: {e}"))?;
     }
     for (n, t) in &m.view_templates {
-        named("view template", n)?;
+        named(ui_msg!("view template"), n)?;
         t.check(m).map_err(|e| format!("view template `{n}`: {e}"))?;
     }
     Ok(())
@@ -693,6 +751,8 @@ pub fn graphics_of(m: &Model, view: impl Key) -> Option<&Graphics> {
 #[derive(Default)]
 pub struct Look {
     hidden: BTreeSet<Id>,
+    /// The layers of each CAD drawing it hides, by the drawing's name.
+    layers: BTreeMap<String, BTreeSet<String>>,
     paint: BTreeMap<Id, Override>,
     style: VisualStyle,
     /// The section box a 3D view is cut to, its min and max corners, while it's on.
@@ -706,6 +766,21 @@ fn halftone(c: Rgb) -> Rgb {
 }
 
 impl Look {
+    /// The resolved fill layers for the renderer, after category, filter and element precedence.
+    pub(crate) fn pattern_style(&self, id: Id, cut: bool) -> Option<&Style> {
+        let o = self.paint.get(&id)?;
+        let s = if cut { &o.cut } else { &o.projection };
+        (s.foreground.is_some() || s.background.is_some()).then_some(s)
+    }
+
+    pub(crate) fn pattern_styles(&self) -> BTreeMap<Id, [Style; 2]> {
+        self.paint
+            .iter()
+            .filter(|(id, _)| self.pattern_style(**id, false).is_some() || self.pattern_style(**id, true).is_some())
+            .map(|(id, o)| (*id, [o.projection.clone(), o.cut.clone()]))
+            .collect()
+    }
+
     /// What view `view` looks like: nothing hidden or painted when it isn't a view, or has no graphics.
     pub fn of(m: &Model, view: impl Key) -> Look {
         let look = graphics_of(m, view).map_or_else(Look::default, |own| Look::with(m, own));
@@ -733,7 +808,7 @@ impl Look {
     /// (a room's area) makes redraws slow.
     pub fn with(m: &Model, own: &Graphics) -> Look {
         let g = own.resolved(m);
-        let mut look = Look { style: g.style, ..Look::default() };
+        let mut look = Look { style: g.style, layers: own.layers.clone(), ..Look::default() };
         // Nothing to look for: no graphics of its own, and nothing in the project phased or in an option.
         let linked = m.elements.keys().next_back().is_some_and(|id| crate::link::is_linked(*id));
         if own.draws_as_is() && !linked && !crate::phasing::any(m) && !m.elements.values().any(|e| matches!(e, Element::Mass(_))) {
@@ -802,6 +877,11 @@ impl Look {
         self.style
     }
 
+    /// The layers of the CAD drawing `cad` the view hides.
+    pub fn hidden_layers(&self, cad: &str) -> Option<&BTreeSet<String>> {
+        self.layers.get(cad)
+    }
+
     /// Whether the view draws element `id`.
     pub fn shows(&self, id: Id) -> bool {
         !self.hidden.contains(&id)
@@ -811,7 +891,8 @@ impl Look {
     /// otherwise: what the drawing code fills the union of cut walls with.
     pub fn cut_fill(&self, id: Id, default: Rgb) -> Rgb {
         let Some(o) = self.paint.get(&id) else { return default };
-        let c = o.cut.fill.map_or(default, |[r, g, b]| Rgb(r, g, b));
+        let base = if self.pattern_style(id, true).is_some() { crate::render::PAPER } else { default };
+        let c = o.cut.fill.map_or(base, |[r, g, b]| Rgb(r, g, b));
         if o.halftone { halftone(c) } else { c }
     }
 

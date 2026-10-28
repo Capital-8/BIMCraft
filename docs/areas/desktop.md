@@ -58,7 +58,8 @@ HTTP say, is answered with an error and closed. A test (`tests/control.rs`) play
 
 The interface's language is `lang::Lang`: a project's language, or Simplified Chinese (issue 38), which only the window speaks
 (a drawing's lettering, `font.rs`, is drawn in code and has no hanzi, so a project is never in Chinese and `Lang::project()` gives
-it English). Its words are `lang/zh.rs`, English keys with the Chinese, and the core's words (schedule headings) stay English there.
+it English). Its words, including the schedule headings shown in the window, are in `translations/ui/*.po`;
+missing or unfinished translations show English. Project text has separate catalogs; see [translations](translations.md).
 egui's own fonts have no hanzi, so the window in Chinese needs a font the system has: `lang::use_chinese_font` puts one behind egui's
 (`lang/font.rs` tries each system's known places, then the Linux font folders, taking Noto Sans CJK's Simplified face) the first frame the
 language is Chinese. Where there is none, `set_lang` leaves the language as it was and the status says why, and a settings file that says
@@ -112,7 +113,7 @@ or the app is closed the ordinary way (`startup::up`, `closed`); one that dies w
 mark, and the next start takes the next choice on `LADDER` (wgpu's own, DirectX 12, Vulkan, OpenGL: Windows only), keeping the first that
 survives. `graphics.json` keeps the backend's name (`{"backend": "DirectX 12", "starting": false}`), never its place on the ladder, so
 reordering the ladder cannot change what a kept mark means; 0.8.0's marks (`"choice"`, a place on the old order) are read through that order. An error from `run_native` leaves the mark too, is logged, and on Windows shown in a message box (`startup::tell`: its words are
-rows in `WORDS`). `WGPU_BACKEND` set by the user switches all of it off. A new way for the start to fail goes through `startup::note`, not `eprintln!` alone.
+entries in the interface's PO catalogs). `WGPU_BACKEND` set by the user switches all of it off. A new way for the start to fail goes through `startup::note`, not `eprintln!` alone.
 
 Tags. A `Tag` names an element at a `host` by a `label`: the name of one of the fields its category's schedule has (`schedule::field_text` reads it
 as the schedule shows it, in the project's units), or, with none, the category's usual one (`Tag::usual`: a door's or window's `Mark`, a room's `Name`, else
@@ -134,6 +135,14 @@ plan's (and a plan view's) Properties have Section Box under Extents too, a `Fla
 Unhide. Only Reveal Hidden Elements lets what a view hides be picked, so the Modify tab's View panel offers Unhide Element and Unhide Category (EU, VU) for a selection
 `BimApp::hidden_selection` finds the active view hiding: the elements hidden one by one, and the categories hidden whole. They run `graphics` with `show_elements` or `show`
 (`unhide_selection`), the selection stays, and with nothing of it hidden EU opens the Elements tab as before and VU says so.
+
+Filter. While something is selected, every tab's Select panel has Filter, and the funnel by the status bar's count opens it too
+(`filter.rs`): Revit's Filter, the selection counted by category, each checked to keep or cleared to leave out, with Check All,
+Check None and the total kept; OK keeps what is checked selected. Its Filter by list goes further: any parameter every selected
+element has, which `selection::common` finds (the schedules' fields their categories share, Category first, Count left out; what
+schedules aren't of, lines, regions, text, tags, grids, views and sheets, has its fields in `schedule::MORE`: a line's Line Style), and
+the list becomes that parameter's values (`selection::groups`, as schedules show them, numbers by value, `(none)` last), to keep or
+leave out the same way. The `filter_selection` command gives agents the same: the groups, the shared fields, and with `keep`, the ids kept.
 
 Undo's list. The arrows beside Undo and Redo (`BimApp::steps_list`) list `Session::steps`, each a `Step` the core keeps with its
 undo snapshot: the command's label and the elements it made and took away, by category, which `step_name` turns into Create Walls

@@ -4,6 +4,8 @@
 //! moment offers, and [`BimApp::act`] does what one says. A new item is an [`Action`] variant, its
 //! label (a row in `lang::WORDS`), the group it joins in `context_items`, and its arm in `act`.
 
+use bimcraft_i18n::msg;
+
 use egui::{Button, Response};
 
 use crate::lang::t;
@@ -29,6 +31,8 @@ pub(crate) enum Action {
     CreateGroup,
     Ungroup,
     Delete,
+    /// The linked CAD drawings selected, read again from their files.
+    ReloadCad,
 }
 
 impl Action {
@@ -36,19 +40,20 @@ impl Action {
     pub(crate) fn label(self) -> &'static str {
         match self {
             Action::Cancel => "Cancel",
-            Action::Finish => "Finish Drawing",
+            Action::Finish => msg!("Finish Drawing"),
             Action::ZoomToFit => "Zoom to Fit",
             Action::ZoomIn => "Zoom In",
             Action::ZoomOut => "Zoom Out",
             Action::HomeView => "Home View",
             Action::EditType => "Edit Type",
-            Action::SelectAllInstances => "Select All Instances",
+            Action::SelectAllInstances => msg!("Select All Instances"),
             Action::HideElement => "Hide Element",
             Action::HideCategory => "Hide Category",
             Action::OverrideGraphics => "Override Graphics",
-            Action::CreateGroup => "Create Group",
-            Action::Ungroup => "Ungroup",
+            Action::CreateGroup => msg!("Create Group"),
+            Action::Ungroup => msg!("Ungroup"),
             Action::Delete => "Delete",
+            Action::ReloadCad => msg!("Reload CAD"),
         }
     }
 
@@ -126,6 +131,9 @@ impl BimApp {
             if groupable || self.group_selected() {
                 groups.push(vec![Item::new(Action::CreateGroup, groupable), Item::new(Action::Ungroup, self.group_selected())]);
             }
+            if !self.linked_cads().is_empty() {
+                groups.push(vec![Item::new(Action::ReloadCad, true)]);
+            }
             // What the view on screen hides and paints.
             if self.graphic_view().is_some() {
                 groups.push(vec![
@@ -161,7 +169,29 @@ impl BimApp {
             Action::CreateGroup => self.create_group(),
             Action::Ungroup => self.ungroup(),
             Action::Delete => self.delete(),
+            Action::ReloadCad => {
+                for cad in self.linked_cads() {
+                    self.run("reload_cad", serde_json::json!({"cad": cad}));
+                }
+            }
         }
+    }
+
+    /// The linked CAD drawings the selection places, when all it holds are imports of linked drawings; else none.
+    fn linked_cads(&self) -> Vec<String> {
+        let m = &self.session.model;
+        let mut names = Vec::new();
+        for id in &self.selection {
+            match m.elements.get(*id) {
+                Some(bimcraft_core::model::Element::CadImport(ci)) if m.cads.get(&ci.cad).is_some_and(|c| c.path().is_some()) => {
+                    if !names.contains(&ci.cad) {
+                        names.push(ci.cad.clone());
+                    }
+                }
+                _ => return Vec::new(),
+            }
+        }
+        names
     }
 
     /// The menu on a view's `response`, doing what's chosen from it.

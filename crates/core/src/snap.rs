@@ -4,6 +4,8 @@
 //! and from the line before it), to a wall's centre line, or to the nearest 10 mm. The ruler's
 //! numbers and graduations are here too, so every front end reads them alike.
 
+use bimcraft_i18n::ui_msg;
+
 use crate::curves::Curve;
 use crate::geom::{self, P2};
 use crate::graphics::Look;
@@ -53,16 +55,16 @@ impl Kind {
     /// What it's called, in English.
     pub fn name(self) -> &'static str {
         match self {
-            Kind::Endpoint => "Endpoint",
-            Kind::Midpoint => "Midpoint",
-            Kind::Intersection => "Intersection",
+            Kind::Endpoint => ui_msg!("Endpoint"),
+            Kind::Midpoint => ui_msg!("Midpoint"),
+            Kind::Intersection => ui_msg!("Intersection"),
             Kind::Centre => "Centre",
-            Kind::Perpendicular => "Perpendicular",
-            Kind::Quadrant => "Quadrant",
-            Kind::Tangent => "Tangent",
-            Kind::Nearest => "Nearest",
+            Kind::Perpendicular => ui_msg!("Perpendicular"),
+            Kind::Quadrant => ui_msg!("Quadrant"),
+            Kind::Tangent => ui_msg!("Tangent"),
+            Kind::Nearest => ui_msg!("Nearest"),
             Kind::Point => "Point Cloud",
-            Kind::Angle => "Angle",
+            Kind::Angle => ui_msg!("Angle"),
             Kind::Free => "",
         }
     }
@@ -324,10 +326,62 @@ impl<'a> Scene<'a> {
                 Element::Stair(st) if st.level == level && near(&[st.start]) => s.points.push((st.start, Kind::Endpoint)),
                 Element::Ramp(r) if r.level == level && near(&[r.start]) => s.points.push((r.start, Kind::Endpoint)),
                 Element::Railing(r) if r.level == level => s.points.extend(ring(&r.path)),
+                Element::CadImport(ci) if ci.level == level => cad_scene(&mut s, m, ci, p, window, look),
                 _ => {}
             }
         }
         s
+    }
+}
+
+/// What of a CAD import lies within `window` mm of `p`, of the layers it and the view show: its lines' ends and middles, its
+/// arcs' and circles' centres, and its straight segments, so a wall can be traced over it.
+fn cad_scene(s: &mut Scene, m: &Model, ci: &crate::model::CadImport, p: P2, window: f64, look: &Look) {
+    use crate::dxf::Shape;
+    let Some(cad) = m.cads.get(&ci.cad) else { return };
+    let place = crate::model::cad_place(ci);
+    // The window in the drawing's own units: the box round its corners, turned back.
+    let corners = [P2(-1.0, -1.0), P2(1.0, -1.0), P2(1.0, 1.0), P2(-1.0, 1.0)].map(|k| {
+        let q = crate::model::cad_unplace(ci, p + k * window);
+        [q, q]
+    });
+    let Some([lo, hi]) = crate::dxf::union(corners) else { return };
+    let in_view = look.hidden_layers(&ci.cad);
+    let near = |b: [P2; 2]| b[0].0 <= hi.0 && b[1].0 >= lo.0 && b[0].1 <= hi.1 && b[1].1 >= lo.1;
+    for e in &cad.dxf().entities {
+        if !cad.shows(e, &ci.hidden) || in_view.is_some_and(|h| h.contains(&e.layer)) || !near(e.shape.bounds()) {
+            continue;
+        }
+        match &e.shape {
+            Shape::Circle { c, .. } => s.points.push((place(*c), Kind::Centre)),
+            Shape::Arc { c, .. } => s.points.push((place(*c), Kind::Centre)),
+            Shape::Point(q) => s.points.push((place(*q), Kind::Endpoint)),
+            Shape::Text { .. } => continue,
+            _ => {}
+        }
+        let straight = matches!(e.shape, Shape::Line(..) | Shape::Polyline { .. } | Shape::Fill { .. });
+        for (pts, closed) in crate::cad::paths(&e.shape) {
+            let close = closed.then(|| pts.last().copied().zip(pts.first().copied())).flatten();
+            let segs = pts.windows(2).filter_map(|w| Some((*w.first()?, *w.get(1)?))).chain(close);
+            if !straight {
+                // A curve: its ends, and its middle point.
+                if let (Some(a), Some(b), false) = (pts.first(), pts.last(), closed) {
+                    s.points.extend([(place(*a), Kind::Endpoint), (place(*b), Kind::Endpoint)]);
+                    if let Some(mid) = pts.get(pts.len() / 2) {
+                        s.points.push((place(*mid), Kind::Midpoint));
+                    }
+                }
+                continue;
+            }
+            for (a, b) in segs {
+                if !near(crate::dxf::union([[a, a], [b, b]]).unwrap_or_default()) {
+                    continue;
+                }
+                let (a, b) = (place(a), place(b));
+                s.points.extend([(a, Kind::Endpoint), (b, Kind::Endpoint), ((a + b) * 0.5, Kind::Midpoint)]);
+                s.lines.push((a, b));
+            }
+        }
     }
 }
 

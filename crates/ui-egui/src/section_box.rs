@@ -2,6 +2,8 @@
 //! typed there; in the view, a frame round it and, in Modify, a grip on each face that a drag moves along its axis, the cut
 //! shown as it goes (`orbit.rs`). What the box keeps, and where its grips are, is the core's (`view3d::box_grips`).
 
+use bimcraft_i18n::msg;
+
 use bimcraft_core::model::{Element, SectionBox};
 use bimcraft_core::view3d::{Camera, P3, box_edges, box_grips};
 use egui::{Grid, Painter, Pos2, Rect, Shape, Stroke, StrokeKind, Ui, WidgetInfo, WidgetType, vec2};
@@ -94,7 +96,7 @@ impl BimApp {
     }
 }
 
-const TIP: &str = "Section Box: cut the 3D view to a box, each face moved by its grip in the view or typed here (BX)";
+const TIP: &str = msg!("Section Box: cut the 3D view to a box, each face moved by its grip in the view or typed here (BX)");
 
 /// The grip of section box `b` within [`GRIP`] of `at` on screen, if any, as `box_grips` orders them.
 pub(crate) fn grip_at(b: (P3, P3), at: Pos2, screen: impl Fn(P3) -> Pos2) -> Option<usize> {

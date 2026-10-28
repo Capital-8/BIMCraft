@@ -7,6 +7,8 @@
 //! element's values of project parameters are keyed by theirs: renaming changes nothing a file holds but the name. A name
 //! that is a GUID is refused, so the two never mix.
 
+use bimcraft_i18n::ui_msg;
+
 use std::collections::{BTreeMap, HashMap};
 use std::fmt;
 
@@ -29,6 +31,8 @@ pub enum Kind {
     Picture,
     /// A scan point clouds place.
     Cloud,
+    /// A CAD drawing imports place.
+    Cad,
     Family,
     Parameter,
     ViewFilter,
@@ -54,17 +58,18 @@ impl Kind {
     pub fn label(&self) -> String {
         match self {
             Kind::Type(c) => format!("{c} type"),
-            Kind::Material => "material".into(),
-            Kind::Picture => "picture".into(),
+            Kind::Material => ui_msg!("material").into(),
+            Kind::Picture => ui_msg!("picture").into(),
             Kind::Cloud => "scan".into(),
-            Kind::Family => "family".into(),
-            Kind::Parameter => "parameter".into(),
+            Kind::Cad => ui_msg!("CAD drawing").into(),
+            Kind::Family => ui_msg!("family").into(),
+            Kind::Parameter => ui_msg!("parameter").into(),
             Kind::ViewFilter => "view filter".into(),
             Kind::ViewTemplate => "view template".into(),
-            Kind::Phase => "phase".into(),
-            Kind::PhaseFilter => "phase filter".into(),
-            Kind::OptionSet => "design option set".into(),
-            Kind::DesignOption => "design option".into(),
+            Kind::Phase => ui_msg!("phase").into(),
+            Kind::PhaseFilter => ui_msg!("phase filter").into(),
+            Kind::OptionSet => ui_msg!("design option set").into(),
+            Kind::DesignOption => ui_msg!("design option").into(),
             Kind::FamilyType => "family type".into(),
             Kind::FamilyParameter => "family parameter".into(),
             Kind::LinePattern => "line pattern".into(),
@@ -80,6 +85,7 @@ impl Kind {
             "material" => Kind::Material,
             "picture" => Kind::Picture,
             "cloud" => Kind::Cloud,
+            "cad" => Kind::Cad,
             "family" => Kind::Family,
             "parameter" => Kind::Parameter,
             "view-filter" => Kind::ViewFilter,
@@ -107,6 +113,7 @@ impl fmt::Display for Kind {
             Kind::Material => f.write_str("material"),
             Kind::Picture => f.write_str("picture"),
             Kind::Cloud => f.write_str("cloud"),
+            Kind::Cad => f.write_str("cad"),
             Kind::Family => f.write_str("family"),
             Kind::Parameter => f.write_str("parameter"),
             Kind::ViewFilter => f.write_str("view-filter"),
@@ -506,6 +513,7 @@ impl Model {
         add(Kind::Material, &mut self.materials.keys());
         add(Kind::Picture, &mut self.images.keys());
         add(Kind::Cloud, &mut self.clouds.keys());
+        add(Kind::Cad, &mut self.cads.keys());
         add(Kind::Family, &mut self.families.keys());
         add(Kind::Parameter, &mut self.parameters.keys());
         add(Kind::ViewFilter, &mut self.view_filters.keys());
@@ -793,8 +801,13 @@ impl Model {
 }
 
 /// Each name `g` holds of a library entry, given to `f` with what it names, which may put another in its place: a view's
-/// template, filters, phase, phase filter, design options and its linework's line styles.
+/// template, filters, phase, phase filter, design options, its linework's line styles and the CAD drawings whose layers it hides.
 fn graphics_refs(g: &mut crate::graphics::Graphics, f: &mut dyn FnMut(&Kind, &mut String)) {
+    for o in g.categories.values_mut().chain(g.elements.values_mut()).chain(g.filters.iter_mut().map(|a| &mut a.over)) {
+        for name in o.patterns_mut() {
+            f(&Kind::FillPattern, name);
+        }
+    }
     if let Some(t) = &mut g.template {
         f(&Kind::ViewTemplate, t);
     }
@@ -818,6 +831,13 @@ fn graphics_refs(g: &mut crate::graphics::Graphics, f: &mut dyn FnMut(&Kind, &mu
             let option = option_ref(&set, &option, f);
             f(&Kind::OptionSet, &mut set);
             (set, option)
+        })
+        .collect();
+    g.layers = std::mem::take(&mut g.layers)
+        .into_iter()
+        .map(|(mut cad, layers)| {
+            f(&Kind::Cad, &mut cad);
+            (cad, layers)
         })
         .collect();
 }
@@ -904,6 +924,7 @@ impl crate::model::Element {
                     f(&Kind::LineStyle, st);
                 }
             }
+            Element::CadImport(ci) => f(&Kind::Cad, &mut ci.cad),
             Element::Schedule(sc) => {
                 let mut fields: Vec<&mut String> =
                     sc.fields.iter_mut().map(|x| &mut x.name).chain(sc.sort.iter_mut().map(|x| &mut x.field)).collect();
@@ -968,6 +989,11 @@ impl Model {
         }
         for vt in self.view_templates.values_mut() {
             graphics_refs(&mut vt.graphics, f);
+        }
+        for o in self.phase_overrides.values_mut() {
+            for name in o.patterns_mut() {
+                f(&Kind::FillPattern, name);
+            }
         }
         for (set, s) in self.option_sets.iter_mut() {
             s.primary = option_ref(set, &s.primary, f);
