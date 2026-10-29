@@ -1,6 +1,6 @@
 //! A project's language: the words its drawings print (a stair's UP, a title block's SCALE, a
 //! schedule's headings) and the names commands give what they make (levels, views, sheets, rooms).
-//! English, Brazilian Portuguese, Spanish or Swedish. Names already given stay as they are; the core's
+//! English, Brazilian Portuguese, Spanish, Swedish or Czech. Names already given stay as they are; the core's
 //! messages, which agents read, stay English.
 
 use serde::{Deserialize, Serialize};
@@ -18,32 +18,35 @@ pub enum Language {
     Spanish,
     #[serde(rename = "sv")]
     Swedish,
+    #[serde(rename = "cs")]
+    Czech,
 }
 
 impl Language {
-    pub const ALL: [Language; 4] = [Language::English, Language::Portuguese, Language::Spanish, Language::Swedish];
+    pub const ALL: [Language; 5] = [Language::English, Language::Portuguese, Language::Spanish, Language::Swedish, Language::Czech];
 
-    /// Its code in commands and files: en, pt, es, sv.
+    /// Its code in commands and files: en, pt, es, sv, cs.
     pub fn code(self) -> &'static str {
-        self.of(["en", "pt", "es", "sv"])
+        self.of(["en", "pt", "es", "sv", "cs"])
     }
 
     /// Its name, in itself.
     pub fn label(self) -> &'static str {
-        self.of(["English", "Português (Brasil)", "Español", "Svenska"])
+        self.of(["English", "Português (Brasil)", "Español", "Svenska", "Čeština"])
     }
 
     /// Of one thing in each language, English first, this language's.
-    pub fn of<T>(self, [english, portuguese, spanish, swedish]: [T; 4]) -> T {
+    pub fn of<T>(self, [english, portuguese, spanish, swedish, czech]: [T; 5]) -> T {
         match self {
             Language::English => english,
             Language::Portuguese => portuguese,
             Language::Spanish => spanish,
             Language::Swedish => swedish,
+            Language::Czech => czech,
         }
     }
 
-    /// A language by its code or its name, or from a locale as systems give one: pt-BR, es_419.UTF-8, sv-SE.
+    /// A language by its code or its name, or from a locale as systems give one: pt-BR, es_419.UTF-8, sv-SE, cs-CZ.
     pub fn from_code(code: &str) -> Option<Language> {
         let code = code.trim().to_lowercase();
         Some(match code.split(['-', '_', '.']).next().unwrap_or_default() {
@@ -51,6 +54,7 @@ impl Language {
             "pt" | "portuguese" | "português" => Language::Portuguese,
             "es" | "spanish" | "español" => Language::Spanish,
             "sv" | "swedish" | "svenska" => Language::Swedish,
+            "cs" | "cz" | "czech" | "čeština" | "cestina" => Language::Czech,
             _ => return None,
         })
     }
@@ -106,5 +110,13 @@ mod tests {
             ["sv", "sv-SE", "sv_SE.UTF-8", "swedish", "Svenska"].map(Language::from_code),
             [Some(sv), Some(sv), Some(sv), Some(sv), Some(sv)]
         );
+    }
+
+    #[test]
+    fn czech_words_and_locales_are_project_language() {
+        let cs = Language::Czech;
+        assert_eq!([cs.word("Level"), cs.word("UP"), cs.word("Room Schedule")], ["Podlaží", "NAHORU", "Výkaz místností"]);
+        assert_eq!(cs.find("VÝKAZ DVEŘÍ", &["Room Schedule", "Door Schedule"]), Some("Door Schedule"));
+        assert_eq!(["cs", "cs-CZ", "cs_CZ.UTF-8", "czech", "Čeština"].map(Language::from_code), [Some(cs); 5]);
     }
 }
