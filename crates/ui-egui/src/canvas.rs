@@ -103,6 +103,15 @@ impl PlanCache {
     }
 }
 
+/// What an alignment service was built from: the level, the model's counters and address, and so the model it is for.
+struct AlignmentCache {
+    level: Id,
+    next_id: Id,
+    len: usize,
+    at: usize,
+    service: bimcraft_core::alignment::AlignmentGuideService,
+}
+
 pub struct Canvas {
     pub(crate) drawing: PlanCache,
     cams: BTreeMap<Id, Camera>,
@@ -137,11 +146,11 @@ pub struct Canvas {
     prior: Option<Vec<Id>>,
     /// What the last point a tool previewed snapped to this frame, if one did.
     pub(crate) found: Cell<Option<Found>>,
-    /// Cached alignment service: (level, model next_id, model elements len, the model's address, service). A command gives the
+    /// The cached alignment service (see [`AlignmentCache`]). A command gives the
     /// session a model of its own to change while the history keeps the one before, so a moved element, an undo and a redo
     /// change the address though they change neither count. shortcut: an address freed and taken again by a model of the same
     /// counts would hold stale guides until the next command; a revision counter on the model would close that.
-    alignment_cache: RefCell<Option<(Id, Id, usize, usize, bimcraft_core::alignment::AlignmentGuideService)>>,
+    alignment_cache: RefCell<Option<AlignmentCache>>,
 }
 
 impl Default for Canvas {
@@ -921,21 +930,15 @@ impl BimApp {
             angles: false,
         };
         let mut cache = self.canvas.alignment_cache.borrow_mut();
-        let reuse = match &*cache {
-            Some((cached_level, cached_next, cached_len, cached_at, s)) => {
-                *cached_level == level
-                    && *cached_next == m.next_id
-                    && *cached_len == m.elements.len()
-                    && *cached_at == std::ptr::from_ref(m) as usize
-                    && s.config() == &config
-            }
-            None => false,
-        };
+        let at = std::ptr::from_ref(m) as usize;
+        let reuse = cache.as_ref().is_some_and(|c| {
+            c.level == level && c.next_id == m.next_id && c.len == m.elements.len() && c.at == at && c.service.config() == &config
+        });
         if !reuse {
             let s = bimcraft_core::alignment::AlignmentGuideService::from_model(m, level, config);
-            *cache = Some((level, m.next_id, m.elements.len(), std::ptr::from_ref(m) as usize, s));
+            *cache = Some(AlignmentCache { level, next_id: m.next_id, len: m.elements.len(), at, service: s });
         }
-        if let Some((_, _, _, _, s)) = &*cache { s.find_alignments(cursor, start, tol) } else { Vec::new() }
+        cache.as_ref().map_or_else(Vec::new, |c| c.service.find_alignments(cursor, start, tol))
     }
 
     /// Finds alignment guides (smart snapping) to reference points of existing walls when drawing a wall.

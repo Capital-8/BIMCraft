@@ -194,10 +194,8 @@ impl AlignmentGuideService {
         // 3. Columns, Structural Columns, Footings
         for (id, e) in m.elements.iter() {
             match e {
-                Element::Column(c) | Element::StructuralColumn(c) | Element::Footing(c) if c.level == level_guid => {
-                    if config.endpoints {
-                        refs.push(ReferencePoint { point: c.at, kind: ReferenceType::Endpoint, wall_id: Some(*id) });
-                    }
+                Element::Column(c) | Element::StructuralColumn(c) | Element::Footing(c) if c.level == level_guid && config.endpoints => {
+                    refs.push(ReferencePoint { point: c.at, kind: ReferenceType::Endpoint, wall_id: Some(*id) });
                 }
                 _ => {}
             }
