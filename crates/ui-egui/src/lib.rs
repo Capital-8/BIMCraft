@@ -70,7 +70,7 @@ use std::sync::Arc;
 use bimcraft_core::dims::Placing as DimMode;
 use bimcraft_core::engine::{self, Session};
 use bimcraft_core::geom::P2;
-use bimcraft_core::model::{CEILING_HEIGHT, DimKind, Element, Id, Justify, Location, Model, RAMP_WIDTH, Reference, STAIR_WIDTH};
+use bimcraft_core::model::{CEILING_HEIGHT, DimKind, Element, Id, Justify, Location, Model, RAMP_WIDTH, Reference, RoomArea, STAIR_WIDTH};
 use bimcraft_core::snap::{Kind as Snap, Snaps};
 use bimcraft_core::units::Units;
 use bimcraft_core::{element_json, render, schedule, stairs};
@@ -3471,6 +3471,17 @@ impl BimApp {
             if big_button(ui, Icon::Keyboard, "Shortcuts", self.show_shortcuts, tip).clicked() {
                 self.show_shortcuts = true;
             }
+            // Where a room's area is measured, as Revit's Room Area Computation.
+            let now = self.session.model.room_area;
+            let tip = tf("Room Area Computation: where room areas are measured; now {}", &[&t(now.label()).to_lowercase()]);
+            let r = big_button(ui, Icon::Settings, "Room Area Computation", false, &tip);
+            ribbon::choices(ui, &r, false, |ui| {
+                for a in RoomArea::ALL {
+                    if ui.selectable_label(a == now, t(a.label())).clicked() {
+                        self.run("room_area", json!({"at": a.name()}));
+                    }
+                }
+            });
             // What the drawings say, and how new things are named.
             let now = self.session.model.language;
             let tip = tf("Project Language: what the drawings say and how new things are named; now {}", &[now.label()]);

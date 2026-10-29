@@ -5582,6 +5582,17 @@ fn room(s: &mut Session, p: &Value) -> R {
         })),
     };
     let r = Room { params: Default::default(), level, point, name, number: number.clone() };
+    if let Some(wall) = m.wall_holding(&r, m.room_area) {
+        return Err(bad(
+            c,
+            format!(
+                "[{}, {}] lies inside wall {}; place a room in the space between walls, not in a wall",
+                point.0,
+                point.1,
+                m.shown(wall)
+            ),
+        ));
+    }
     let region = m.room_region(&r).ok_or_else(|| {
         bad(
             c,
@@ -9254,6 +9265,9 @@ fn units(s: &mut Session, p: &Value) -> R {
 fn room_area(s: &mut Session, p: &Value) -> R {
     let c = "room_area";
     only(c, p, &["at"])?;
+    if p.get("at").is_some_and(|v| !v.is_string()) {
+        return Err(bad(c, "`at` is centre or finish"));
+    }
     if let Some(name) = string(c, p, "at")? {
         let at = RoomArea::parse(&name).ok_or_else(|| bad(c, format!("`at` is centre or finish, not `{name}`")))?;
         if at != s.model.room_area {
@@ -10002,7 +10016,7 @@ fn inspect(s: &mut Session, _: &Value) -> R {
         })
         .collect();
     Ok(json!({
-        "name": m.name, "units": "mm", "project_units": m.units.name(), "language": m.language.code(), "path": s.path, "levels": levels,
+        "name": m.name, "units": "mm", "project_units": m.units.name(), "room_area": m.room_area.name(), "language": m.language.code(), "path": s.path, "levels": levels,
         "counts": counts,
         "types": m.types, "materials": m.materials, "images": images(m), "families": families(m), "parameters": m.parameters,
         "view_filters": m.view_filters, "view_templates": m.view_templates, "phases": m.phases, "phase_filters": m.phase_filters,

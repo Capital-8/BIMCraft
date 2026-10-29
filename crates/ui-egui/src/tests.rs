@@ -6001,3 +6001,21 @@ fn a_view_tabs_close_button_is_part_of_its_tab() {
     press(&mut h, "Close {3D}");
     assert!(!h.state().views.contains(&Sheet::View3D));
 }
+
+/// Manage > Room Area Computation: the button drops the two choices down, a pick sets the project's `room_area` through the command,
+/// and undo puts it back.
+#[test]
+fn room_area_computation_is_set_from_manage_and_undone() {
+    use bimcraft_core::model::RoomArea;
+    let mut h = app(BOX);
+    h.state_mut().tab = Tab::Manage;
+    h.run();
+    assert_eq!(h.state().session.model.room_area, RoomArea::Centre);
+    press(&mut h, "Room Area Computation");
+    assert!(h.query_by_label("At wall centre line").is_some(), "both choices are on screen");
+    press(&mut h, "At wall finish");
+    assert_eq!(h.state().session.model.room_area, RoomArea::Finish);
+    h.state_mut().run("undo", json!({}));
+    h.run();
+    assert_eq!(h.state().session.model.room_area, RoomArea::Centre);
+}

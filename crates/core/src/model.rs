@@ -2152,6 +2152,14 @@ impl RoomArea {
         RoomArea::ALL.into_iter().find(|a| a.name() == name)
     }
 
+    /// As a menu names it (Revit's "At wall centerline" and "At wall finish").
+    pub fn label(self) -> &'static str {
+        match self {
+            RoomArea::Centre => ui_msg!("At wall centre line"),
+            RoomArea::Finish => ui_msg!("At wall finish"),
+        }
+    }
+
     fn is_default(&self) -> bool {
         *self == RoomArea::default()
     }
@@ -4474,7 +4482,24 @@ impl Model {
     /// A room's boundary measured at `at`: the walls' centre lines (Revit's "At wall centerline") or their faces ("At wall
     /// finish": the area inside the walls, which Brazilian codes call área útil).
     pub fn room_region_at(&self, r: &Room, at: RoomArea) -> Option<Region> {
+        if self.wall_holding(r, at).is_some() {
+            return None;
+        }
         geom::region_at(&self.room_lines(r.level, at), r.point, TOL)
+    }
+
+    /// The room-bounding wall whose body a room's point lies in, when rooms are measured at `at` the finish faces. There the
+    /// faces of a wall close its body into a loop of its own, so a point inside a wall would make a room of the wall. At the
+    /// centre lines nothing closes a wall's body, so there is nothing to refuse.
+    pub fn wall_holding(&self, r: &Room, at: RoomArea) -> Option<Id> {
+        if at != RoomArea::Finish {
+            return None;
+        }
+        self.elements
+            .iter()
+            .filter(|(_, e)| matches!(e, Element::Wall(w) if self.bounding(w, r.level)))
+            .find(|&(&id, _)| geom::contains(&walls::outline(self, id), r.point))
+            .map(|(&id, _)| id)
     }
 
     /// The lines rooms on `level` are found among, measured at `at`.
