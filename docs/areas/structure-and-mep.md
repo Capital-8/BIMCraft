@@ -63,8 +63,7 @@ told), with the `host` it reinforces (a beam, a column, a footing or a floor, he
 is a bar whose last point is its first; a layer of bars, or hoops along a beam, is one command with `count` and `step`, which makes one
 element for each (IFC has one `IfcReinforcingBar` for each, and a bar schedule counts them). It has no type: the diameter and the grade
 are its own, and the bends are sharp, with no hooks, so its length is the sum of its pieces (`rebar::length`) and its weight that
-length of steel at 7850 kg/m³ (`rebar::weight_kg`). Nothing checks that it lies inside its host yet: the generator that arms a beam
-from a cover and spacings will place bars inside by construction. The schedule of category `rebar` lists Id, Level, Grade, Diameter,
+length of steel at 7850 kg/m³ (`rebar::weight_kg`). Nothing checks that it lies inside its host: `reinforce` places bars inside by construction. The schedule of category `rebar` lists Id, Level, Grade, Diameter,
 Length, Count, Weight and Host, and grouped by Grade, Diameter and Length with Count and Weight totalled it is a bar schedule. IFC
 writes each as an `IfcReinforcingBar` (`SteelGrade`, `NominalDiameter`, `CrossSectionArea`, `BarLength`) with a body of an
 `IfcSweptDiskSolid` along an `IfcPolyline`, aggregated (`IfcRelAggregates`) to its host, or contained in its storey when it has none;
@@ -82,3 +81,23 @@ it already makes a column or a floor structural. The cover Eberick sets (`Cobrim
 rules that will arm it. A run is found in its body as the way it spreads furthest, except where the body is one extruded profile and the extrusion is
 not up: then it runs along the extrusion (`Reader::extrusion`), because a beam between two columns can be shallower than it is deep, and its body then
 spreads furthest up. A strip footing, a plan outline stood up, is still read by its shape. A landing slab that belongs to no stair is a floor.
+
+Bars by rules (`reinforce.rs`, the `reinforce` command; tests in `reinforce_tests.rs`). The engineer says how many bars, how thick and how far
+apart; the module lays them out in the host's own frame (`Frame`: along, across, up) inside the cover and checks that what is asked fits, with the
+message saying what to change. It holds geometry and no standard's table: a spacing or a count is never decided here (that is design), and the
+clearance between bars (`clearance`, their thickness and at least 20 mm unless told) is the only rule it brings. Parameters are read with serde types
+that deny unknown fields (`Row`, `Pitch`, `Stirrup`, `ColumnBars`, `Mesh`, `Grid`), by key, so a key that is not the host's is refused with the host named.
+The cover is `{top, bottom, sides}` (Revit's faces: the top and bottom faces of a beam, a footing or a floor, the ends of a column, and all round
+the rest) or one number, and where none is given the host's `Cobrimento` or `ConcreteCover` parameter (a length in mm, as the import of an Eberick IFC
+leaves it) is the cover. A spacing is the most between bars: `spread` and `stations` place them evenly from end to end, so the count follows the length
+(Revit's Maximum Spacing) and `ends` gives closer stirrups in the first and last `length` mm. A stirrup is a closed loop; with `hook` it runs on past
+its first corner to a tail turned into the section at each end (`stirrup`). A beam has `bottom` and `top` rows, `stirrup`, `skin` and `anchor`; a
+rectangular column `bars` (`x` and `y` along each face, corners counted), `stirrup`, `ties` (straight, no hooks) and `anchor`; a rectangular footing a
+`mesh` of two layers with `hook` turning their ends up; a level floor `bottom` and `top` meshes whose bars stop a cover short of its outline and of its
+openings (`chords`, a scan line through the outline and the openings together; a bar parallel to an opening's edge and nearer it than the cover keeps
+its cover from the ends only). Round sections, sloped floors and strip footings are refused. Each bar is a `rebar` element of the host with a `layer`
+(`bottom`, `top`, `skin`, `stirrup`, `bars`, `tie`, `mesh x`, `mesh y`, `bottom x`, `top y`, ...); reinforcing a host again replaces its bars that have a layer
+and leaves the ones with none, which were drawn by hand, and one command makes up to `rebar::MAX_BARS`. A bar's layer is in the project file and the
+schedule (a field a bar schedule may show), not in IFC. What it does not do: hooks on a bar other than a stirrup, bends, laps and splices, and any check
+against a standard.
+

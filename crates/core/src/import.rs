@@ -2438,7 +2438,8 @@ pub fn ifc(bytes: &[u8], name: &str) -> Result<Imported, String> {
             )
         });
         let grade = text(x.args.get(8)).map(str::trim).filter(|g| !g.is_empty()).map_or_else(|| crate::rebar::GRADE.to_string(), clip);
-        let rid = m.insert(Element::Rebar(Rebar { level, host: host.map(|h| Guid::of_id(*h)), path, diameter, grade }));
+        let rid =
+            m.insert(Element::Rebar(Rebar { level, host: host.map(|h| Guid::of_id(*h)), path, diameter, grade, layer: String::new() }));
         from.insert(rid, who(id));
         origin.entry(id).or_insert(rid);
         elements_from.entry(id).or_default().push(rid);

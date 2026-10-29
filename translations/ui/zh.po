@@ -283,7 +283,7 @@ msgstr "接闪器 (AT)：在屋顶上单击处放置接闪器；按空格键旋�
 msgid "Air Terminals"
 msgstr "接闪器"
 
-#: crates/core/src/commands.rs:817
+#: crates/core/src/commands.rs:838
 #: crates/ui-egui/src/lib.rs:305
 #: crates/ui-egui/src/sketch.rs:664
 msgid "Align"
@@ -298,7 +298,7 @@ msgstr "对齐 (AL)：选取参照线，再选取要与其对齐的对象"
 msgid "Aligned"
 msgstr "对齐"
 
-#: crates/core/src/commands.rs:532
+#: crates/core/src/commands.rs:553
 msgid "Aligned Dimension"
 msgstr "对齐尺寸标注"
 
@@ -590,7 +590,7 @@ msgstr "底部已附着"
 msgid "Bathtub"
 msgstr "浴缸"
 
-#: crates/core/src/commands.rs:393
+#: crates/core/src/commands.rs:414
 msgid "Beam"
 msgstr "梁"
 
@@ -646,7 +646,7 @@ msgstr "边界线：在上一标高绘制屋顶的迹线及其中的天井"
 msgid "Boundary Line: sketch the shaft opening's outline"
 msgstr "边界线：绘制竖井洞口的轮廓"
 
-#: crates/core/src/model.rs:2102
+#: crates/core/src/model.rs:2106
 msgid "Brick"
 msgstr "砖"
 
@@ -674,7 +674,7 @@ msgstr "按视图"
 msgid "CAD drawing"
 msgstr ""
 
-#: crates/core/src/commands.rs:430
+#: crates/core/src/commands.rs:451
 msgid "Cable Tray"
 msgstr "电缆桥架"
 
@@ -682,7 +682,7 @@ msgstr "电缆桥架"
 msgid "Cable Tray (CT): click its start and its end; a chain of clicks makes a tray for each step"
 msgstr "电缆桥架 (CT)：单击起点和终点；连续单击可为每一段创建一段桥架"
 
-#: crates/core/src/commands.rs:464
+#: crates/core/src/commands.rs:485
 msgid "Cabling"
 msgstr "布线"
 
@@ -828,7 +828,7 @@ msgstr "中心"
 msgid "Centre Lines"
 msgstr ""
 
-#: crates/core/src/model.rs:2110
+#: crates/core/src/model.rs:2114
 msgid "Ceramic tile"
 msgstr "瓷砖"
 
@@ -1371,7 +1371,7 @@ msgstr "颜色"
 msgid "Colour"
 msgstr "颜色"
 
-#: crates/core/src/commands.rs:368
+#: crates/core/src/commands.rs:389
 msgid "Column"
 msgstr "柱"
 
@@ -1408,7 +1408,7 @@ msgstr "紧凑"
 msgid "Comparison"
 msgstr "比较"
 
-#: crates/core/src/commands.rs:780
+#: crates/core/src/commands.rs:801
 msgid "Component"
 msgstr "构件"
 
@@ -1424,11 +1424,11 @@ msgstr "概念体量"
 msgid "Concrete"
 msgstr "混凝土"
 
-#: crates/core/src/model.rs:2104
+#: crates/core/src/model.rs:2108
 msgid "Concrete block"
 msgstr "混凝土砌块"
 
-#: crates/core/src/commands.rs:422
+#: crates/core/src/commands.rs:443
 msgid "Conduit"
 msgstr "线管"
 
@@ -1481,11 +1481,11 @@ msgstr "已复制 {} 个 IFC GlobalId。"
 msgid "Copied {} rows, tab-separated."
 msgstr "已复制 {} 行，以制表符分隔。"
 
-#: crates/core/src/model.rs:2118
+#: crates/core/src/model.rs:2122
 msgid "Copper"
 msgstr "铜"
 
-#: crates/core/src/commands.rs:834
+#: crates/core/src/commands.rs:855
 #: crates/ui-egui/src/inquiry.rs:172
 #: crates/ui-egui/src/lib.rs:3831
 #: crates/ui-egui/src/lib.rs:3865
@@ -1521,15 +1521,15 @@ msgstr "复制报告"
 msgid "Copy its ID, GUID and IFC GlobalId"
 msgstr "复制其 ID、GUID 和 IFC GlobalId"
 
-#: crates/core/src/model.rs:290
+#: crates/core/src/model.rs:294
 msgid "Core Centreline"
 msgstr "核心层中心线"
 
-#: crates/core/src/model.rs:293
+#: crates/core/src/model.rs:297
 msgid "Core Face: Exterior"
 msgstr "核心面：外部"
 
-#: crates/core/src/model.rs:294
+#: crates/core/src/model.rs:298
 msgid "Core Face: Interior"
 msgstr "核心面：内部"
 
@@ -1827,7 +1827,7 @@ msgstr "拆除 (DW)：单击图元，在视图阶段中将其拆除；再次单�
 msgid "Demolished"
 msgstr "已拆除"
 
-#: crates/core/src/commands.rs:5838
+#: crates/core/src/commands.rs:5897
 msgid "Dependent"
 msgstr "相关"
 
@@ -1986,7 +1986,7 @@ msgstr "门 (DR)：单击一面墙"
 msgid "Door Schedule"
 msgstr "门明细表"
 
-#: crates/core/src/commands.rs:522
+#: crates/core/src/commands.rs:543
 msgid "Dormer"
 msgstr "老虎窗"
 
@@ -2006,11 +2006,11 @@ msgstr "点线"
 msgid "Double Door"
 msgstr "双扇门"
 
-#: crates/core/src/model.rs:1787
+#: crates/core/src/model.rs:1791
 msgid "Double Sliding"
 msgstr "双扇推拉"
 
-#: crates/core/src/model.rs:1785
+#: crates/core/src/model.rs:1789
 msgid "Double Swing"
 msgstr "双扇平开"
 
@@ -2023,7 +2023,7 @@ msgstr "双击选项卡名称也有同样效果；之后单击选项卡会显示
 msgid "Down"
 msgstr "下移"
 
-#: crates/core/src/commands.rs:446
+#: crates/core/src/commands.rs:467
 msgid "Down Conductor"
 msgstr "引下线"
 
@@ -2116,7 +2116,7 @@ msgstr "每支笔在各比例视图中于图纸上的宽度（毫米）：介于
 msgid "Earthing"
 msgstr "接地"
 
-#: crates/core/src/commands.rs:455
+#: crates/core/src/commands.rs:476
 msgid "Earthing Conductor"
 msgstr "接地线"
 
@@ -2136,7 +2136,7 @@ msgstr "接地极 (EG)：在单击处自标高向下打入接地棒；按空格�
 msgid "Earthing Electrodes"
 msgstr "接地极"
 
-#: crates/core/src/model.rs:1231
+#: crates/core/src/model.rs:1235
 msgid "East"
 msgstr "东"
 
@@ -2207,7 +2207,7 @@ msgstr "电气设备"
 msgid "Electrical Equipment (EE): a distribution board, where you click on the wall; Space turns it"
 msgstr "电气设备 (EE)：在墙上单击处放置配电箱；按空格键旋转"
 
-#: crates/core/src/commands.rs:1383
+#: crates/core/src/commands.rs:1404
 msgid "Elements"
 msgstr "图元"
 
@@ -2424,7 +2424,7 @@ msgstr "填充区域 (FR)：在此视图中绘制以图案填充的区域"
 msgid "Filled region"
 msgstr "填充区域"
 
-#: crates/core/src/commands.rs:903
+#: crates/core/src/commands.rs:924
 msgid "Fillet Arc"
 msgstr "圆角弧"
 
@@ -2502,11 +2502,11 @@ msgstr "完成编辑模式"
 msgid "Finish Edit Mode: the lines, closed into loops, become the outline and its holes"
 msgstr "完成编辑模式：闭合成环的线成为轮廓及其洞口"
 
-#: crates/core/src/model.rs:291
+#: crates/core/src/model.rs:295
 msgid "Finish Face: Exterior"
 msgstr "面层面：外部"
 
-#: crates/core/src/model.rs:292
+#: crates/core/src/model.rs:296
 msgid "Finish Face: Interior"
 msgstr "面层面：内部"
 
@@ -2514,7 +2514,7 @@ msgstr "面层面：内部"
 msgid "Finish or cancel the sketch before leaving its plan."
 msgstr "离开草图所在平面之前，请先完成或取消草图。"
 
-#: crates/core/src/model.rs:1789
+#: crates/core/src/model.rs:1793
 msgid "Fixed"
 msgstr "固定"
 
@@ -2597,7 +2597,7 @@ msgstr "楼板：在墙内单击，为其创建楼板"
 msgid "Folder for new projects"
 msgstr "新项目的文件夹"
 
-#: crates/core/src/model.rs:1788
+#: crates/core/src/model.rs:1792
 msgid "Folding"
 msgstr "折叠"
 
@@ -2783,7 +2783,7 @@ msgstr "轴网"
 msgid "Grid (GR): click its two ends"
 msgstr "轴网 (GR)：单击其两端"
 
-#: crates/core/src/schedule.rs:440
+#: crates/core/src/schedule.rs:441
 msgid "Gross Floor Area"
 msgstr "建筑面积"
 
@@ -2795,7 +2795,7 @@ msgstr "组"
 msgid "Group:"
 msgstr "组："
 
-#: crates/core/src/model.rs:2109
+#: crates/core/src/model.rs:2113
 msgid "Gypsum board"
 msgstr "石膏板"
 
@@ -3082,7 +3082,7 @@ msgstr "隔离类别 (IC)"
 msgid "Isolate Element (HI)"
 msgstr "隔离图元 (HI)"
 
-#: crates/core/src/commands.rs:385
+#: crates/core/src/commands.rs:406
 msgid "Isolated Footing"
 msgstr "独立基础"
 
@@ -3452,7 +3452,7 @@ msgstr "创建明细表，或打开已有的明细表"
 msgid "Manage"
 msgstr "管理"
 
-#: crates/core/src/model.rs:893
+#: crates/core/src/model.rs:897
 msgid "Mark"
 msgstr "标记"
 
@@ -3489,7 +3489,7 @@ msgstr "体量楼层 (MF)：在所选体量穿过的每个标高处创建一个�
 msgid "Massing"
 msgstr "体量建模"
 
-#: crates/core/src/commands.rs:809
+#: crates/core/src/commands.rs:830
 msgid "Match Properties"
 msgstr "匹配属性"
 
@@ -3544,7 +3544,7 @@ msgstr "最大化"
 msgid "Maximum Riser Height"
 msgstr "最大踢面高度"
 
-#: crates/core/src/commands.rs:1336
+#: crates/core/src/commands.rs:1357
 msgid "Measure"
 msgstr "测量"
 
@@ -3661,7 +3661,7 @@ msgstr "修改墙"
 msgid "Mounting Height"
 msgstr "安装高度"
 
-#: crates/core/src/commands.rs:826
+#: crates/core/src/commands.rs:847
 msgid "Move"
 msgstr "移动"
 
@@ -3699,7 +3699,7 @@ msgstr "多个类别（{}）"
 msgid "NOT ENCLOSED"
 msgstr "未封闭"
 
-#: crates/core/src/model.rs:894
+#: crates/core/src/model.rs:898
 #: crates/ui-egui/src/cad.rs:84
 #: crates/ui-egui/src/clouds.rs:58
 #: crates/ui-egui/src/lib.rs:3908
@@ -3797,7 +3797,7 @@ msgstr "新类型"
 msgid "New {}"
 msgstr "新建{}"
 
-#: crates/core/src/schedule.rs:1044
+#: crates/core/src/schedule.rs:1045
 msgid "No"
 msgstr "否"
 
@@ -3862,7 +3862,7 @@ msgstr "尚无视图样板：点击“从此视图创建”创建一个。"
 msgid "None"
 msgstr "无"
 
-#: crates/core/src/model.rs:1229
+#: crates/core/src/model.rs:1233
 msgid "North"
 msgstr "北"
 
@@ -4394,7 +4394,7 @@ msgstr "图片"
 msgid "Picture…"
 msgstr "图片…"
 
-#: crates/core/src/commands.rs:411
+#: crates/core/src/commands.rs:432
 msgid "Pipe"
 msgstr "管道"
 
@@ -4836,7 +4836,7 @@ msgstr "半径"
 msgid "Radius:"
 msgstr "半径："
 
-#: crates/core/src/commands.rs:495
+#: crates/core/src/commands.rs:516
 msgid "Railing"
 msgstr "栏杆扶手"
 
@@ -4849,7 +4849,7 @@ msgstr "栏杆扶手：单击楼梯或坡道，在两侧各创建一道；或单
 msgid "Railings"
 msgstr "栏杆扶手"
 
-#: crates/core/src/commands.rs:485
+#: crates/core/src/commands.rs:506
 msgid "Ramp"
 msgstr "坡道"
 
@@ -5081,15 +5081,15 @@ msgstr "旋转圆"
 msgid "Ribbon"
 msgstr "功能区"
 
-#: crates/core/src/schedule.rs:401
+#: crates/core/src/schedule.rs:402
 msgid "Riser Height"
 msgstr "踢面高度"
 
-#: crates/core/src/schedule.rs:400
+#: crates/core/src/schedule.rs:401
 msgid "Risers"
 msgstr "踢面"
 
-#: crates/core/src/commands.rs:505
+#: crates/core/src/commands.rs:526
 msgid "Roof"
 msgstr "屋顶"
 
@@ -5113,7 +5113,7 @@ msgstr "面屋顶 (RB)：在所选体量的顶面上创建屋顶"
 msgid "Roof by Footprint: click inside the walls to roof them, on the level above"
 msgstr "迹线屋顶：单击墙内部，在上一标高为其创建屋顶"
 
-#: crates/core/src/model.rs:2111
+#: crates/core/src/model.rs:2115
 msgid "Roof tiles"
 msgstr "屋面瓦"
 
@@ -5133,7 +5133,7 @@ msgstr "房间 (RM)：单击墙内部"
 msgid "Room Schedule"
 msgstr "房间明细表"
 
-#: crates/core/src/commands.rs:841
+#: crates/core/src/commands.rs:862
 msgid "Rotate"
 msgstr "旋转"
 
@@ -5223,7 +5223,7 @@ msgstr "比例：此视图所代表的图纸，为模型的 1 : n；其注释和
 msgid "Scan"
 msgstr "扫描"
 
-#: crates/core/src/commands.rs:1199
+#: crates/core/src/commands.rs:1220
 msgid "Schedule"
 msgstr "明细表"
 
@@ -5253,7 +5253,7 @@ msgstr "明细表"
 msgid "Schedules/Quantities (all)"
 msgstr "明细表/数量（全部）"
 
-#: crates/core/src/model.rs:2107
+#: crates/core/src/model.rs:2111
 msgid "Screed"
 msgstr "找平层"
 
@@ -5566,7 +5566,7 @@ msgstr "跳过此版本"
 msgid "Sky"
 msgstr "天空"
 
-#: crates/core/src/model.rs:1786
+#: crates/core/src/model.rs:1790
 msgid "Sliding"
 msgstr "推拉"
 
@@ -5691,7 +5691,7 @@ msgstr "排序/成组"
 msgid "Source code on GitHub"
 msgstr "GitHub 上的源代码"
 
-#: crates/core/src/model.rs:1230
+#: crates/core/src/model.rs:1234
 msgid "South"
 msgstr "南"
 
@@ -5724,7 +5724,7 @@ msgstr "通过点的样条曲线：单击它经过的点；按 Enter 完成"
 msgid "Spline: click its control points; Enter finishes it"
 msgstr "样条曲线：单击其控制点；按 Enter 完成"
 
-#: crates/core/src/commands.rs:883
+#: crates/core/src/commands.rs:904
 msgid "Split"
 msgstr "拆分"
 
@@ -5742,7 +5742,7 @@ msgstr "拆分图元 (SL)：在墙或线上单击要拆分的位置"
 msgid "Split between the line's ends."
 msgstr "请在线的两端之间拆分。"
 
-#: crates/core/src/commands.rs:575
+#: crates/core/src/commands.rs:596
 msgid "Spot Elevation"
 msgstr "高程点"
 
@@ -5754,7 +5754,7 @@ msgstr "高程点 (EL)：单击楼板、屋顶或楼梯；在剖面中则单击�
 msgid "Square Grid"
 msgstr "方格"
 
-#: crates/core/src/commands.rs:473
+#: crates/core/src/commands.rs:494
 msgid "Stair"
 msgstr "楼梯"
 
@@ -5794,7 +5794,7 @@ msgstr "直线"
 msgid "Structural"
 msgstr "结构"
 
-#: crates/core/src/commands.rs:376
+#: crates/core/src/commands.rs:397
 msgid "Structural Column"
 msgstr "结构柱"
 
@@ -5826,7 +5826,7 @@ msgstr "表面填充图案"
 msgid "Surface Transparency"
 msgstr "表面透明度"
 
-#: crates/core/src/model.rs:1784
+#: crates/core/src/model.rs:1788
 msgid "Swing"
 msgstr "平开"
 
@@ -5976,7 +5976,7 @@ msgstr "临时隔离图元"
 msgid "Temporary dimension {}"
 msgstr "临时尺寸标注 {}"
 
-#: crates/core/src/commands.rs:544
+#: crates/core/src/commands.rs:565
 #: crates/ui-egui/src/notes.rs:501
 msgid "Text"
 msgstr "文字"
@@ -6221,7 +6221,7 @@ msgstr "图块宽度"
 msgid "Timber"
 msgstr "木材"
 
-#: crates/core/src/schedule.rs:470
+#: crates/core/src/schedule.rs:471
 msgid "Title"
 msgstr "标题"
 
@@ -6275,7 +6275,7 @@ msgstr "选中图元总数：{}"
 msgid "Transparency"
 msgstr "透明度"
 
-#: crates/core/src/schedule.rs:402
+#: crates/core/src/schedule.rs:403
 msgid "Tread"
 msgstr "踏板"
 
@@ -6299,7 +6299,7 @@ msgstr "修剪/延伸单个图元"
 msgid "Trim/Extend Single Element: pick the line to trim or extend to, then the line to change, on the part to keep"
 msgstr "修剪/延伸单个图元：拾取边界线，然后在要保留的部分上拾取要更改的线"
 
-#: crates/core/src/commands.rs:857
+#: crates/core/src/commands.rs:878
 #: crates/ui-egui/src/sketch.rs:667
 msgid "Trim/Extend to Corner"
 msgstr "修剪/延伸为角"
@@ -6317,7 +6317,7 @@ msgstr "关闭捕捉替换"
 msgid "Turn the wall about its {}: {}"
 msgstr "绕墙的{}旋转墙：{}"
 
-#: crates/core/src/model.rs:895
+#: crates/core/src/model.rs:899
 #: crates/ui-egui/src/editor.rs:622
 #: crates/ui-egui/src/editor.rs:628
 #: crates/ui-egui/src/properties.rs:2654
@@ -6453,7 +6453,7 @@ msgstr "取消隐藏图元"
 msgid "Units"
 msgstr "单位"
 
-#: crates/core/src/commands.rs:5979
+#: crates/core/src/commands.rs:6038
 msgid "Unnamed"
 msgstr "未命名"
 
@@ -6642,11 +6642,11 @@ msgstr "墙"
 msgid "Wall (WA): each click builds a wall; Enter or Esc ends the chain"
 msgstr "墙 (WA)：每次单击创建一段墙；按 Enter 或 Esc 结束连续绘制"
 
-#: crates/core/src/model.rs:289
+#: crates/core/src/model.rs:293
 msgid "Wall Centreline"
 msgstr "墙中心线"
 
-#: crates/core/src/commands.rs:403
+#: crates/core/src/commands.rs:424
 msgid "Wall Footing"
 msgstr "条形基础"
 
@@ -6682,7 +6682,7 @@ msgstr "波浪"
 msgid "Weight"
 msgstr "重量"
 
-#: crates/core/src/model.rs:1232
+#: crates/core/src/model.rs:1236
 msgid "West"
 msgstr "西"
 
@@ -6751,7 +6751,7 @@ msgstr "窗明细表"
 msgid "Windows"
 msgstr "窗口"
 
-#: crates/core/src/commands.rs:438
+#: crates/core/src/commands.rs:459
 msgid "Wire"
 msgstr "导线"
 
@@ -6775,7 +6775,7 @@ msgstr "X"
 msgid "Y"
 msgstr "Y"
 
-#: crates/core/src/schedule.rs:1044
+#: crates/core/src/schedule.rs:1045
 msgid "Yes"
 msgstr "是"
 
@@ -7203,7 +7203,7 @@ msgstr "{}（未载入）"
 msgid "{} (primary)"
 msgstr "{}（主选项）"
 
-#: crates/core/src/schedule.rs:1034
+#: crates/core/src/schedule.rs:1035
 msgid "{} ({})"
 msgstr "{}（{}）"
 

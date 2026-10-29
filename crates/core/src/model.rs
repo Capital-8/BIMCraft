@@ -186,6 +186,10 @@ pub struct Rebar {
     pub diameter: f64,
     #[serde(default = "default_grade")]
     pub grade: String,
+    /// The part of the host's reinforcement it belongs to (`bottom`, `stirrup`, `mesh x`): what `reinforce` made it for, and
+    /// replaces when it reinforces the host again. Empty for a bar drawn by hand.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub layer: String,
 }
 
 fn default_grade() -> String {
@@ -4379,6 +4383,7 @@ impl Model {
                 Element::Rebar(rb) => {
                     level_ok(rb.level)?;
                     text(&who, "grade", &rb.grade)?;
+                    text(&who, "layer", &rb.layer)?;
                     if rb.grade.trim().is_empty() {
                         return Err(format!("{who}: a bar needs a steel grade"));
                     }

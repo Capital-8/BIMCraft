@@ -355,13 +355,34 @@ pub static ALL: &[Command] = &[
         "rebar",
         "Rebar",
         &[],
-        "{points: [[x,y,z],…], diameter, host?, grade?, closed?, count?, step?, level?} a reinforcing bar bent along `points` \
+        "{points: [[x,y,z],…], diameter, host?, grade?, layer?, closed?, count?, step?, level?} a reinforcing bar bent along `points` \
          (mm; z over the level), `diameter` mm thick (3 to 100), of steel `grade` (CA-50 unless told). `host` is the beam, \
          column, footing or floor it reinforces (the level is then its level) and it goes with; `closed` joins the last point \
          to the first, a hoop. With `count` bars (up to 1000), each is `step` [dx,dy,dz] from the last: a layer of bars, or \
          hoops along a beam. Returns their ids. Its schedule lists \
          Grade, Diameter, Length and Weight (kg, of steel at 7850 kg/m³), and a grouped one is a bar schedule",
         rebar_bars,
+    ),
+    edit(
+        "reinforce",
+        "Reinforce",
+        &[],
+        "{host, cover?, grade?, grade_stirrup?, clearance?, …} bars by rules for a beam, a column, a footing or a floor: the engineer \
+         says how many, how thick and how far apart (no standard's table is in it) and it lays them inside the cover and checks \
+         that they fit, saying what to change. All: `cover` (mm: one number, or {top, bottom, sides}, top and bottom the faces of a \
+         beam, a footing or a floor and the ends of a column; else the host's Cobrimento or ConcreteCover parameter), `grade` \
+         (CA-50), `grade_stirrup` (the stirrups' and ties'), `clearance` (least mm between bars; their thickness, at least 20, \
+         unless told). A spacing is the most between bars: they are spread evenly, so the last is where the first is from the \
+         other end. Beam: `bottom` and `top` {count, diameter}; `stirrup` {diameter, spacing, ends?: {length, spacing}, hook?} \
+         (`ends` closer in the first and last `length` mm; `hook` a tail in mm at the ends); `skin` {diameter, spacing} up each \
+         side between the rows; `anchor` {start?, end?} mm the bars run past the ends (0 flush, none a cover short). Column \
+         (rectangular): `bars` {diameter, x?, y?} (bars along each face across its width and across its depth, corners counted, \
+         2 each), `stirrup`, `ties` {diameter} across the section between bars that are not at a corner, `anchor` {below?, above?}. \
+         Footing (rectangular): `mesh` {x?, y?: {diameter, spacing}, hook?} (hook turns the ends up). Floor (level): `bottom` and \
+         `top` {x?, y?: {diameter, spacing}}, bars along east and north, stopping a cover short of its outline and its openings. \
+         The bars are `rebar` elements of the host, each on a `layer`; reinforcing again replaces the ones it made and leaves \
+         any drawn by hand. Returns ids, count, removed and weight_kg",
+        reinforce_host,
     ),
     edit(
         "column",
@@ -4074,6 +4095,7 @@ fn rebar_bars(s: &mut Session, p: &Value) -> R {
     if grade.trim().is_empty() {
         return Err(bad(c, "`grade` can't be blank"));
     }
+    let layer = string(c, p, "layer")?.unwrap_or_default();
     let count = count_opt(c, p, "count", 1)?;
     if !(1..=rebar::MAX_BARS).contains(&count) || count.saturating_mul(path.len()) > MAX_POINTS {
         return Err(bad(c, format!("`count` is 1 to {} bars, and the bars' points together up to {MAX_POINTS}", rebar::MAX_BARS)));
@@ -4100,10 +4122,47 @@ fn rebar_bars(s: &mut Session, p: &Value) -> R {
         .map(|k| {
             let k = k as f64;
             let path = path.iter().map(|q| [q[0] + k * step[0], q[1] + k * step[1], q[2] + k * step[2]]).collect();
-            m.insert(Element::Rebar(Rebar { level, host, path, diameter, grade: grade.clone() }))
+            m.insert(Element::Rebar(Rebar { level, host, path, diameter, grade: grade.clone(), layer: layer.clone() }))
         })
         .collect();
     Ok(json!({"ids": ids}))
+}
+
+fn reinforce_host(s: &mut Session, p: &Value) -> R {
+    let c = "reinforce";
+    let m = &s.model;
+    let host = id_opt(c, p, "host")?.ok_or_else(|| bad(c, "`host` is required: the id of the element to reinforce"))?;
+    let id = m.elements.id(host).ok_or_else(|| bad(c, format!("no element {host}")))?;
+    let element = m.elements.get(id).ok_or_else(|| bad(c, format!("no element {host}")))?;
+    let level = m.level_of(element).ok_or_else(|| bad(c, "that element has no level"))?;
+    let made = crate::reinforce::bars(m, element, p)?;
+    let guid = m.guid(id);
+    // The bars it made before, which this replaces; a bar with no layer was drawn by hand.
+    let old: Vec<Id> = m
+        .elements
+        .iter()
+        .filter(|(_, e)| matches!(e, Element::Rebar(r) if r.host == Some(guid) && !r.layer.is_empty()))
+        .map(|(i, _)| *i)
+        .collect();
+    let weight: f64 = made.iter().map(|b| rebar::weight_kg(b.diameter, rebar::length(&b.path))).sum();
+    let m = s.model_mut();
+    for i in &old {
+        m.elements.remove(*i);
+    }
+    let ids: Vec<Id> = made
+        .into_iter()
+        .map(|b| {
+            m.insert(Element::Rebar(Rebar {
+                level,
+                host: Some(guid),
+                path: b.path,
+                diameter: b.diameter,
+                grade: b.grade,
+                layer: b.layer.into(),
+            }))
+        })
+        .collect();
+    Ok(json!({"ids": ids, "count": ids.len(), "removed": old.len(), "weight_kg": (weight * 1000.0).round() / 1000.0}))
 }
 
 fn wall(s: &mut Session, p: &Value) -> R {

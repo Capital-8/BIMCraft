@@ -1,0 +1,502 @@
+//! Bars by rules: `reinforce` arms a beam, a column, a footing or a floor from the cover and the bars, stirrups and meshes it is
+//! told, through the commands every front end drives.
+
+use serde_json::{Value, json};
+
+use crate::element_json;
+use crate::engine::Session;
+use crate::model::Element;
+
+fn run(s: &mut Session, id: &str, p: Value) -> Value {
+    s.execute(id, &p).unwrap_or_else(|e| panic!("{id} {p}: {e}"))
+}
+
+fn ids(r: &Value) -> Vec<u64> {
+    r["ids"].as_array().unwrap().iter().map(|v| v.as_u64().unwrap()).collect()
+}
+
+fn fails(s: &mut Session, id: &str, p: Value) -> String {
+    let before = s.model.clone();
+    let e = s.execute(id, &p).expect_err(&format!("{id} {p} should fail"));
+    assert_eq!(*s.model, *before, "a refused {id} changes nothing");
+    e
+}
+
+/// A beam 200 x 500 and 6 m long with its top at the level: its centre line is at z -250, its section spans z -500 to 0 and y
+/// -100 to 100.
+fn beam(s: &mut Session) -> u64 {
+    ids(&run(s, "beam", json!({"points": [[0, 0], [6000, 0]]})))[0]
+}
+
+/// The bars of `host` on `layer`, by id.
+fn on(s: &Session, host: u64, layer: &str) -> Vec<Value> {
+    let guid = s.model.elements.guid(host).unwrap();
+    s.model
+        .elements
+        .iter()
+        .filter(|(_, e)| matches!(e, Element::Rebar(r) if r.host == Some(guid) && r.layer == layer))
+        .map(|(id, _)| element_json(&s.model, *id))
+        .collect()
+}
+
+fn near(a: &Value, b: f64) -> bool {
+    a.as_f64().is_some_and(|x| (x - b).abs() < 1e-6)
+}
+
+#[test]
+fn a_beam_is_armed_with_bars_below_bars_above_and_stirrups_spread_to_their_spacing() {
+    let mut s = Session::new();
+    let host = beam(&mut s);
+    let r = run(
+        &mut s,
+        "reinforce",
+        json!({
+            "host": host, "cover": 25,
+            "bottom": {"count": 3, "diameter": 16}, "top": {"count": 2, "diameter": 12.5},
+            "stirrup": {"diameter": 5, "spacing": 150}, "grade_stirrup": "CA-60"
+        }),
+    );
+    // 3 + 2 bars and stirrups from 27.5 to 5972.5 mm, no further apart than 150: 40 gaps of 148.625, 41 stirrups.
+    assert_eq!(ids(&r).len(), 46);
+    assert_eq!((r["count"].as_u64(), r["removed"].as_u64()), (Some(46), Some(0)));
+    let (bottom, top, stirrups) = (on(&s, host, "bottom"), on(&s, host, "top"), on(&s, host, "stirrup"));
+    assert_eq!((bottom.len(), top.len(), stirrups.len()), (3, 2, 41));
+
+    // Bottom bars: 25 mm cover, 5 mm stirrup and half a bar in from the bottom face and the sides, 25 mm short of each end.
+    let mut ys: Vec<f64> = bottom.iter().map(|b| b["path"][0][1].as_f64().unwrap()).collect();
+    ys.sort_by(f64::total_cmp);
+    assert_eq!(ys, [-62.0, 0.0, 62.0]);
+    for b in &bottom {
+        assert!(near(&b["path"][0][0], 25.0) && near(&b["path"][1][0], 5975.0) && near(&b["path"][0][2], -462.0), "{b}");
+        assert_eq!((b["diameter"].as_f64(), b["grade"].as_str(), b["length"].as_f64()), (Some(16.0), Some("CA-50"), Some(5950.0)));
+    }
+    let mut ys: Vec<f64> = top.iter().map(|b| b["path"][0][1].as_f64().unwrap()).collect();
+    ys.sort_by(f64::total_cmp);
+    assert_eq!(ys, [-63.75, 63.75]);
+    assert!(top.iter().all(|b| near(&b["path"][0][2], -36.25)), "{top:?}");
+
+    // A stirrup is a closed loop of 1180 mm in the section, 25 mm of cover round it, of the grade told for stirrups.
+    let first = stirrups.iter().min_by(|a, b| a["path"][0][0].as_f64().unwrap().total_cmp(&b["path"][0][0].as_f64().unwrap())).unwrap();
+    assert!(near(&first["path"][0][0], 27.5), "{first}");
+    assert_eq!(
+        (first["length"].as_f64(), first["grade"].as_str(), first["path"].as_array().map(Vec::len)),
+        (Some(1180.0), Some("CA-60"), Some(5))
+    );
+    let zs: Vec<f64> = first["path"].as_array().unwrap().iter().map(|p| p[2].as_f64().unwrap()).collect();
+    assert!(zs.iter().all(|z| near(&json!(*z), -472.5) || near(&json!(*z), -27.5)), "{zs:?}");
+    let last = stirrups.iter().map(|b| b["path"][0][0].as_f64().unwrap()).fold(0.0, f64::max);
+    assert!((last - 5972.5).abs() < 1e-6);
+}
+
+#[test]
+fn stirrups_get_closer_near_the_ends_and_skin_bars_fill_the_web() {
+    let mut s = Session::new();
+    let host = beam(&mut s);
+    run(
+        &mut s,
+        "reinforce",
+        json!({
+            "host": host, "cover": 25, "bottom": {"count": 3, "diameter": 16}, "top": {"count": 2, "diameter": 12.5},
+            "stirrup": {"diameter": 5, "spacing": 150, "ends": {"length": 600, "spacing": 100}},
+            "skin": {"diameter": 8, "spacing": 150}
+        }),
+    );
+    // 600 mm each end at no more than 100 (7 each, the 600 mm point shared with the middle), 4745 mm between at no more than 150.
+    assert_eq!(on(&s, host, "stirrup").len(), 7 + 31 + 7);
+    // The web between the bars' centres, 425.75 mm, in three gaps: two rows a side.
+    let skin = on(&s, host, "skin");
+    assert_eq!(skin.len(), 4);
+    assert!(skin.iter().all(|b| near(&b["path"][0][1], 66.0) || near(&b["path"][0][1], -66.0)), "{skin:?}");
+}
+
+#[test]
+fn a_hook_adds_its_tails_to_a_stirrup_and_an_anchor_runs_a_bar_past_the_end() {
+    let mut s = Session::new();
+    let host = beam(&mut s);
+    run(
+        &mut s,
+        "reinforce",
+        json!({
+            "host": host, "cover": 25, "bottom": {"count": 2, "diameter": 16},
+            "stirrup": {"diameter": 5, "spacing": 200, "hook": 50}, "anchor": {"start": 0, "end": 300}
+        }),
+    );
+    let bottom = on(&s, host, "bottom");
+    // Flush with the start face, 300 mm past the end face.
+    assert!(bottom.iter().all(|b| near(&b["path"][0][0], 0.0) && near(&b["path"][1][0], 6300.0)), "{bottom:?}");
+    // A loop and a tail of 50 mm at each end: 7 points, 1180 + 100 mm of bar.
+    let st = on(&s, host, "stirrup");
+    assert!(st.iter().all(|b| b["path"].as_array().map(Vec::len) == Some(7) && near(&b["length"], 1280.0)), "{:?}", st.first());
+}
+
+#[test]
+fn the_cover_comes_from_the_hosts_own_parameter_when_none_is_given() {
+    let mut s = Session::new();
+    let host = beam(&mut s);
+    let e = fails(&mut s, "reinforce", json!({"host": host, "bottom": {"count": 2, "diameter": 16}}));
+    assert!(e.contains("cover"), "{e}");
+    run(&mut s, "parameter", json!({"name": "Cobrimento", "kind": "length", "categories": ["beam"]}));
+    run(&mut s, "modify", json!({"id": host, "params": {"Cobrimento": 30}}));
+    run(&mut s, "reinforce", json!({"host": host, "bottom": {"count": 2, "diameter": 16}}));
+    let bars = on(&s, host, "bottom");
+    // 30 cover and half a bar: 250 - 30 - 8 = 212 down from the centre line; 30 short of each end.
+    assert!(bars.iter().all(|b| near(&b["path"][0][2], -462.0) && near(&b["path"][0][0], 30.0)), "{bars:?}");
+    // A face of its own wins: 40 at the bottom face.
+    run(&mut s, "reinforce", json!({"host": host, "cover": {"bottom": 40}, "bottom": {"count": 2, "diameter": 16}}));
+    assert!(on(&s, host, "bottom").iter().all(|b| near(&b["path"][0][2], -452.0)));
+}
+
+#[test]
+fn reinforcing_again_replaces_its_bars_and_leaves_the_ones_drawn_by_hand() {
+    let mut s = Session::new();
+    let host = beam(&mut s);
+    let hand = ids(&run(&mut s, "rebar", json!({"points": [[50, 0, -400], [5950, 0, -400]], "diameter": 20, "host": host})))[0];
+    let spec = json!({"host": host, "cover": 25, "bottom": {"count": 3, "diameter": 16}, "stirrup": {"diameter": 5, "spacing": 150}});
+    let first = run(&mut s, "reinforce", spec.clone());
+    let again = run(&mut s, "reinforce", spec);
+    assert_eq!((ids(&again).len(), again["removed"].as_u64()), (44, Some(44)));
+    assert!(ids(&first).iter().all(|id| s.model.elements.get(*id).is_none()));
+    assert!(s.model.elements.get(hand).is_some());
+    let bars = s.model.elements.values().filter(|e| matches!(e, Element::Rebar(_))).count();
+    assert_eq!(bars, 1 + 44);
+    // Undo puts back the bars it replaced.
+    run(&mut s, "undo", json!({}));
+    assert_eq!(s.model.elements.values().filter(|e| matches!(e, Element::Rebar(_))).count(), 1 + 44);
+    // They go with their host.
+    run(&mut s, "delete", json!({"ids": [host]}));
+    assert_eq!(s.model.elements.values().filter(|e| matches!(e, Element::Rebar(_))).count(), 0);
+}
+
+#[test]
+fn a_beam_that_cannot_hold_what_it_is_told_is_refused_and_says_what_to_change() {
+    let mut s = Session::new();
+    let host = beam(&mut s);
+    let base = json!({"host": host, "cover": 25});
+    let with = |extra: Value| -> Value {
+        let mut v = base.clone();
+        v.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+        v
+    };
+    for (extra, says) in [
+        // Six 25 mm bars in 200 mm touch: 0 mm between them, where a bar's own thickness is the least.
+        (json!({"bottom": {"count": 6, "diameter": 25}}), "clearance"),
+        (json!({"bottom": {"count": 3, "diameter": 16}, "clearance": 60}), "clearance"),
+        // Cover and stirrup leave no room.
+        (json!({"cover": 100, "bottom": {"count": 1, "diameter": 16}}), "narrow"),
+        // Nothing to make.
+        (json!({}), "nothing"),
+        // Top and bottom bars 24 mm apart centre to centre meet.
+        (
+            json!({"cover": {"top": 230, "bottom": 230, "sides": 25}, "top": {"count": 2, "diameter": 16}, "bottom": {"count": 2, "diameter": 16}}),
+            "meet",
+        ),
+        // Not a parameter of a beam, and not a parameter of anything.
+        (json!({"mesh": {"x": {"diameter": 10, "spacing": 200}}}), "mesh"),
+        (json!({"bottom": {"count": 2, "diameter": 16}, "colour": "red"}), "colour"),
+        // Counts, diameters and spacings out of range.
+        (json!({"bottom": {"count": 0, "diameter": 16}}), "count"),
+        (json!({"bottom": {"count": 2, "diameter": 1}}), "diameter"),
+        (json!({"bottom": {"count": 2, "diameter": 200}}), "diameter"),
+        (json!({"stirrup": {"diameter": 5, "spacing": 0}}), "spacing"),
+        (json!({"stirrup": {"diameter": 5, "spacing": 3}}), "spacing"),
+        (json!({"stirrup": {"diameter": 5, "spacing": 1e-9}}), "spacing"),
+        (json!({"stirrup": {"diameter": 5, "spacing": 150, "ends": {"length": -1, "spacing": 100}}}), "ends"),
+        (json!({"stirrup": {"diameter": 5, "spacing": 150, "hook": -3}}), "hook"),
+        (json!({"cover": -5, "bottom": {"count": 2, "diameter": 16}}), "cover"),
+        (json!({"cover": 1e300, "bottom": {"count": 2, "diameter": 16}}), "cover"),
+        (json!({"cover": "thick", "bottom": {"count": 2, "diameter": 16}}), "cover"),
+        (json!({"bottom": {"count": 2, "diameter": 16}, "grade": ""}), "grade"),
+        // So many stirrups the command would make more bars than it may.
+        (json!({"stirrup": {"diameter": 5, "spacing": 5.5}}), "1000"),
+    ] {
+        let e = fails(&mut s, "reinforce", with(extra.clone()));
+        assert!(e.contains(says), "{extra}: {e}");
+    }
+    for (p, says) in [
+        (json!({"cover": 25, "bottom": {"count": 2, "diameter": 16}}), "host"),
+        (json!({"host": 999999, "cover": 25, "bottom": {"count": 2, "diameter": 16}}), "no element"),
+        (json!({"host": "x", "cover": 25, "bottom": {"count": 2, "diameter": 16}}), "host"),
+    ] {
+        let e = fails(&mut s, "reinforce", p.clone());
+        assert!(e.contains(says), "{p}: {e}");
+    }
+}
+
+/// A structural column 300 x 300 and 3 m tall at 1 m east, 2 m north, on the ground level.
+fn column(s: &mut Session, angle: f64) -> u64 {
+    run(s, "structural_column", json!({"at": [1000, 2000], "type": "Concrete 300 x 300", "height": 3000, "angle": angle}))["id"]
+        .as_u64()
+        .unwrap()
+}
+
+fn xy(b: &Value, i: usize) -> (f64, f64, f64) {
+    let p = &b["path"][i];
+    (p[0].as_f64().unwrap(), p[1].as_f64().unwrap(), p[2].as_f64().unwrap())
+}
+
+#[test]
+fn a_column_gets_bars_on_every_face_stirrups_up_its_height_and_ties_across() {
+    let mut s = Session::new();
+    let host = column(&mut s, 0.0);
+    let r = run(
+        &mut s,
+        "reinforce",
+        json!({"host": host, "cover": 25, "bars": {"diameter": 16, "x": 3, "y": 3}, "stirrup": {"diameter": 5, "spacing": 150}, "ties": {"diameter": 6.3}}),
+    );
+    // Eight bars (a corner at each, a bar in the middle of each face), 21 stirrups from 27.5 to 2972.5 mm, a tie across the
+    // section both ways at each of them.
+    let (bars, stirrups, ties) = (on(&s, host, "bars"), on(&s, host, "stirrup"), on(&s, host, "tie"));
+    assert_eq!((bars.len(), stirrups.len(), ties.len(), ids(&r).len()), (8, 21, 42, 71));
+    // 25 cover, 5 stirrup, half a bar: bars sit 112 mm from the middle; they run from 25 to 2975 up the column.
+    let mut at: Vec<(f64, f64)> = bars.iter().map(|b| (xy(b, 0).0, xy(b, 0).1)).collect();
+    at.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    let want = [
+        (888.0, 1888.0),
+        (888.0, 2000.0),
+        (888.0, 2112.0),
+        (1000.0, 1888.0),
+        (1000.0, 2112.0),
+        (1112.0, 1888.0),
+        (1112.0, 2000.0),
+        (1112.0, 2112.0),
+    ];
+    assert_eq!(at, want);
+    assert!(bars.iter().all(|b| near(&json!(xy(b, 0).2), 25.0) && near(&json!(xy(b, 1).2), 2975.0)), "{bars:?}");
+    assert!(near(&stirrups[0]["length"], 980.0), "{}", stirrups[0]);
+    // A tie runs from the outer face of one bar to the outer face of the one across.
+    assert!(ties.iter().all(|b| near(&b["length"], 240.0) && b["path"].as_array().map(Vec::len) == Some(2)), "{ties:?}");
+}
+
+#[test]
+fn a_column_turned_to_an_angle_has_its_bars_turned_with_it_and_anchors_run_past_its_ends() {
+    let mut s = Session::new();
+    let host = column(&mut s, 90.0);
+    run(
+        &mut s,
+        "reinforce",
+        json!({"host": host, "cover": {"top": 25, "bottom": 50, "sides": 25}, "bars": {"diameter": 16, "x": 2, "y": 3}, "anchor": {"below": 400, "above": 600}}),
+    );
+    // Width along north: four corners and one bar in the middle of each face along the depth, six bars.
+    let bars = on(&s, host, "bars");
+    assert_eq!(bars.len(), 6);
+    // No stirrup, so 25 cover and half a bar: 117 mm from the middle; north-west of the middle is a corner too.
+    let corner = bars.iter().find(|b| (xy(b, 0).0 - 883.0).abs() < 1e-6 && (xy(b, 0).1 - 2117.0).abs() < 1e-6);
+    assert!(corner.is_some(), "{bars:?}");
+    // 400 below the base, 600 above the top.
+    assert!(bars.iter().all(|b| near(&json!(xy(b, 0).2), -400.0) && near(&json!(xy(b, 1).2), 3600.0)), "{bars:?}");
+    // The cover at the base is the bottom's, 50, when the bars stop short of it.
+    run(&mut s, "reinforce", json!({"host": host, "cover": {"top": 25, "bottom": 50, "sides": 25}, "bars": {"diameter": 16}}));
+    let bars = on(&s, host, "bars");
+    assert_eq!(bars.len(), 4);
+    assert!(bars.iter().all(|b| near(&json!(xy(b, 0).2), 50.0) && near(&json!(xy(b, 1).2), 2975.0)), "{bars:?}");
+}
+
+#[test]
+fn a_column_that_cannot_be_armed_as_asked_is_refused() {
+    let mut s = Session::new();
+    let host = column(&mut s, 0.0);
+    let round = run(&mut s, "structural_column", json!({"at": [5000, 0], "type": "Concrete Round 400"}))["id"].as_u64().unwrap();
+    let base = json!({"host": host, "cover": 25});
+    let with = |extra: Value| -> Value {
+        let mut v = base.clone();
+        v.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+        v
+    };
+    for (extra, says) in [
+        (json!({"bars": {"diameter": 16, "x": 1}}), "bars"),
+        (json!({"bars": {"diameter": 16, "x": 2000}}), "bars"),
+        (json!({"bars": {"diameter": 16, "x": 9, "y": 9}}), "clearance"),
+        (json!({"bars": {"diameter": 16}, "ties": {"diameter": 6.3}}), "tie"),
+        (json!({"bars": {"diameter": 16}, "mesh": {}}), "mesh"),
+        (json!({"bars": {"diameter": 16}, "bottom": {"count": 2, "diameter": 16}}), "bottom"),
+        (json!({"stirrup": {"diameter": 5, "spacing": 150}, "anchor": {"below": -5}}), "anchor"),
+        (json!({"cover": 200, "bars": {"diameter": 16}}), "narrow"),
+        (json!({}), "nothing"),
+    ] {
+        let e = fails(&mut s, "reinforce", with(extra.clone()));
+        assert!(e.contains(says), "{extra}: {e}");
+    }
+    let e = fails(&mut s, "reinforce", json!({"host": round, "cover": 25, "bars": {"diameter": 16}}));
+    assert!(e.contains("round"), "{e}");
+}
+
+/// A footing 1200 x 1200 and 400 thick with its top at the level, at 3 m east, 3 m north.
+fn footing(s: &mut Session) -> u64 {
+    run(s, "footing", json!({"at": [3000, 3000], "type": "Footing 1200 x 1200"}))["id"].as_u64().unwrap()
+}
+
+#[test]
+fn a_footing_gets_two_layers_of_mesh_with_their_ends_turned_up() {
+    let mut s = Session::new();
+    let host = footing(&mut s);
+    let r = run(
+        &mut s,
+        "reinforce",
+        json!({"host": host, "cover": 50, "mesh": {"x": {"diameter": 10, "spacing": 150}, "y": {"diameter": 10, "spacing": 150}, "hook": 100}}),
+    );
+    // 1090 mm between the outer bars' centres at no more than 150: eight gaps, nine bars each way.
+    let (mx, my) = (on(&s, host, "mesh x"), on(&s, host, "mesh y"));
+    assert_eq!((mx.len(), my.len(), ids(&r).len()), (9, 9, 18));
+    // The x bars lie on the cover and run 50 short of each end, 1100 mm, with a leg of 100 turned up at both: 1300 mm.
+    let mut ys: Vec<f64> = mx.iter().map(|b| xy(b, 1).1).collect();
+    ys.sort_by(f64::total_cmp);
+    assert!((ys[0] - (3000.0 - 545.0)).abs() < 1e-6 && (ys[8] - (3000.0 + 545.0)).abs() < 1e-6, "{ys:?}");
+    for b in &mx {
+        // The footing's bottom is at z -400; a 10 mm bar on 50 of cover is centred 55 above it, the second layer 65.
+        assert!(near(&b["length"], 1300.0) && b["path"].as_array().map(Vec::len) == Some(4), "{b}");
+        assert!(near(&json!(xy(b, 1).2), -345.0) && near(&json!(xy(b, 0).2), -245.0), "{b}");
+        assert!((xy(b, 1).0 - 2450.0).abs() < 1e-6 && (xy(b, 2).0 - 3550.0).abs() < 1e-6, "{b}");
+    }
+    assert!(my.iter().all(|b| near(&json!(xy(b, 1).2), -335.0)), "{my:?}");
+}
+
+#[test]
+fn a_footing_refuses_a_mesh_that_does_not_fit_its_depth() {
+    let mut s = Session::new();
+    let host = footing(&mut s);
+    let m = json!({"x": {"diameter": 10, "spacing": 150}});
+    for (extra, says) in [
+        (json!({"mesh": {"x": {"diameter": 10, "spacing": 150}, "hook": 400}}), "hook"),
+        (json!({"cover": 200, "mesh": m.clone()}), "thickness"),
+        (json!({"mesh": {}}), "nothing"),
+        (json!({"mesh": {"z": {"diameter": 10, "spacing": 150}}}), "z"),
+        (json!({"bottom": {"count": 2, "diameter": 10}}), "bottom"),
+        (json!({"mesh": {"x": {"diameter": 10, "spacing": 10}}}), "spacing"),
+    ] {
+        let mut p = json!({"host": host, "cover": 50});
+        p.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+        let e = fails(&mut s, "reinforce", p);
+        assert!(e.contains(says), "{extra}: {e}");
+    }
+}
+
+/// A floor 4 m by 3 m, 200 thick, its top at the level.
+fn slab(s: &mut Session, extra: Value) -> u64 {
+    let mut p = json!({"boundary": [[0, 0], [4000, 0], [4000, 3000], [0, 3000]]});
+    p.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+    run(s, "floor", p)["id"].as_u64().unwrap()
+}
+
+#[test]
+fn a_floor_gets_a_mesh_at_the_bottom_and_one_at_the_top() {
+    let mut s = Session::new();
+    let host = slab(&mut s, json!({}));
+    let r = run(
+        &mut s,
+        "reinforce",
+        json!({
+            "host": host, "cover": 20,
+            "bottom": {"x": {"diameter": 8, "spacing": 150}, "y": {"diameter": 8, "spacing": 200}},
+            "top": {"x": {"diameter": 6.3, "spacing": 200}}
+        }),
+    );
+    let (bx, by, tx) = (on(&s, host, "bottom x"), on(&s, host, "bottom y"), on(&s, host, "top x"));
+    // 2952 mm of room across the 3 m at no more than 150: 20 gaps, 21 bars; 3952 along the 4 m at 200: 21; the top x bars at 200
+    // across 2955.7: 15 gaps, 16 bars.
+    assert_eq!((bx.len(), by.len(), tx.len(), ids(&r).len()), (21, 21, 16, 58));
+    // The x bars run 20 in from each edge: 3960. The bottom is at z -200: 20 cover and half a bar up, then the y layer on them.
+    assert!(bx.iter().all(|b| near(&b["length"], 3960.0) && near(&json!(xy(b, 0).2), -176.0)), "{bx:?}");
+    assert!(by.iter().all(|b| near(&b["length"], 2960.0) && near(&json!(xy(b, 0).2), -168.0)), "{by:?}");
+    // The top mesh hangs from the top face, 20 cover and half a bar down.
+    assert!(tx.iter().all(|b| near(&json!(xy(b, 0).2), -23.15)), "{tx:?}");
+}
+
+#[test]
+fn a_floors_bars_stop_at_its_outline_and_round_its_openings() {
+    let mut s = Session::new();
+    // An L: 4 m wide below 1.4 m, 1.5 m wide above it, up to 3 m.
+    let host = slab(&mut s, json!({"boundary": [[0, 0], [4000, 0], [4000, 1400], [1500, 1400], [1500, 3000], [0, 3000]]}));
+    run(
+        &mut s,
+        "reinforce",
+        json!({"host": host, "cover": 20, "bottom": {"x": {"diameter": 8, "spacing": 150}, "y": {"diameter": 8, "spacing": 200}}}),
+    );
+    let (bx, by) = (on(&s, host, "bottom x"), on(&s, host, "bottom y"));
+    // Bars across y at 24 + 147.6 k: ten below 1400 run the whole 4 m (3960), eleven above run 1500 less the covers (1460).
+    assert_eq!(
+        (bx.iter().filter(|b| near(&b["length"], 3960.0)).count(), bx.iter().filter(|b| near(&b["length"], 1460.0)).count()),
+        (10, 11)
+    );
+    // Bars along y at 24 + 197.6 k: eight in the tall arm (2960), thirteen in the low one, 1400 less the covers (1360).
+    assert_eq!(
+        (by.iter().filter(|b| near(&b["length"], 2960.0)).count(), by.iter().filter(|b| near(&b["length"], 1360.0)).count()),
+        (8, 13)
+    );
+
+    // A hole is gone round: the bars it crosses are in two pieces, each a cover short of it.
+    let host = slab(&mut s, json!({"openings": [[[1000, 1000], [2000, 1000], [2000, 2000], [1000, 2000]]]}));
+    run(&mut s, "reinforce", json!({"host": host, "cover": 20, "bottom": {"x": {"diameter": 8, "spacing": 150}}}));
+    let bx = on(&s, host, "bottom x");
+    // y = 24 + 147.6 k is inside the hole for k = 7 to 13: seven bars of two pieces, 14 of 3960 less nothing: 14 whole, 7 * 2.
+    assert_eq!(bx.len(), 14 + 14);
+    assert_eq!(bx.iter().filter(|b| near(&b["length"], 960.0)).count(), 7);
+    assert_eq!(bx.iter().filter(|b| near(&b["length"], 1960.0)).count(), 7);
+}
+
+#[test]
+fn a_floor_that_cannot_be_armed_is_refused() {
+    let mut s = Session::new();
+    let host = slab(&mut s, json!({}));
+    let sloped = slab(&mut s, json!({"slope": 5, "arrow": [[0, 0], [4000, 0]]}));
+    let bottom = json!({"x": {"diameter": 8, "spacing": 150}});
+    let e = fails(&mut s, "reinforce", json!({"host": sloped, "cover": 20, "bottom": bottom.clone()}));
+    assert!(e.contains("slope"), "{e}");
+    for (extra, says) in [
+        // 90 of cover at both faces in 200 of slab: the meshes meet.
+        (json!({"cover": 90, "bottom": bottom.clone(), "top": bottom.clone()}), "meet"),
+        (json!({"bottom": {"x": {"diameter": 8, "spacing": 150}, "hook": 50}}), "hook"),
+        (json!({"bottom": {}}), "nothing"),
+        (json!({"stirrup": {"diameter": 5, "spacing": 150}, "bottom": bottom.clone()}), "stirrup"),
+    ] {
+        let mut p = json!({"host": host, "cover": 20});
+        p.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+        let e = fails(&mut s, "reinforce", p);
+        assert!(e.contains(says), "{extra}: {e}");
+    }
+}
+
+#[test]
+fn a_floor_too_big_for_one_command_is_refused_not_cut_short() {
+    let mut s = Session::new();
+    let host = slab(&mut s, json!({"boundary": [[0, 0], [40000, 0], [40000, 30000], [0, 30000]]}));
+    let e = fails(&mut s, "reinforce", json!({"host": host, "cover": 20, "bottom": {"x": {"diameter": 8, "spacing": 28}}}));
+    assert!(e.contains("1000"), "{e}");
+}
+
+#[test]
+fn hostile_parameters_for_every_kind_of_host_are_refused_or_made_never_a_crash() {
+    let mut s = Session::new();
+    let hosts = [beam(&mut s), column(&mut s, 33.0), footing(&mut s), slab(&mut s, json!({}))];
+    let row = |k: Value, d: Value| json!({"count": k, "diameter": d});
+    let pitch = |d: Value, sp: Value| json!({"diameter": d, "spacing": sp});
+    let mut hostile = Vec::new();
+    for n in [json!(0), json!(-1), json!(1e300), json!(5e-324), json!(2.5), json!("x"), json!(null), json!([]), json!({}), json!(1e9)] {
+        hostile.push(json!({"cover": n.clone(), "bottom": row(json!(2), json!(16)), "bars": {"diameter": 16}}));
+        hostile.push(json!({"cover": 25, "bottom": row(n.clone(), json!(16)), "top": row(json!(2), n.clone())}));
+        hostile.push(
+            json!({"cover": 25, "stirrup": pitch(json!(5), n.clone()), "bars": {"diameter": n.clone(), "x": n.clone(), "y": n.clone()}}),
+        );
+        hostile
+            .push(json!({"cover": 25, "mesh": {"x": pitch(n.clone(), json!(150)), "y": pitch(json!(10), n.clone()), "hook": n.clone()}}));
+        hostile.push(json!({"cover": 25, "bottom": {"x": pitch(n.clone(), n.clone()), "y": pitch(json!(8), json!(100))}, "top": {"y": pitch(json!(8), n.clone())}}));
+        hostile.push(json!({"cover": {"top": n.clone(), "bottom": n.clone(), "sides": n.clone()}, "stirrup": pitch(json!(5), json!(150)), "bars": {"diameter": 16}}));
+        hostile.push(json!({"cover": 25, "stirrup": {"diameter": 5, "spacing": 150, "ends": {"length": n.clone(), "spacing": n.clone()}, "hook": n.clone()}, "ties": {"diameter": n.clone()}}));
+        hostile.push(json!({"cover": 25, "bars": {"diameter": 16}, "anchor": {"start": n.clone(), "end": n.clone(), "below": n.clone(), "above": n.clone()}, "skin": pitch(json!(8), n.clone()), "clearance": n}));
+    }
+    for host in hosts {
+        for p in &hostile {
+            let mut p = p.clone();
+            if let Some(o) = p.as_object_mut() {
+                o.insert("host".into(), json!(host));
+            }
+            let before = s.model.clone();
+            match s.execute("reinforce", &p) {
+                Ok(_) => assert!(s.model.check().is_ok(), "{p}"),
+                Err(e) => {
+                    assert!(!e.contains("internal error"), "{p}: {e}");
+                    assert_eq!(*s.model, *before, "{p}");
+                }
+            }
+        }
+    }
+}

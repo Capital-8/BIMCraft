@@ -235,17 +235,21 @@ fn the_property_sets_of_other_programs_come_in_as_parameters() {
 
 #[test]
 fn what_bimcraft_writes_in_its_own_sets_is_not_read_twice() {
-    // The sample house and what CI adds to it, which write every kind of product and every set BIMCraft has.
-    let mut s = crate::engine::Session::new();
-    s.script(crate::sample::SAMPLE).unwrap();
-    s.script(include_str!("../../../ci/ifc-coverage.txt")).unwrap();
+    // The sample house, and what CI adds to it, in a project of its own (its lines name their hosts by id): between them every
+    // kind of product and every set BIMCraft has.
+    let mut house = crate::engine::Session::new();
+    house.script(crate::sample::SAMPLE).unwrap();
     // A plain column and a stair, which the sample may not hold.
-    s.script("column {\"at\": [12000, 0]}\nstair {\"start\": [20000, 0], \"end\": [23000, 0]}").unwrap();
-    s.execute("parameter", &serde_json::json!({"name": "Fire", "kind": "text", "categories": ["wall"]})).unwrap();
-    let wall = s.model.elements.iter().find(|(_, e)| e.category() == "wall").map(|(id, _)| *id).unwrap();
-    s.execute("modify", &serde_json::json!({"id": wall, "params": {"Fire": "EI60"}})).unwrap();
-    let text = crate::ifc::export(&s.model);
-    let i = ifc(text.as_bytes(), "x").unwrap();
-    // The one parameter the project had: no mark from a name that is a type's, no `LoadBearing` read twice.
-    assert_eq!(i.model.parameters.keys().collect::<Vec<_>>(), ["Fire"]);
+    house.script("column {\"at\": [12000, 0]}\nstair {\"start\": [20000, 0], \"end\": [23000, 0]}").unwrap();
+    house.execute("parameter", &serde_json::json!({"name": "Fire", "kind": "text", "categories": ["wall"]})).unwrap();
+    let wall = house.model.elements.iter().find(|(_, e)| e.category() == "wall").map(|(id, _)| *id).unwrap();
+    house.execute("modify", &serde_json::json!({"id": wall, "params": {"Fire": "EI60"}})).unwrap();
+    let mut coverage = crate::engine::Session::new();
+    coverage.script(include_str!("../../../ci/ifc-coverage.txt")).unwrap();
+    for (s, parameters) in [(house, vec!["Fire"]), (coverage, Vec::new())] {
+        let text = crate::ifc::export(&s.model);
+        let i = ifc(text.as_bytes(), "x").unwrap();
+        // Only the parameters the project had: no mark from a name that is a type's, no `LoadBearing` read twice.
+        assert_eq!(i.model.parameters.keys().collect::<Vec<_>>(), parameters);
+    }
 }
