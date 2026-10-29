@@ -251,6 +251,30 @@ cuts and regions draw the layers with the same bounded pattern renderer as fille
 target sets its scale. Pattern references follow library renames, save as GUIDs, and prevent deletion while used by a view or
 template. The 3D renderer continues to use the solid `fill` colour for shading; it does not draw hatch patterns.
 
+A 3D view may be seen in perspective, as through a camera, rather than parallel (axonometric): `View3D::perspective`, a `Perspective`
+with the `lens` it is seen through (its focal length, mm on a 35 mm camera, whose 36 mm of film, `FILM`, is the picture's width; 10 to
+600 mm, checked in `Model::check`) and `on` or off (off, it keeps its lens), set by the `perspective` command, which makes the default 3D
+view as `section_box` does; `View3D::lens` is the lens while it's on. The camera is `view3d::Camera` with `lens` set: the eye stands back from
+the target along the view as far as makes `scale` true at the target (`Camera::eye_distance`, the focal length in px over the scale), so
+orbit turns it about the target, pan carries both, zoom walks it in (a point on the plane through the target staying under the cursor),
+`Camera::sized` keeps the eye where it stood as the picture or the lens changes, and `with_eye_elevation` raises or lowers it looking at the
+same target from as far across the plan. `fit_from` fits a perspective with the eye as far back as puts a ball round what is shown inside
+the picture's narrower side. `Camera::project` keeps "larger is nearer": in perspective `d² / a - d` for a point `a` mm in front of an eye
+`d` from the target, as near as a parallel view's at the target and straight across the picture of a plane (it goes as `1 / a`), so the
+rasterizer's barycentric depths stay exact, and `point_at` turns a pixel and its depth back into the model point (textures, the section
+box's `Boxed`). What is less than `NEAR` (10 mm) in front of the eye is cut away: a triangle into the one or two its near part makes
+(`Projector::in_front`, as weights of its corners, so a curve's lighting carries over), a line to its near part (`Camera::in_front`: edges in
+wireframe, levels' marks, the section box's frame); a point behind the eye projects to no number. A face is lit on the side the eye is on
+(`Camera::toward`), as the card's `front_facing` is, and how far a line may lie behind a surface and show is a pixel's worth where the
+line is (`Camera::slack`). `Camera::along` takes, in perspective, the point on the axis nearest the line from the eye through the pointer,
+so a dragged section box face stays under it. `render` of the 3D view goes through its lens, and `eye_elevation` puts the eye that high. A
+sheet's 3D viewport stays parallel (its scale is paper's). The card draws perspective too: `View::perspective` gives the shader the
+focal length, how far the eye is and a depth of `a + b / ahead`, 1 at `NEAR` and 0 past the far side of the mesh (a reversed depth, as
+precise far off as near), with the same `NEAR` cut by the card's clipping; `Mesh::pick` cuts and projects as the processor does.
+`picking_the_mesh_in_perspective_finds_what_the_cpu_picture_shows_from_afar_and_from_within` and
+`the_card_draws_in_perspective_what_the_processor_does_from_afar_and_from_among_the_walls` compare them, from outside and with the eye
+inside the house (`view3d::inside`).
+
 The 3D view can be drawn on the graphics card (File > Settings > Performance; off until asked for: `BimApp::card`, `settings.json`'s
 `gpu_3d`). `view3d::gpu::Mesh` is the triangles a view shows as f32 vertices relative to the middle of what is drawn (millimetres far
 from the origin would overflow f32), each with its colour, normal, face normal, plane, element and texture; the textures' mip levels as

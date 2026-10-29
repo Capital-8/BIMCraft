@@ -1032,6 +1032,7 @@ pub fn section_camera(m: &Model, id: impl Key, view: View) -> Option<(Camera, Cl
         target: [at.0, at.1, view.cy],
         width: view.width,
         height: view.height,
+        lens: None,
     };
     let column = |s: f64| f64::from(view.width) / 2.0 + (s - view.cx) * view.scale;
     let row = |z: f64| f64::from(view.height) / 2.0 - (z - view.cy) * view.scale;

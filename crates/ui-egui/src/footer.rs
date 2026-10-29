@@ -13,8 +13,8 @@ use bimcraft_core::engine::Session;
 use bimcraft_core::graphics::{self, ANNOTATION, Detail, Group, MODEL, VisualStyle};
 use bimcraft_core::model::{Id, Model};
 use egui::{
-    Color32, FontId, Frame, Key, Margin, Popup, Response, RichText, Sense, Shape, Stroke, StrokeKind, TextEdit, Ui, WidgetInfo, WidgetType,
-    pos2, vec2,
+    Align, Color32, FontId, Frame, Key, Layout, Margin, Popup, Response, RichText, Sense, Shape, Stroke, StrokeKind, TextEdit, Ui,
+    UiBuilder, WidgetInfo, WidgetType, pos2, vec2,
 };
 use serde_json::{Value, json};
 
@@ -328,14 +328,16 @@ impl BimApp {
             return;
         }
         let temp = self.temporary().cloned().unwrap_or_default();
-        // A small card in the view's corner, floating; a bar along its foot in the Compact layout.
+        // A small card floating over the view's bottom left corner, the view drawn under it; a bar along its foot in the
+        // Compact layout, the view above it.
         let card = crate::style::card([true, false, false, true]).inner_margin(Margin::symmetric(6, 2));
         let compact = crate::style::compact();
         let (panel, card) = match compact {
             true => (card.outer_margin(0), Frame::NONE),
             false => (Frame::NONE, card),
         };
-        egui::Panel::bottom(egui::Id::new(("view-control", self.sheet))).frame(panel).show_separator_line(false).show(ui, |ui| {
+        let (id, over) = (egui::Id::new(("view-control", self.sheet)), self.view_rect);
+        let mut controls = |ui: &mut Ui| {
             card.show(ui, |ui| {
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 2.0;
@@ -420,7 +422,13 @@ impl BimApp {
                     }
                 })
             });
-        });
+        };
+        if compact {
+            egui::Panel::bottom(id).frame(panel).show_separator_line(false).show(ui, controls);
+        } else {
+            // A child that takes no room of the view's: over it, not after it.
+            controls(&mut ui.new_child(UiBuilder::new().id_salt(id).max_rect(over).layout(Layout::bottom_up(Align::Min))));
+        }
     }
 
     /// The cyan frame round a view that hides, isolates or reveals for now, as Revit draws.

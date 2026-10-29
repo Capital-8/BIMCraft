@@ -956,6 +956,7 @@ impl BimApp {
         let view_shown = matches!(subject, Subject::Plan(_) | Subject::CeilingPlan | Subject::View3D)
             || (matches!(subject, Subject::Element(_)) && self.selection.is_empty() && matches!(self.sheet, Sheet::Section(_)));
         if subject == Subject::View3D {
+            self.camera_properties(ui);
             self.section_box_properties(ui);
         }
         if view_shown {

@@ -9,6 +9,7 @@ use bimcraft_i18n::msg;
 
 mod browser;
 mod cad;
+mod camera;
 mod canvas;
 mod clouds;
 mod context;
@@ -71,7 +72,7 @@ use egui::containers::menu::{MenuButton, SubMenuButton};
 use egui::{
     Align, Align2, Area, CentralPanel, Color32, ComboBox, Context, CornerRadius, Event, FontId, Frame, Grid, Id as UiId, Key,
     KeyboardShortcut, Layout, Margin, Modal, Modifiers, Order, Panel, Popup, Pos2, Rect, Response, RichText, ScrollArea, Sense, Stroke,
-    StrokeKind, TextEdit, Ui, ViewportCommand, WidgetInfo, WidgetType, pos2, vec2,
+    StrokeKind, TextEdit, Ui, UiBuilder, ViewportCommand, WidgetInfo, WidgetType, pos2, vec2,
 };
 use serde_json::{Value, json};
 
@@ -419,6 +420,9 @@ pub struct BimApp {
     /// seen.
     drop_headers: Vec<(dock::Palette, Rect, bool)>,
     tab_bar: Rect,
+    /// How far down the view the tabs reach where they float over it (else the view's top): what floats over the view
+    /// (the Options Bar) and what docks along it start below.
+    tabs_foot: f32,
     tab_rects: Vec<(Sheet, Rect)>,
     work: Rect,
     pointer: Pos2,
@@ -899,6 +903,9 @@ fn tab_button_with(ui: &mut Ui, label: &str, active: bool, contextual: bool, sen
     r
 }
 
+/// How tall a card floating over a view is (its tabs, its view control bar), points.
+const FLOATING_CARD: f32 = 30.0;
+
 impl BimApp {
     pub fn new(session: Session) -> BimApp {
         let first = Sheet::Plan(session.model.levels().first().map_or(0, |(id, _)| *id));
@@ -923,6 +930,7 @@ impl BimApp {
             dragging: None,
             drop_headers: Vec::new(),
             tab_bar: Rect::NOTHING,
+            tabs_foot: f32::NEG_INFINITY,
             tab_rects: Vec::new(),
             work: Rect::ZERO,
             pointer: Pos2::ZERO,
@@ -1309,15 +1317,29 @@ impl BimApp {
         self.docks(ui);
         CentralPanel::default().frame(Frame::NONE).show(ui, |ui| {
             let g = style::gap().max(4);
-            Panel::top("view-tabs")
-                .frame(Frame::new().inner_margin(Margin { left: g, right: g, top: g, bottom: 4 }))
-                .show_separator_line(false)
-                .show(ui, |ui| {
-                    self.view_tabs(ui);
-                });
             let front = self.front;
-            self.view_pane(ui, front);
-            self.work = self.pane;
+            // A schedule's table keeps its rows clear of the tabs.
+            let table = matches!(self.sheet, Sheet::Schedule(_) | Sheet::Table(_));
+            if style::compact() || table {
+                Panel::top("view-tabs")
+                    .frame(Frame::new().inner_margin(Margin { left: g, right: g, top: g, bottom: 4 }))
+                    .show_separator_line(false)
+                    .show(ui, |ui| {
+                        self.view_tabs(ui);
+                    });
+                self.view_pane(ui, front);
+                self.tabs_foot = f32::NEG_INFINITY;
+            } else {
+                // A drawn view fills the pane, and its tabs float over its top left corner on a card of their own: drawn after
+                // it, so they are over it for the hand too.
+                let pane = ui.available_rect_before_wrap();
+                ui.scope_builder(UiBuilder::new().max_rect(pane), |ui| self.view_pane(ui, front));
+                let card = style::card([true, false, true, false]).inner_margin(Margin::same(2));
+                // A child that takes no room of the pane's: over the view, not after it.
+                let mut over = ui.new_child(UiBuilder::new().id_salt("view-tabs").max_rect(pane));
+                self.tabs_foot = card.show(&mut over, |ui| self.view_tabs(ui)).response.rect.bottom();
+            }
+            self.work = self.pane.with_min_y(self.pane.top().max(self.tabs_foot));
         });
         self.options_bar(&ctx);
         if self.ribbon_min && self.ribbon_peek {
@@ -1360,9 +1382,14 @@ impl BimApp {
         }
     }
 
-    /// A view under its view control bar, as the active view draws it.
+    /// A view and its view control bar, as the active view draws it: the bar floating over its foot, or (Compact) under it.
     fn view_body(&mut self, ui: &mut Ui) {
-        self.view_control_bar(ui);
+        let floating = !style::compact();
+        if !floating {
+            self.view_control_bar(ui);
+        }
+        // What the floating tabs and view control bar take of the view's height: a tab and a bar each, and a gap round each.
+        self.canvas.room = if floating { 2.0 * (FLOATING_CARD + f32::from(style::gap())) } else { 0.0 };
         self.view_rect = ui.available_rect_before_wrap();
         self.pane = self.view_rect;
         // The plan sets the cursor each frame it shows.
@@ -1376,6 +1403,9 @@ impl BimApp {
             Sheet::Section(id) => self.section_view(ui, id),
             Sheet::Paper(id) => self.paper_view(ui, id),
             Sheet::Schedule(_) | Sheet::Table(_) => self.schedule(ui),
+        }
+        if floating {
+            self.view_control_bar(ui);
         }
         self.temp_frame(ui);
     }
@@ -3692,7 +3722,9 @@ impl BimApp {
         let g = f32::from(style::gap());
         let view = self.view_rect;
         let frame = style::card([false; 4]).inner_margin(Margin::symmetric(10, 3));
-        let shown = Area::new(UiId::new("options-bar")).order(Order::Middle).fixed_pos(view.left_top() + vec2(g, g)).show(ctx, |ui| {
+        // Below the tabs where they float over the view.
+        let top = view.top().max(self.tabs_foot - g + 4.0);
+        let shown = Area::new(UiId::new("options-bar")).order(Order::Middle).fixed_pos(pos2(view.left() + g, top + g)).show(ctx, |ui| {
             // Kept short of the view's zoom buttons on the right, as far as its fields wrap (a drop-down doesn't).
             ui.set_max_width((view.width() - 2.0 * g - 60.0).max(200.0));
             frame.show(ui, |ui| self.options(ui));

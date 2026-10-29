@@ -24,9 +24,10 @@ use crate::massing;
 use crate::model::{
     CEILING_HEIGHT, CadImport, Ceiling, CeilingType, Column, ColumnType, Component, DEFAULT_HEIGHT, DimKind, Dimension, Element, Extrusion,
     Face, Facing, Floor, FloorType, Grid, Guid, Id, Key, Landing, Layer, Level, Line, Location, MAX_COORD, MAX_POINTS, MAX_SLOPE, MAX_TEXT,
-    Mass, Model, Note, Opening, OpeningType, PARAMETER_CATEGORIES, ParameterKind, Pattern, PlanView, PointCloud, ProjectParameter,
-    RAMP_SLOPE, RAMP_WIDTH, RISER, Railing, RailingType, Ramp, Reference, Roof, RoofType, Room, RoomArea, RoomSeparator, STAIR_WIDTH,
-    Schedule, Section, SectionBox, Shaft, Sheet, Side, Spot, Stair, TOL, TREAD, Tag, View3D, Viewport, Wall, WallType, heading, paper,
+    Mass, Model, Note, Opening, OpeningType, PARAMETER_CATEGORIES, ParameterKind, Pattern, Perspective, PlanView, PointCloud,
+    ProjectParameter, RAMP_SLOPE, RAMP_WIDTH, RISER, Railing, RailingType, Ramp, Reference, Roof, RoofType, Room, RoomArea, RoomSeparator,
+    STAIR_WIDTH, Schedule, Section, SectionBox, Shaft, Sheet, Side, Spot, Stair, TOL, TREAD, Tag, View3D, Viewport, Wall, WallType,
+    heading, paper,
 };
 use crate::paint;
 use crate::phasing;
@@ -1173,9 +1174,10 @@ pub static ALL: &[Command] = &[
         "render",
         "Render",
         "{view?: a level's, section's or elevation's name or id, a sheet's number, or {3D}, ceiling?, width?, height?, path?, \
-         azimuth?, elevation?} a level's floor plan (with `ceiling`, its reflected ceiling plan, looking up from 2300 mm), a section, an elevation, a sheet (at 5 px a paper mm), or the 3D view seen from \
+         azimuth?, elevation?, eye_elevation?} a level's floor plan (with `ceiling`, its reflected ceiling plan, looking up from 2300 mm), a section, an elevation, a sheet (at 5 px a paper mm), or the 3D view seen from \
          `azimuth` degrees round from east (counter-clockwise) and `elevation` degrees up (by default from the south-east, \
-         30° up), as a PNG (pngBase64), or written to a path: .png, .svg for a plan, .pdf for a sheet. A plan, section, \
+         30° up), fitted; in perspective (see `perspective`) through its lens, and with `eye_elevation` from an eye that high \
+         (mm) looking at the same point, as a PNG (pngBase64), or written to a path: .png, .svg for a plan, .pdf for a sheet. A plan, section, \
          elevation or sheet that could not draw something as asked (a fill pattern too dense for the view, more ink behind \
          a region than is kept above it) says so in the reply's `notes`",
         render_view,
@@ -1241,6 +1243,17 @@ pub static ALL: &[Command] = &[
          picked. A corner not given stays where it was; turned on with none, it's fitted round the model, 300 mm clear of \
          it. `on: false` turns it off and keeps its extents for when it's turned on again",
         section_box,
+    ),
+    edit(
+        "perspective",
+        "Perspective",
+        &[],
+        "{view?: a 3D view's name or id ({3D} unless given), on?: true | false (true unless given), lens?: mm} a 3D view seen \
+         in perspective, as through a camera, or with `on: false` parallel (axonometric) again, as the ViewCube's Toggle to \
+         Perspective and Toggle to Parallel do. `lens` is the focal length it is seen through, 10 to 600 mm on a 35 mm camera \
+         (whose 36 mm of film is the picture's width): 35 unless given or set before; turned off, it keeps it. The eye stands \
+         back from the middle of the picture as far as the lens and the zoom say; `render` takes how high it stands",
+        perspective,
     ),
     edit(
         "filter",
@@ -2388,12 +2401,25 @@ fn render_view(s: &mut Session, p: &Value) -> R {
         let (azimuth, elevation) = (num(c, p, "azimuth")?.unwrap_or(view3d::AZIMUTH), num(c, p, "elevation")?.unwrap_or(view3d::ELEVATION));
         let scene = view3d::Scene::new(m);
         let look = Look::of_3d(m);
-        let png = scene.render_in(&scene.fit_in(azimuth, elevation, w3, h3, &look), &[], &look).png().map_err(|e| bad(c, e))?;
+        // Through the view's lens, if it's in perspective, and from as high as the eye is put.
+        let lens = m.default_3d().and_then(|v| match m.elements.get(v) {
+            Some(Element::View3D(v3)) => v3.lens(),
+            _ => None,
+        });
+        let fitted = scene.fit_from(view3d::Camera { lens, ..scene.fit_in(azimuth, elevation, w3, h3, &look) }, &look);
+        let cam = match (num(c, p, "eye_elevation")?, lens) {
+            (Some(z), Some(_)) if z.is_finite() && z.abs() <= MAX_COORD => fitted.with_eye_elevation(z),
+            (Some(z), Some(_)) => return Err(bad(c, format!("`eye_elevation`: {z} mm is not a usable height"))),
+            (Some(_), None) => return Err(bad(c, "a parallel 3D view has no eye to raise: turn it to perspective first (`perspective`)")),
+            (None, _) => fitted,
+        };
+        let png = scene.render_in(&cam, &[], &look).png().map_err(|e| bad(c, e))?;
         return png_reply(
             c,
             p,
             png,
-            json!({"width": w3, "height": h3, "view": "{3D}", "kind": "3D view", "azimuth": azimuth, "elevation": elevation}),
+            json!({"width": w3, "height": h3, "view": "{3D}", "kind": "3D view", "azimuth": cam.azimuth, "elevation": cam.elevation,
+                "lens": lens, "eye_elevation": cam.eye_elevation()}),
         );
     }
     // A section or elevation, by name or id.
@@ -2915,6 +2941,43 @@ fn section_box(s: &mut Session, p: &Value) -> R {
         v3.section_box = Some(b);
     }
     Ok(json!({"view": v, "on": b.on, "min": b.min, "max": b.max}))
+}
+
+fn perspective(s: &mut Session, p: &Value) -> R {
+    let c = "perspective";
+    let m = &s.model;
+    let default = absent(p.get("view"))
+        || matches!(p.get("view"), Some(Value::String(n)) if n.eq_ignore_ascii_case("{3D}") || n.eq_ignore_ascii_case("3D"));
+    // The default 3D view is made when it's first turned, as when its graphics first change.
+    let view = if default {
+        m.default_3d()
+    } else {
+        let v = view_param(c, m, p, false)?;
+        if !matches!(m.elements.get(v), Some(Element::View3D(_))) {
+            return Err(bad(c, format!("{} isn't a 3D view; only a 3D view is seen in perspective", view_title(m, v))));
+        }
+        Some(v)
+    };
+    let was = view.and_then(|v| match m.elements.get(v) {
+        Some(Element::View3D(v3)) => v3.perspective,
+        _ => None,
+    });
+    let on = match p.get("on") {
+        v if absent(v) => true,
+        Some(Value::Bool(b)) => *b,
+        Some(v) => return Err(bad(c, format!("`on` must be true or false, got {v}"))),
+        None => true,
+    };
+    let lens = num(c, p, "lens")?.or(was.map(|w| w.lens)).unwrap_or(view3d::LENS);
+    let v = match view {
+        Some(v) => v,
+        None => s.model_mut().insert(Element::View3D(View3D::default_view())),
+    };
+    let set = Perspective { lens, on };
+    if let Some(Element::View3D(v3)) = s.model_mut().elements.get_mut(v) {
+        v3.perspective = Some(set);
+    }
+    Ok(json!({"view": v, "on": on, "lens": lens}))
 }
 
 fn set_graphics(m: &mut Model, view: impl Key, g: Graphics) {

@@ -8,7 +8,7 @@
 use std::collections::BTreeMap;
 use std::sync::OnceLock;
 
-use super::{Camera, DATUM, EDGE, LevelMarks, P3, Scene, add, cross, dot, level_marks, mul, sub, unit};
+use super::{Camera, DATUM, EDGE, LevelMarks, NEAR, P3, Scene, add, cross, dot, level_marks, mul, sub, unit, weighed};
 use crate::geom::{self, P2};
 use crate::graphics::{Look, VisualStyle};
 use crate::model::Id;
@@ -68,6 +68,18 @@ pub struct View {
     pub target: [f32; 3],
     pub scale: f32,
     pub depth: f32,
+    /// In perspective: the lens's focal length in px, how far the eye is from the target, mm, and the card's depth (larger
+    /// nearer, 1 at [`NEAR`] in front of the eye and 0 as far past the target as the mesh reaches) as `a + b / ahead` for a
+    /// point `ahead` mm in front of the eye.
+    pub perspective: Option<Perspective>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Perspective {
+    pub focal: f32,
+    pub eye: f32,
+    pub a: f32,
+    pub b: f32,
 }
 
 struct Tri {
@@ -240,14 +252,13 @@ impl Mesh {
         let (back, right, up) = cam.axes();
         let target = sub(cam.target, self.origin);
         let f = |v: P3| v.map(|x| x as f32);
-        View {
-            right: f(right),
-            up: f(up),
-            back: f(back),
-            target: f(target),
-            scale: cam.scale as f32,
-            depth: (self.radius + dot(target, target).sqrt() + 1.0) as f32,
-        }
+        let depth = self.radius + dot(target, target).sqrt() + 1.0;
+        let perspective = cam.focal().zip(cam.eye_distance()).map(|(focal, eye)| {
+            let far = (eye + depth).max(2.0 * NEAR);
+            let b = NEAR * far / (far - NEAR);
+            Perspective { focal: focal as f32, eye: eye as f32, a: (-NEAR / (far - NEAR)) as f32, b: b as f32 }
+        });
+        View { right: f(right), up: f(up), back: f(back), target: f(target), scale: cam.scale as f32, depth: depth as f32, perspective }
     }
 
     /// The marks drawn over the surfaces: each shown level's plane and head, `tints` colouring (and showing all four edges of)
@@ -281,7 +292,6 @@ impl Mesh {
         let (opaque, clear) = self.nearest(cam, centre);
         // A level's mark is hidden by what is opaque only, as the processor's are.
         let behind = opaque.map_or(f64::NEG_INFINITY, |(z, _)| f64::from(z));
-        let slack = 1.5 / cam.scale.max(1e-9);
         // A surface seen through shows where it is nearer than anything opaque.
         let seen = clear.filter(|(z, _)| opaque.is_none_or(|(d, _)| *z > d)).or(opaque);
         let mut hit = seen.map(|(_, hit)| hit);
@@ -290,8 +300,9 @@ impl Mesh {
             let on_line = marks.lines.iter().find_map(|([a, b], wide)| covers((cam.project(*a), cam.project(*b)), *wide, centre));
             let head: Vec<_> = marks.head.iter().map(|p| cam.project(*p)).collect();
             let ring: Vec<P2> = head.iter().map(|(x, y, _)| P2(*x, *y)).collect();
-            let on_head = geom::contains(&ring, at).then(|| head.iter().map(|p| p.2).sum::<f64>() / 4.0);
-            if on_line.or(on_head).is_some_and(|z| behind <= z + slack) {
+            let whole = ring.iter().all(|q| q.0.is_finite() && q.1.is_finite());
+            let on_head = (whole && geom::contains(&ring, at)).then(|| head.iter().map(|p| p.2).sum::<f64>() / 4.0);
+            if on_line.or(on_head).is_some_and(|z| behind <= z + cam.slack(1.5, z)) {
                 hit = Some(Hit { id: marks.id, face: "" });
             }
         }
@@ -304,16 +315,20 @@ impl Mesh {
         let Some(bvh) = Some(self.bvh()).filter(|b| !b.nodes.is_empty()) else { return (None, None) };
         // Opaque, then seen through.
         let mut found: [Option<(f32, usize)>; 2] = [None, None];
+        let project = cam.projector();
         let mut stack = vec![0usize];
         while let Some(n) = stack.pop() {
             let Some(node) = bvh.nodes.get(n) else { continue };
-            // The box's picture is inside the rectangle its corners make.
-            let corners = (0..8).map(|k| cam.project([0, 1, 2].map(|a| if k >> a & 1 == 0 { node.lo[a] } else { node.hi[a] })));
-            let (lo, hi) = corners.fold((P2(f64::MAX, f64::MAX), P2(f64::MIN, f64::MIN)), |(lo, hi), (cx, cy, _)| {
-                (P2(lo.0.min(cx), lo.1.min(cy)), P2(hi.0.max(cx), hi.1.max(cy)))
-            });
-            if x < lo.0 - 1e-6 || x > hi.0 + 1e-6 || y < lo.1 - 1e-6 || y > hi.1 + 1e-6 {
-                continue;
+            // The box's picture is inside the rectangle its corners make, where all of it is in front of the eye.
+            let corners = (0..8).map(|k| [0, 1, 2].map(|a| if k >> a & 1 == 0 { node.lo[a] } else { node.hi[a] }));
+            if corners.clone().all(|p| project.ahead(p) >= NEAR) {
+                let (lo, hi) =
+                    corners.map(|p| project.at(p)).fold((P2(f64::MAX, f64::MAX), P2(f64::MIN, f64::MIN)), |(lo, hi), (cx, cy, _)| {
+                        (P2(lo.0.min(cx), lo.1.min(cy)), P2(hi.0.max(cx), hi.1.max(cy)))
+                    });
+                if x < lo.0 - 1e-6 || x > hi.0 + 1e-6 || y < lo.1 - 1e-6 || y > hi.1 + 1e-6 {
+                    continue;
+                }
             }
             if let Some(children) = node.children {
                 stack.extend(children);
@@ -321,21 +336,25 @@ impl Mesh {
             }
             for &i in bvh.order.get(node.first..node.first + node.count).unwrap_or_default() {
                 let Some(t) = self.tris.get(i) else { continue };
-                let [a, b, c] = t.p.map(|p| cam.project(p));
-                let area = (b.0 - a.0) * (c.1 - a.1) - (b.1 - a.1) * (c.0 - a.0);
-                if area.is_nan() || area.abs() <= 1e-12 {
-                    continue;
-                }
-                let wa = ((b.0 - x) * (c.1 - y) - (b.1 - y) * (c.0 - x)) / area;
-                let wb = ((c.0 - x) * (a.1 - y) - (c.1 - y) * (a.0 - x)) / area;
-                let wc = 1.0 - wa - wb;
-                if wa < -1e-9 || wb < -1e-9 || wc < -1e-9 {
-                    continue;
-                }
-                let z = (wa * a.2 + wb * b.2 + wc * c.2) as f32;
-                let found = &mut found[usize::from(t.clear)];
-                if found.is_none_or(|(d, j)| z > d || z == d && i < j) {
-                    *found = Some((z, i));
+                // In front of the eye, as the processor cuts it.
+                let (parts, count) = project.in_front(&t.p);
+                for part in parts.iter().take(count) {
+                    let [a, b, c] = weighed(&t.p, part).map(|p| project.at(p));
+                    let area = (b.0 - a.0) * (c.1 - a.1) - (b.1 - a.1) * (c.0 - a.0);
+                    if area.is_nan() || area.abs() <= 1e-12 {
+                        continue;
+                    }
+                    let wa = ((b.0 - x) * (c.1 - y) - (b.1 - y) * (c.0 - x)) / area;
+                    let wb = ((c.0 - x) * (a.1 - y) - (c.1 - y) * (a.0 - x)) / area;
+                    let wc = 1.0 - wa - wb;
+                    if wa < -1e-9 || wb < -1e-9 || wc < -1e-9 {
+                        continue;
+                    }
+                    let z = (wa * a.2 + wb * b.2 + wc * c.2) as f32;
+                    let found = &mut found[usize::from(t.clear)];
+                    if found.is_none_or(|(d, j)| z > d || z == d && i < j) {
+                        *found = Some((z, i));
+                    }
                 }
             }
         }
@@ -406,8 +425,13 @@ mod tests {
     /// Whether picking `s`'s 3D view through its mesh finds what the processor's picture shows, at every third pixel.
     fn picks_as_the_picture(s: &Session) {
         let (scene, look) = (Scene::new(&s.model), Look::of_3d(&s.model));
+        picks_through(s, scene.fit_in(AZIMUTH, ELEVATION, 640, 480, &look));
+    }
+
+    /// Whether picking `s`'s 3D view through its mesh, seen through `cam`, finds what the processor's picture shows.
+    fn picks_through(s: &Session, cam: Camera) {
+        let (scene, look) = (Scene::new(&s.model), Look::of_3d(&s.model));
         let mesh = Mesh::new(&scene, &look).unwrap();
-        let cam = scene.fit_in(AZIMUTH, ELEVATION, 640, 480, &look);
         let tints = [(s.model.levels().first().unwrap().0, Rgb(0, 120, 215))];
         let image = scene.render_in(&cam, &tints, &look);
         let (mut agree, mut total) = (0, 0);
@@ -426,6 +450,17 @@ mod tests {
     #[test]
     fn picking_the_mesh_finds_what_the_cpu_picture_shows() {
         picks_as_the_picture(&sample());
+    }
+
+    #[test]
+    fn picking_the_mesh_in_perspective_finds_what_the_cpu_picture_shows_from_afar_and_from_within() {
+        let s = sample();
+        let (scene, look) = (Scene::new(&s.model), Look::of_3d(&s.model));
+        let flat = scene.fit_in(AZIMUTH, ELEVATION, 640, 480, &look);
+        let cam = scene.fit_from(Camera { lens: Some(crate::view3d::LENS), ..flat }, &look);
+        picks_through(&s, cam);
+        // The eye inside the house, 1.6 m up, through a wide lens: what is behind it is cut away alike.
+        picks_through(&s, crate::view3d::inside(&s.model, cam));
     }
 
     #[test]

@@ -13,7 +13,7 @@ use bimcraft_core::graphics::{Look, VisualStyle};
 use bimcraft_core::model::{Id, Model};
 use bimcraft_core::render::{self, Rgb};
 use bimcraft_core::view3d::gpu::{Hit, Mesh};
-use bimcraft_core::view3d::{AZIMUTH, Camera, ELEVATION, Image, MAX_SIDE, P3, Scene, move_box_face};
+use bimcraft_core::view3d::{AZIMUTH, Camera, ELEVATION, Image, MAX_SIDE, P3, Scene, box_grips, move_box_face};
 use egui::{
     Align, Color32, ColorImage, Layout, PointerButton, Pos2, Rect, Sense, Stroke, StrokeKind, TextureHandle, TextureOptions, Ui, UiBuilder,
     pos2, vec2,
@@ -114,6 +114,14 @@ pub(crate) fn scene_of<'a>(slot: &'a mut Option<(Arc<Model>, Scene)>, model: &Ar
     &slot.get_or_insert_with(|| (Arc::clone(model), Scene::new(model))).1
 }
 
+/// The lens the default 3D view is seen through while it's in perspective.
+pub(crate) fn lens_of(model: &Model) -> Option<f64> {
+    match model.default_3d().and_then(|v| model.elements.get(v)) {
+        Some(bimcraft_core::model::Element::View3D(v)) => v.lens(),
+        _ => None,
+    }
+}
+
 /// The mesh of `scene` for the card, built again when the model changed; or why the card can't draw it.
 fn mesh_of<'a>(slot: &'a mut Option<Meshed>, model: &Arc<Model>, scene: &Scene) -> &'a Result<Arc<Mesh>, String> {
     if !slot.as_ref().is_some_and(|(m, _)| Arc::ptr_eq(m, model)) {
@@ -141,7 +149,7 @@ impl BimApp {
         let look = Look::of_3d(&model);
         let o = &mut self.orbit;
         if let (Some(c), Some((_, scene))) = (o.camera, &o.scene) {
-            o.camera = Some(scene.fit_in(c.azimuth, c.elevation, c.width, c.height, &look));
+            o.camera = Some(scene.fit_from(c, &look));
         }
     }
 
@@ -177,9 +185,14 @@ impl BimApp {
         let o = &mut self.orbit;
         (o.rect, o.ppp) = (rect, ppp);
         let scene = scene_of(&mut o.scene, &model);
+        // Through the view's lens while it's in perspective: the eye stays where it stood as the lens or the picture changes.
+        let lens = lens_of(&model);
         let mut cam = match o.camera {
-            Some(c) => Camera { width: w, height: h, ..c },
-            None => scene.fit_in(AZIMUTH, ELEVATION, w, h, &Look::of_3d(&model)),
+            Some(c) => c.sized(w, h, lens),
+            None => {
+                let look = Look::of_3d(&model);
+                scene.fit_from(Camera { lens, ..scene.fit_in(AZIMUTH, ELEVATION, w, h, &look) }, &look)
+            }
         };
         if let Some(at) = hover {
             // A wheel notch (about 50 points) zooms by a fifth.
@@ -235,7 +248,10 @@ impl BimApp {
             o.boxing = None;
         }
         let reboxed = match (boxed, o.boxing, latest) {
-            (Some(b), Some((k, from)), Some(now)) => Some(move_box_face(b, k, cam.along(k / 2, px(from), px(now)).unwrap_or(0.0))),
+            (Some(b), Some((k, from)), Some(now)) => {
+                let grip = box_grips(b).get(k).copied().unwrap_or_default();
+                Some(move_box_face(b, k, cam.along(k / 2, grip, px(from), px(now)).unwrap_or(0.0)))
+            }
             _ => None,
         };
         let mut boxed_to = None;
@@ -356,7 +372,7 @@ impl BimApp {
                 let ring = [lo, P2(hi.0, lo.1), hi, P2(lo.0, hi.1)].map(at).to_vec();
                 p.add(egui::Shape::closed_line(ring, Stroke::new(1.5, pal().accent)));
             }
-            for g in geom::edge_grips(shown) {
+            for g in geom::edge_grips(shown).into_iter().filter(|g| at(*g).is_finite()) {
                 let r = Rect::from_center_size(at(g), vec2(9.0, 9.0));
                 p.rect_filled(r, 1.0, pal().surface);
                 p.rect_stroke(r, 1.0, Stroke::new(1.5, pal().accent), StrokeKind::Middle);
