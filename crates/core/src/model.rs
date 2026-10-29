@@ -338,6 +338,9 @@ pub struct Layer {
 /// Layers a type may have.
 pub const MAX_LAYERS: usize = 32;
 
+/// How see-through the starter library's glass is, percent.
+pub const GLASS_TRANSPARENCY: u8 = 70;
+
 /// A material of the project's library: its colour in shaded views, the pattern its cut shows in
 /// plans and sections, and the one its surfaces show where a plan looks down on a floor or a
 /// ceiling plan up at a ceiling.
@@ -358,6 +361,13 @@ pub struct Material {
     /// What its surfaces look like in the 3D view, over its colour.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub texture: Option<Texture>,
+    /// How much of what lies behind its surfaces shows through them in the 3D view, percent: 0 (opaque) to 100.
+    #[serde(default, skip_serializing_if = "is_clear")]
+    pub transparency: u8,
+}
+
+fn is_clear(x: &u8) -> bool {
+    *x == 0
 }
 
 impl Default for Material {
@@ -369,6 +379,7 @@ impl Default for Material {
             cut_pattern: None,
             surface_pattern: None,
             texture: None,
+            transparency: 0,
         }
     }
 }
@@ -2297,7 +2308,9 @@ impl Model {
             (msg!("Copper"), [184, 115, 51], Pattern::Solid, Pattern::None, Some(Kind::Metal)),
         ] {
             let texture = texture.map(Texture::new);
-            m.materials.insert(language.word(name).into(), Material { color, cut, surface, texture, ..Material::default() });
+            // Glass is the one that lets the building behind it show.
+            let transparency = if name == "Glass" { GLASS_TRANSPARENCY } else { 0 };
+            m.materials.insert(language.word(name).into(), Material { color, cut, surface, texture, transparency, ..Material::default() });
         }
         m.families = crate::family::library(language);
         for (n, t) in [("Generic - 200mm", 200.0), ("Interior - 100mm", 100.0)] {
@@ -2714,6 +2727,7 @@ impl Model {
         // 5 to 6 (detailing: lines, regions, groups, repeating details, line and fill styles) has none either: a file of 5 holds
         // none of it, so reading it as 6 changes nothing.
         // 6 to 7 (CAD drawings, and the imports that place them) has none either.
+        // A material's `transparency` (added within 8) has no step: a file without it reads as opaque, as it was.
         // 7 to 8: a note's size is its text type's. A note of a size gets a type of it.
         self.typed_notes();
         // 8 to 9: freely ordered graphic line segments; existing dash/space/dot patterns need no conversion.
@@ -4613,6 +4627,9 @@ impl Model {
             text(&format!("material `{n}`"), "name", n)?;
             if n.trim().is_empty() {
                 return Err("a material needs a name".into());
+            }
+            if x.transparency > 100 {
+                return Err(format!("material `{n}`: transparency is a percent, 0 to 100, not {}", x.transparency));
             }
             if let Some(t) = &x.texture {
                 t.check(&self.images).map_err(|e| format!("material `{n}`: texture: {e}"))?;

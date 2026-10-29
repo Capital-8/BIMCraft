@@ -147,12 +147,12 @@ impl Mesh {
             return Err(format!("{} triangles, more than the card is given", shown.len()));
         }
         // What the view sees through is drawn after what it doesn't, each in the order the processor draws it.
-        let clear = |i: usize| !plain && look.transparency(scene.tris[i].owner) > 0;
+        let clear = |i: usize| scene.tris[i].alpha(look) > 0;
         let shown: Vec<usize> = shown.iter().copied().filter(|&i| !clear(i)).chain(shown.iter().copied().filter(|&i| clear(i))).collect();
         let clear_from = shown.iter().take_while(|&&i| !clear(i)).count() * 3;
         // A texture is looked up as the CPU does unless the view colours its surface another way.
         let colour = |t: &super::Tri| if plain { t.color } else { look.surface(t.owner, t.color) };
-        let textured = |t: &super::Tri| scene.skins.get(t.tex as usize).is_some_and(Option::is_some) && colour(t) == t.color;
+        let textured = |t: &super::Tri| scene.skins.get(t.texture() as usize).is_some_and(Option::is_some) && colour(t) == t.color;
         let levels: Vec<_> = scene.levels.iter().filter(|(id, ..)| plain || look.shows(*id)).cloned().collect();
         let corners = levels.iter().flat_map(|(.., c)| c.iter());
         let points = shown.iter().flat_map(|&i| scene.tris[i].p.iter()).chain(corners);
@@ -172,11 +172,12 @@ impl Mesh {
             tris: Vec::with_capacity(shown.len()),
             bvh: OnceLock::new(),
         };
-        let mut owners: BTreeMap<Id, u32> = BTreeMap::new();
+        let mut owners: BTreeMap<(Id, u8), u32> = BTreeMap::new();
         for i in shown {
             let t = &scene.tris[i];
-            let owner = *owners.entry(t.owner).or_insert_with(|| {
-                let transparency = if plain { 0 } else { look.transparency(t.owner).min(100) };
+            let alpha = t.alpha(look).min(100);
+            let owner = *owners.entry((t.owner, alpha)).or_insert_with(|| {
+                let transparency = alpha;
                 mesh.owners.push(Owner { id: t.owner, edge: look.edge(t.owner, EDGE), transparency });
                 mesh.owners.len() as u32
             });
@@ -185,7 +186,7 @@ impl Mesh {
             let face = unit(cross(sub(t.p[1], t.p[0]), sub(t.p[2], t.p[0])));
             let smooth = scene.smooth.get(i).and_then(Option::as_deref);
             let plane = scene.planes.get(i).map_or(i, |p| *p) as u32 + 1;
-            let tex = if textured(t) { t.tex } else { 0 };
+            let tex = if textured(t) { t.texture() } else { 0 };
             for (k, p) in t.p.iter().enumerate() {
                 let normal = smooth.map_or(face, |n| unit(n[k])).map(|v| v as f32);
                 let position = sub(*p, origin).map(|v| v as f32);
@@ -466,6 +467,24 @@ mod tests {
         let reach = mesh.radius as f32 * 1.001 + 1.0;
         assert!(mesh.vertices.iter().all(|v| v.position.iter().all(|c| c.abs() <= reach)));
         assert!(mesh.vertices.iter().all(|v| v.owner >= 1 && v.owner as usize <= mesh.owners.len() && v.plane >= 1));
-        assert_eq!(mesh.clear_from, mesh.vertices.len(), "nothing seen through");
+        // Only the glass of the windows is seen through, and it is drawn last.
+        let clear: Vec<_> = mesh.owners.iter().filter(|o| o.transparency > 0).collect();
+        assert!(!clear.is_empty() && clear.iter().all(|o| s.model.elements.get(o.id).is_some_and(|e| e.category() == "window")));
+        assert!(mesh.clear_from < mesh.vertices.len());
+    }
+
+    #[test]
+    fn a_glass_layer_is_an_owner_of_its_own_with_the_materials_transparency() {
+        let mut s = Session::new();
+        s.script(
+            r#"type {"category": "wall", "name": "Curtain", "layers": [{"material": "Glass", "thickness": 50}, {"material": "Concrete block", "thickness": 100}]}
+               wall {"points": [[0,0],[8000,0]], "type": "Curtain"}"#,
+        )
+        .unwrap();
+        let mesh = Mesh::new(&Scene::new(&s.model), &Look::of_3d(&s.model)).unwrap();
+        let mut alphas: Vec<u8> = mesh.owners.iter().map(|o| o.transparency).collect();
+        alphas.sort_unstable();
+        assert_eq!(alphas, vec![0, crate::model::GLASS_TRANSPARENCY], "one wall, drawn in two parts");
+        assert!(mesh.clear_from > 0 && mesh.clear_from < mesh.vertices.len(), "the opaque layer first, then the glass");
     }
 }

@@ -32,8 +32,13 @@ window's panel operation (`IfcWindowPanelProperties`, a sliding sash) needs an `
 A material's `texture` (`texture.rs`) is a pattern drawn in code or a picture of `Model::images` (a PNG or JPEG comes in, is kept
 as a PNG of at most 1024 px, its header checked before the decoder makes room for it), laid on a face at its `size` in mm by the
 face's own axes (`view3d::basis`: across is level, up goes up it, east and north where it lies flat), sampled per pixel from the
-depth buffer, in the 3D view alone, from a mip chain. A triangle carries a texture id (one more than its material's place in the
-library); `Scene::new` resolves them. Paint (`paint.rs`) is `{face: material}` in an element's `params` under `Paint`, a reserved
+depth buffer, in the 3D view alone, from a mip chain. A triangle carries a skin (`view3d::skin`): in its low 24 bits a texture id (one more than its material's place in the
+library), in its high 8 its material's `transparency`; `Scene::new` resolves the textures. A material's `transparency` (percent,
+0 to 100, 0 opaque and not written, the starter Glass 70) is how see-through the 3D view draws what is made of it, with no view
+override: a layer's skin wins over its element's, paint gives a face its own, and a family-less window's glass takes the Glass
+material's. IFC carries it in `IFCSURFACESTYLESHADING`'s second argument (0 opaque to 1 clear, `$` for opaque), read back from a
+shading or a rendering. Only the nearest see-through surface is blended, so a glass wall's far face and stacked glass don't
+accumulate; plans and sections ignore it. Paint (`paint.rs`) is `{face: material}` in an element's `params` under `Paint`, a reserved
 name: a triangle's face is read from its winding, so every solid emits triangles turned out (`Solid::tris`, `prism`), and
 `Image::face` says which face a pixel is on. Favorites (`favorites.rs`) are a file of the user's own (`default_path`:
 `BIMCRAFT_FAVORITES`, else the configuration folder) with materials and their pictures, families and their materials; they change

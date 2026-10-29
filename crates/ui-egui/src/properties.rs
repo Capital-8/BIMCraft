@@ -20,7 +20,7 @@ use bimcraft_core::texture::{Kind as TextureKind, Texture};
 use bimcraft_core::units::Units;
 use egui::{
     Align, Align2, Button, Checkbox, ComboBox, Context, FontId, Frame, Grid, Id as UiId, Key, Layout, Margin, Popup, Rect, RichText,
-    ScrollArea, Sense, Shape, Stroke, StrokeKind, TextEdit, TextureHandle, Ui, WidgetInfo, WidgetType, pos2, vec2,
+    ScrollArea, Sense, Shape, Slider, Stroke, StrokeKind, TextEdit, TextureHandle, Ui, WidgetInfo, WidgetType, pos2, vec2,
 };
 use serde_json::{Value, json};
 
@@ -639,6 +639,8 @@ pub(crate) struct MaterialsDialog {
     picked: String,
     name: String,
     color: Option<[u8; 3]>,
+    /// Its transparency as set on the slider, percent (applied once the mouse lets go).
+    clear: Option<u8>,
     /// The texture's fields as typed (a tile's width and height, the angle, the offset across and up), for the material and
     /// texture they were made from.
     texture: Option<(String, Texture, [String; 5])>,
@@ -649,7 +651,7 @@ pub(crate) struct MaterialsDialog {
 impl MaterialsDialog {
     pub(crate) fn new(m: &Model) -> MaterialsDialog {
         let picked = m.materials.keys().next().cloned().unwrap_or_default();
-        MaterialsDialog { name: picked.clone(), picked, color: None, texture: None, swatch: None }
+        MaterialsDialog { name: picked.clone(), picked, color: None, clear: None, texture: None, swatch: None }
     }
 }
 
@@ -1738,6 +1740,14 @@ impl BimApp {
                             run = Some(json!({"name": d.picked, "color": *colour}));
                         }
                         ui.end_row();
+                        // How see-through the 3D view draws what is made of it, percent.
+                        let l = ui.label(t("Transparency"));
+                        let clear = d.clear.get_or_insert(m.transparency);
+                        ui.add(Slider::new(clear, 0..=100).suffix("%")).labelled_by(l.id);
+                        if released && *clear != m.transparency {
+                            run = Some(json!({"name": d.picked, "transparency": *clear}));
+                        }
+                        ui.end_row();
                         // The patterns drawn in code, then the project's fill patterns.
                         let cut = [
                             ("cut", msg!("Cut Pattern"), m.cut, &m.cut_pattern),
@@ -1870,11 +1880,14 @@ impl BimApp {
             });
         }
         if let Some(n) = picked {
-            (d.name, d.picked, d.color) = (n.clone(), n, None);
+            (d.name, d.picked, d.color, d.clear) = (n.clone(), n, None, None);
         } else if !self.session.model.materials.contains_key(&d.picked) {
             d = MaterialsDialog::new(&self.session.model);
         } else if d.color.is_some_and(|c| self.session.model.materials.get(&d.picked).is_some_and(|m| m.color == c)) {
             d.color = None;
+        }
+        if d.clear.is_some_and(|c| self.session.model.materials.get(&d.picked).is_some_and(|m| m.transparency == c)) {
+            d.clear = None;
         }
         if !(close || r.should_close()) {
             self.materials_dialog = Some(d);

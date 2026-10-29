@@ -1104,8 +1104,8 @@ fn layers_of(r: &Reader, l: &Links, id: u64, t: f64) -> Vec<Layer> {
     layers
 }
 
-/// The colours a file shades its materials in, by their names: each material's surface style's.
-fn material_colours(r: &Reader, ids: &[u64]) -> HashMap<String, [u8; 3]> {
+/// The colours a file shades its materials in, by their names, and how see-through (percent): each material's surface style's.
+fn material_colours(r: &Reader, ids: &[u64]) -> HashMap<String, ([u8; 3], u8)> {
     let mut out = HashMap::new();
     // Surface styles by their own names, which name materials as BIMCraft and Revit write them;
     // then the materials' styles, over them.
@@ -1126,9 +1126,10 @@ fn material_colours(r: &Reader, ids: &[u64]) -> HashMap<String, [u8; 3]> {
     out
 }
 
-/// The colour `styles` shade with: in IFC2x3 through style assignments; a surface style's, its
+/// The colour `styles` shade with, and how see-through they make it, percent (a shading's or rendering's second argument, 1 for
+/// clear): in IFC2x3 through style assignments; a surface style's, its
 /// shading's or its rendering's.
-fn colour(r: &Reader, mut styles: Vec<u64>) -> Option<[u8; 3]> {
+fn colour(r: &Reader, mut styles: Vec<u64>) -> Option<([u8; 3], u8)> {
     let mut seen = HashSet::new();
     while let Some(id) = styles.pop() {
         let Some(x) = r.get(id).filter(|_| seen.insert(id)) else { continue };
@@ -1139,7 +1140,8 @@ fn colour(r: &Reader, mut styles: Vec<u64>) -> Option<[u8; 3]> {
                 if let Some(c) = r.at(x.args.first()).filter(|c| c.name == "IFCCOLOURRGB") {
                     let byte = |i: usize| real(c.args.get(i)).map(|v| (v.clamp(0.0, 1.0) * 255.0).round() as u8);
                     if let (Some(red), Some(green), Some(blue)) = (byte(1), byte(2), byte(3)) {
-                        return Some([red, green, blue]);
+                        let clear = real(x.args.get(1)).filter(|v| v.is_finite()).map_or(0, |v| (v.clamp(0.0, 1.0) * 100.0).round() as u8);
+                        return Some(([red, green, blue], clear));
                     }
                 }
             }
@@ -2770,9 +2772,10 @@ pub fn ifc(bytes: &[u8], name: &str) -> Result<Imported, String> {
 
     // The materials the layers are made of, in the library, shaded as the file shades them.
     m.adopt_materials();
-    for (name, colour) in material_colours(&r, &ids) {
+    for (name, (colour, clear)) in material_colours(&r, &ids) {
         if let Some(x) = m.materials.get_mut(&name) {
             x.color = colour;
+            x.transparency = clear;
         }
     }
     // Each element's GUID is the GlobalId of what it was made of, where that's one; what points at an element points at it.

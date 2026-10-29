@@ -1614,6 +1614,11 @@ fn hostile_params_never_panic_or_break_the_model() {
         json!({"category": "wall", "name": "Generic - 200mm", "layers": [{"thickness": 5, "material": "x", "extra": 1}]}),
         json!({"name": "M", "color": "#zzzzzz", "cut": 5, "surface": "brick", "rename": "", "delete": "yes"}),
         json!({"name": "Brick", "rename": "Brick", "color": [1, 2]}),
+        json!({"name": "Glass", "transparency": 101}),
+        json!({"name": "Glass", "transparency": -5}),
+        json!({"name": "Glass", "transparency": 1e300}),
+        json!({"name": "Glass", "transparency": "x"}),
+        json!({"name": "Glass", "transparency": 50}),
         json!({"category": "floor", "name": "F", "layers": [{"thickness": 1e300, "material": "Concrete"}]}),
         json!({"category": "roof", "name": "R", "layers": [{"thickness": 0, "function": "membrane"}]}),
         json!({"category": "ceiling", "name": "C", "layers": "x", "grid": -5}),
@@ -3507,6 +3512,18 @@ fn layers_pick_their_materials_from_the_projects_library() {
     assert_eq!(oak["material"], json!({"color": [160, 112, 60], "cut": "diagonal", "surface": "none"}));
     let oak = run(&mut s, "material", json!({"name": "Oak", "surface": "horizontal", "color": [150, 100, 50]}));
     assert_eq!(oak["material"], json!({"color": [150, 100, 50], "cut": "diagonal", "surface": "horizontal"}));
+    // A material's transparency, percent: kept, cleared, and refused past 100.
+    let glass = run(&mut s, "material", json!({"name": "Oak", "transparency": 40}));
+    assert_eq!(glass["material"]["transparency"], 40);
+    assert_eq!(s.model.materials["Oak"].transparency, 40);
+    let glass = run(&mut s, "material", json!({"name": "Oak", "transparency": 0}));
+    assert!(glass["material"].get("transparency").is_none(), "{glass}");
+    for bad in [json!(101), json!(-1), json!(2.5), json!("x"), json!(1e300)] {
+        let e = s.execute("material", &json!({"name": "Oak", "transparency": bad})).unwrap_err();
+        assert!(e.contains("transparency"), "{bad}: {e}");
+    }
+    assert_eq!(s.model.materials["Oak"].transparency, 0);
+    assert!(s.model.materials["Glass"].transparency > 0, "the starter glass is see-through");
     // Layers name one of its materials, or none.
     let floor = |m: &str| json!({"category": "floor", "name": "Oak floor", "layers": [{"function": "finish", "material": m, "thickness": 20}, {"thickness": 180}]});
     let e = s.execute("type", &floor("Oke")).unwrap_err();
@@ -3715,6 +3732,29 @@ fn materials_and_layers_go_to_ifc_and_come_back() {
         (&json!("Oak"), &json!(20.0), &json!("structure"))
     );
     assert_eq!(i["materials"]["Oak"]["color"], json!([160, 112, 60]));
+    let _ = std::fs::remove_file(path);
+}
+
+#[test]
+fn a_materials_transparency_goes_to_ifc_in_its_surface_style_and_comes_back() {
+    let mut s = Session::new();
+    house(&mut s);
+    run(&mut s, "material", json!({"name": "Tint", "color": "#a0c0e0", "transparency": 40}));
+    run(&mut s, "material", json!({"name": "Paint", "color": "#a0703c"}));
+    run(
+        &mut s,
+        "type",
+        json!({"category": "floor", "name": "Tinted", "layers": [{"material": "Tint", "thickness": 20}, {"material": "Paint", "thickness": 180}]}),
+    );
+    run(&mut s, "floor", json!({"type": "Tinted"}));
+    let path = temp("transparency.ifc");
+    run(&mut s, "save", json!({"path": path}));
+    let ifc = std::fs::read_to_string(&path).unwrap();
+    assert!(ifc.contains("IFCSURFACESTYLESHADING(#") && ifc.contains(",0.4)"), "{ifc}");
+    let mut t = Session::new();
+    run(&mut t, "open", json!({"path": path}));
+    let m = &t.model.materials;
+    assert_eq!((m["Tint"].transparency, m["Paint"].transparency), (40, 0));
     let _ = std::fs::remove_file(path);
 }
 

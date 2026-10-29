@@ -782,9 +782,10 @@ pub static ALL: &[Command] = &[
         "material",
         "Materials",
         &[],
-        "{name, color?: \"#rrggbb\" | [r, g, b], cut?, surface?, texture?: {kind?, size?: [w, h], angle?, offset?: [x, y], path?, \
+        "{name, color?: \"#rrggbb\" | [r, g, b], transparency?: 0-100, cut?, surface?, texture?: {kind?, size?: [w, h], angle?, offset?: [x, y], path?, \
          image?} | null, rename?, delete?: true} a material of the project's library, created or changed: its colour in shaded 3D \
-         views, the pattern its cut shows in plans and sections (where a layer is wide enough to hold it), and the one its \
+         views, its `transparency` there (percent of what lies behind it that shows through, 0 opaque; the starter Glass has 70), \
+         the pattern its cut shows in plans and sections (where a layer is wide enough to hold it), and the one its \
          surfaces show at its size in the building (a floor's top in plan, a ceiling's underside in its ceiling plan). Patterns: \
          none, solid, diagonal, crosshatch, horizontal, vertical, grid, brick, concrete, insulation, or the name of one of the \
          project's fill patterns (see `fill_pattern`), kept while the material shows it and renamed with it. Its `texture` is what its \
@@ -6533,6 +6534,13 @@ fn material(s: &mut Session, p: &Value) -> R {
     }
     if let Some(v) = p.get("color").filter(|v| !v.is_null()) {
         mat.color = colour(v).ok_or_else(|| bad(c, format!("`color` is \"#rrggbb\" or [r, g, b], each 0 to 255, not {v}")))?;
+    }
+    if let Some(v) = p.get("transparency").filter(|v| !v.is_null()) {
+        mat.transparency = v
+            .as_u64()
+            .filter(|t| *t <= 100)
+            .and_then(|t| u8::try_from(t).ok())
+            .ok_or_else(|| bad(c, format!("`transparency` is a whole percent, 0 to 100, not {v}")))?;
     }
     // A pattern drawn in code by its name, or one of the project's fill patterns.
     for (key, slot, fill) in [("cut", &mut mat.cut, &mut mat.cut_pattern), ("surface", &mut mat.surface, &mut mat.surface_pattern)] {

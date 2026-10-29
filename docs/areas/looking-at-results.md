@@ -32,6 +32,8 @@ Moved from the root `CLAUDE.md`, word for word: the root keeps the rules and the
   `available`, the fields there are); one placed on a sheet prints as a table: render the sheet and look at it.
 - Sheets: `bimcraft-cli run --sample --save /tmp/sheets.pdf` prints every sheet; read them back with poppler (`pdfinfo`,
   `pdftoppm -png`) when it's installed. `render {"view": "A101"}` draws one sheet as a PNG.
+- Glass: a wall whose layer is the Glass material (or a window), rendered in `{3D}` with a column behind it, shows the column through it;
+  its IFC material style has a second argument in `IFCSURFACESTYLESHADING`.
 - IFC: `bimcraft-cli run --sample --save /tmp/house.ifc`. After touching `ifc.rs`, validate with IfcOpenShell:
   `ifcopenshell.validate.validate(f, logger, express_rules=True)` (needs pytest installed), then build every product's shape
   with `ifcopenshell.geom.create_shape` and compare wall and roof volumes with a hand calculation. `python ci/validate_ifc.py x.ifc`

@@ -254,7 +254,9 @@ impl Step {
         let style = m.materials.get(name).map(|x| {
             let [r, g, b] = x.color.map(|c| real(f64::from(c) / 255.0));
             let colour = self.add(format!("IFCCOLOURRGB($,{r},{g},{b})"));
-            let shading = self.add(format!("IFCSURFACESTYLESHADING(#{colour},$)"));
+            // Its second argument is how see-through the material is, 0 for opaque to 1 for clear; none for an opaque one.
+            let clear = if x.transparency == 0 { "$".to_string() } else { real(f64::from(x.transparency.min(100)) / 100.0) };
+            let shading = self.add(format!("IFCSURFACESTYLESHADING(#{colour},{clear})"));
             let style = self.add(format!("IFCSURFACESTYLE({},.BOTH.,(#{shading}))", s(name)));
             let item = self.add(format!("IFCSTYLEDITEM($,(#{style}),$)"));
             let rep = self.add(format!("IFCSTYLEDREPRESENTATION(#{},'Style','Material',(#{item}))", self.context));
