@@ -41,11 +41,12 @@ pub enum Lang {
     Portuguese,
     Spanish,
     Czech,
+    French,
     Chinese,
 }
 
 impl Lang {
-    pub const ALL: [Lang; 5] = [Lang::English, Lang::Portuguese, Lang::Spanish, Lang::Czech, Lang::Chinese];
+    pub const ALL: [Lang; 6] = [Lang::English, Lang::Portuguese, Lang::Spanish, Lang::Czech, Lang::French, Lang::Chinese];
 
     /// The project language that goes with it, which new projects are named in: Chinese has none, so English.
     pub fn project(self) -> Language {
@@ -54,6 +55,7 @@ impl Lang {
             Lang::Portuguese => Language::Portuguese,
             Lang::Spanish => Language::Spanish,
             Lang::Czech => Language::Czech,
+            Lang::French => Language::French,
         }
     }
 
@@ -94,6 +96,7 @@ impl From<Language> for Lang {
             Language::Portuguese => Lang::Portuguese,
             Language::Spanish => Lang::Spanish,
             Language::Czech => Lang::Czech,
+            Language::French => Lang::French,
         }
     }
 }
