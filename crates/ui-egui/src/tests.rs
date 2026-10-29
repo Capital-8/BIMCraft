@@ -5118,6 +5118,7 @@ fn the_family_editor_edits_a_family_says_what_wont_build_and_starts_a_new_one_of
     // Its top is drawn as an outline: click on its east edge.
     click(&mut h, P2(3800.0, 3000.0));
     assert_eq!(h.state().selection, [table]);
+    h.set_size(vec2(1800.0, 900.0));
     press(&mut h, "Manage");
     press(&mut h, "Edit Family");
     assert!(h.state().family_editor.is_some(), "the window is open on the table's family");
@@ -5914,6 +5915,8 @@ fn select_by_id_finds_elements_by_id_guid_or_ifc_globalid_says_what_it_missed_an
     let walls = ids(&h, "wall");
     let (high, low) = (walls[4], walls[1]);
     let ifc = bimcraft_core::ifc::compress(gid(&h, low).as_u128());
+    // Manage grew with Room Area Computation and Technical Standards: the ribbon folds Inquiry away in a narrower window.
+    h.set_size(vec2(1800.0, 900.0));
     press(&mut h, "Manage");
     press(&mut h, "Select by ID");
     // Live: what the list finds, and what it doesn't, as it is typed.

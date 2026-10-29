@@ -19,7 +19,7 @@ msgstr " Posunuto o {}, {} mm pro umístění poblíž počátku."
 msgid "(none)"
 msgstr "(žádné)"
 
-#: crates/ui-egui/src/standards.rs:136
+#: crates/ui-egui/src/standards.rs:138
 msgid "0.75 in (19.05 mm) binding margin"
 msgstr ""
 
@@ -44,7 +44,7 @@ msgstr "3D pohledy"
 msgid "3D view resolution"
 msgstr "Rozlišení 3D pohledu"
 
-#: crates/ui-egui/src/standards.rs:216
+#: crates/ui-egui/src/standards.rs:218
 msgid "45° Oblique Stroke (Tick)"
 msgstr ""
 
@@ -147,11 +147,11 @@ msgstr "Pohled má vždy měřítko"
 msgid "A wall's centre line, so a wall drawn on it meets it"
 msgstr "Osa stěny, aby se stěna na ní kreslená napojila"
 
-#: crates/ui-egui/src/standards.rs:160
+#: crates/ui-egui/src/standards.rs:162
 msgid "ASME / AIA: 180 mm"
 msgstr ""
 
-#: crates/ui-egui/src/standards.rs:91
+#: crates/ui-egui/src/standards.rs:93
 msgid "ASME Y14.2 & AIA CAD National CAD Standard (NCS):"
 msgstr ""
 
@@ -161,7 +161,7 @@ msgstr ""
 msgid "Above"
 msgstr ""
 
-#: crates/ui-egui/src/standards.rs:223
+#: crates/ui-egui/src/standards.rs:225
 msgid "Above dimension line (continuous)"
 msgstr ""
 
@@ -177,7 +177,7 @@ msgstr "Přijmout primární"
 msgid "Accept Primary: the primary option's elements stay in the model; the others' elements and the set go"
 msgstr "Přijmout primární: prvky primární varianty zůstanou v modelu; prvky ostatních variant a celá sada budou odstraněny"
 
-#: crates/ui-egui/src/standards.rs:167
+#: crates/ui-egui/src/standards.rs:169
 msgid "Active (NBR 17067: A4 module folding with ear)"
 msgstr ""
 
@@ -201,15 +201,15 @@ msgstr "Skutečná šířka ramene"
 msgid "Actual Tread Depth"
 msgstr "Skutečná hloubka stupně"
 
-#: crates/ui-egui/src/standards.rs:316
+#: crates/ui-egui/src/standards.rs:317
 msgid "Adapt Line Weights"
 msgstr ""
 
-#: crates/ui-egui/src/standards.rs:317
+#: crates/ui-egui/src/standards.rs:318
 msgid "Adapt Object Styles"
 msgstr ""
 
-#: crates/ui-egui/src/standards.rs:318
+#: crates/ui-egui/src/standards.rs:319
 msgid "Adapt Project Units"
 msgstr ""
 
@@ -432,7 +432,7 @@ msgstr "Kategorie poznámek"
 msgid "Annotation Line Weights"
 msgstr "Tloušťky čar poznámek"
 
-#: crates/ui-egui/src/standards.rs:104
+#: crates/ui-egui/src/standards.rs:106
 msgid "Annotation Pens (mm on paper):"
 msgstr ""
 
@@ -446,7 +446,7 @@ msgstr "Pero poznámek {}"
 #: crates/ui-egui/src/lineweights.rs:150
 #: crates/ui-egui/src/objectstyles.rs:78
 #: crates/ui-egui/src/properties.rs:986
-#: crates/ui-egui/src/standards.rs:331
+#: crates/ui-egui/src/standards.rs:333
 #: crates/ui-egui/src/typeprops.rs:309
 msgid "Apply"
 msgstr "Použít"
@@ -881,7 +881,7 @@ msgstr "Kamera"
 #: crates/ui-egui/src/reinforce.rs:469
 #: crates/ui-egui/src/shortcuts.rs:398
 #: crates/ui-egui/src/shortcuts.rs:526
-#: crates/ui-egui/src/standards.rs:332
+#: crates/ui-egui/src/standards.rs:334
 #: crates/ui-egui/src/typeprops.rs:310
 msgid "Cancel"
 msgstr "Zrušit"
@@ -926,7 +926,7 @@ msgstr "Kategorie bez přepsání se vykreslují podle nastavení ve Stylech obj
 #: crates/ui-egui/src/editor.rs:926
 #: crates/ui-egui/src/objectstyles.rs:55
 #: crates/ui-egui/src/properties.rs:1533
-#: crates/ui-egui/src/standards.rs:191
+#: crates/ui-egui/src/standards.rs:193
 msgid "Category"
 msgstr "Kategorie"
 
@@ -974,7 +974,7 @@ msgstr "Oblouk se středem a koncovými body"
 msgid "Center-ends Arc: click its centre, its start, then where it ends"
 msgstr "Oblouk se středem a koncovými body: klikněte na jeho střed, počátek a potom konec"
 
-#: crates/ui-egui/src/standards.rs:224
+#: crates/ui-egui/src/standards.rs:226
 msgid "Centered in dimension line break"
 msgstr ""
 
@@ -1621,7 +1621,7 @@ msgstr "Trubka elektroinstalace a vodič"
 msgid "Conduit (CN): click its start and its end; a chain of clicks makes a conduit for each step"
 msgstr "Trubka elektroinstalace (CN): klikněte na její počátek a konec; řetězec kliknutí vytvoří trubku pro každý krok"
 
-#: crates/ui-egui/src/standards.rs:274
+#: crates/ui-egui/src/standards.rs:275
 msgid "Configure national and international technical drawing standards (NBR, ISO, ANSI, EU). Adapting the program applies standard line weights, sheet formats, object styles, and dimensioning conventions."
 msgstr ""
 
@@ -1871,7 +1871,7 @@ msgstr "Vlastní"
 
 #: crates/ui-egui/src/objectstyles.rs:57
 #: crates/ui-egui/src/objectstyles.rs:64
-#: crates/ui-egui/src/standards.rs:199
+#: crates/ui-egui/src/standards.rs:201
 msgid "Cut"
 msgstr "Řez"
 
@@ -1887,7 +1887,7 @@ msgstr "Vzor řezu"
 msgid "Cut Patterns"
 msgstr "Vzory řezu"
 
-#: crates/ui-egui/src/standards.rs:193
+#: crates/ui-egui/src/standards.rs:195
 msgid "Cut Pen"
 msgstr ""
 
@@ -1959,7 +1959,7 @@ msgstr ""
 msgid "Default 3D View"
 msgstr "Výchozí 3D pohled"
 
-#: crates/ui-egui/src/standards.rs:53
+#: crates/ui-egui/src/standards.rs:55
 msgid "Default Sheet Size:"
 msgstr ""
 
@@ -2173,7 +2173,7 @@ msgstr ""
 msgid "Dimension String Type"
 msgstr ""
 
-#: crates/ui-egui/src/standards.rs:214
+#: crates/ui-egui/src/standards.rs:216
 msgid "Dimension Terminator:"
 msgstr ""
 
@@ -2181,11 +2181,11 @@ msgstr ""
 msgid "Dimension Text"
 msgstr ""
 
-#: crates/ui-egui/src/standards.rs:221
+#: crates/ui-egui/src/standards.rs:223
 msgid "Dimension Text Placement:"
 msgstr ""
 
-#: crates/ui-egui/src/standards.rs:208
+#: crates/ui-egui/src/standards.rs:210
 msgid "Dimension lines, witness lines, terminators, text placement, and level marker symbols."
 msgstr ""
 
@@ -2539,7 +2539,7 @@ msgstr "Zadejte název pro každý typ a vzor."
 msgid "Entities"
 msgstr "Entity"
 
-#: crates/ui-egui/src/canvas.rs:2767
+#: crates/ui-egui/src/canvas.rs:2770
 msgid "Equal"
 msgstr ""
 
@@ -2702,7 +2702,7 @@ msgstr "Vzory výplně"
 msgid "Fill patterns exported to {}"
 msgstr "Vzory výplně byly exportovány do {}"
 
-#: crates/ui-egui/src/standards.rs:217
+#: crates/ui-egui/src/standards.rs:219
 msgid "Filled Arrowhead"
 msgstr ""
 
@@ -2903,7 +2903,7 @@ msgstr "Složka pro nové projekty"
 msgid "Folding"
 msgstr "Skládací"
 
-#: crates/ui-egui/src/standards.rs:165
+#: crates/ui-egui/src/standards.rs:167
 msgid "Folding Marks:"
 msgstr ""
 
@@ -3069,7 +3069,7 @@ msgstr "Geometrie"
 msgid "Glass"
 msgstr "Sklo"
 
-#: crates/ui-egui/src/standards.rs:41
+#: crates/ui-egui/src/standards.rs:43
 msgid "Governing Body:"
 msgstr ""
 
@@ -3284,15 +3284,15 @@ msgstr "IFC GlobalId"
 msgid "IFC…"
 msgstr "IFC…"
 
-#: crates/ui-egui/src/standards.rs:84
+#: crates/ui-egui/src/standards.rs:86
 msgid "ISO 128 / EN ISO 128 Line Series:"
 msgstr ""
 
-#: crates/ui-egui/src/standards.rs:135
+#: crates/ui-egui/src/standards.rs:137
 msgid "ISO 5457: 20 mm filing margin"
 msgstr ""
 
-#: crates/ui-egui/src/standards.rs:159
+#: crates/ui-egui/src/standards.rs:161
 msgid "ISO 7200: 180 mm"
 msgstr ""
 
@@ -3344,7 +3344,7 @@ msgstr "V knihovně, nikoli v prvcích k výběru: {}"
 msgid "In this plan only, not in every plan of its level"
 msgstr "Pouze v tomto půdorysu, nikoli ve všech půdorysech daného podlaží"
 
-#: crates/ui-egui/src/standards.rs:168
+#: crates/ui-egui/src/standards.rs:170
 msgid "Inactive (flat storage)"
 msgstr ""
 
@@ -3470,7 +3470,7 @@ msgstr "Středem k počátku projektu a patou k podlaží"
 msgid "Its origin on the project's origin, where its file's coordinates put it"
 msgstr "Počátkem k počátku projektu podle souřadnic v souboru"
 
-#: crates/ui-egui/src/standards.rs:97
+#: crates/ui-egui/src/standards.rs:99
 msgid "JIS Z 8310 / JIS A 0150 Line Standards:"
 msgstr ""
 
@@ -3556,7 +3556,7 @@ msgstr "Materiál křídla"
 msgid "Leaf Thickness"
 msgstr "Tloušťka křídla"
 
-#: crates/ui-egui/src/standards.rs:129
+#: crates/ui-egui/src/standards.rs:131
 msgid "Left Filing / Binding Margin:"
 msgstr ""
 
@@ -3602,7 +3602,7 @@ msgstr "Horní podlaží"
 msgid "Level Elevation"
 msgstr "Výška podlaží"
 
-#: crates/ui-egui/src/standards.rs:254
+#: crates/ui-egui/src/standards.rs:256
 msgid "Level Marker Symbol:"
 msgstr ""
 
@@ -3804,7 +3804,7 @@ msgstr "Čára umístění"
 msgid "Location Line:"
 msgstr "Čára umístění:"
 
-#: crates/ui-egui/src/canvas.rs:2734
+#: crates/ui-egui/src/canvas.rs:2737
 msgid "Lock segment {}"
 msgstr ""
 
@@ -4080,31 +4080,31 @@ msgstr "Více kategorií"
 msgid "Multiple Categories ({})"
 msgstr "Více kategorií ({})"
 
-#: crates/ui-egui/src/standards.rs:134
+#: crates/ui-egui/src/standards.rs:136
 msgid "NBR 16752: 25 mm on all formats"
 msgstr ""
 
-#: crates/ui-egui/src/standards.rs:158
+#: crates/ui-egui/src/standards.rs:160
 msgid "NBR 16752: max 178 mm"
 msgstr ""
 
-#: crates/ui-egui/src/standards.rs:76
+#: crates/ui-egui/src/standards.rs:78
 msgid "NBR 16861 / NBR 6492 Architectural Line Hierarchy:"
 msgstr ""
 
-#: crates/ui-egui/src/standards.rs:175
+#: crates/ui-egui/src/standards.rs:177
 msgid "NBR 17067 Folding Rules (Dobramento de Folha):"
 msgstr ""
 
-#: crates/ui-egui/src/standards.rs:244
+#: crates/ui-egui/src/standards.rs:246
 msgid "NBR 17068: 1 to 2 mm clearance"
 msgstr ""
 
-#: crates/ui-egui/src/standards.rs:233
+#: crates/ui-egui/src/standards.rs:235
 msgid "NBR 17068: 2 to 3 mm extension"
 msgstr ""
 
-#: crates/ui-egui/src/standards.rs:256
+#: crates/ui-egui/src/standards.rs:258
 msgid "NBR 6492: Target in plan (±0.00), equilateral triangle in section"
 msgstr ""
 
@@ -4270,7 +4270,7 @@ msgstr "Bez textury"
 msgid "No view templates yet: Create from This View makes one."
 msgstr "Dosud žádné šablony pohledů: tlačítkem Vytvořit z tohoto pohledu ji vytvoříte."
 
-#: crates/ui-egui/src/standards.rs:250
+#: crates/ui-egui/src/standards.rs:252
 msgid "Nominal Text Height:"
 msgstr ""
 
@@ -4352,7 +4352,7 @@ msgstr "Číslo"
 #: crates/ui-egui/src/properties.rs:2528
 #: crates/ui-egui/src/properties.rs:2721
 #: crates/ui-egui/src/reinforce.rs:470
-#: crates/ui-egui/src/standards.rs:333
+#: crates/ui-egui/src/standards.rs:335
 #: crates/ui-egui/src/typeprops.rs:311
 msgid "OK"
 msgstr "OK"
@@ -4491,7 +4491,7 @@ msgstr ""
 msgid "Other"
 msgstr "Ostatní"
 
-#: crates/ui-egui/src/standards.rs:141
+#: crates/ui-egui/src/standards.rs:143
 msgid "Other Borders (Top, Right, Bottom):"
 msgstr ""
 
@@ -4564,7 +4564,7 @@ msgstr "Pomalovat (PT): nanést materiál a jeho texturu na plochu, na kterou kl
 msgid "Palettes"
 msgstr "Palety"
 
-#: crates/ui-egui/src/standards.rs:122
+#: crates/ui-egui/src/standards.rs:124
 msgid "Paper sizes, sheet borders, filing margins, title blocks, and folding specifications."
 msgstr ""
 
@@ -4655,15 +4655,15 @@ msgstr "Vzory ze souboru PAT, z AutoCADu a Revitu"
 
 #: crates/ui-egui/src/lineweights.rs:49
 #: crates/ui-egui/src/lineweights.rs:111
-#: crates/ui-egui/src/standards.rs:108
+#: crates/ui-egui/src/standards.rs:110
 msgid "Pen"
 msgstr "Pero"
 
-#: crates/ui-egui/src/standards.rs:185
+#: crates/ui-egui/src/standards.rs:187
 msgid "Pen assignments by model category: how walls, columns, doors, windows, and floors draw."
 msgstr ""
 
-#: crates/ui-egui/src/standards.rs:71
+#: crates/ui-egui/src/standards.rs:73
 msgid "Pen widths conforming to the selected standard: fine, medium, and heavy line hierarchies on paper."
 msgstr ""
 
@@ -4736,7 +4736,7 @@ msgstr "Fázování (PH): fáze projektu v pořadí, filtry fází, které je zo
 msgid "Pick Faces"
 msgstr "Vybrat plochy"
 
-#: crates/ui-egui/src/canvas.rs:1620
+#: crates/ui-egui/src/canvas.rs:1623
 msgid "Pick Faces: click a face of a mass"
 msgstr "Vybrat plochy: klikněte na plochu objemu"
 
@@ -5250,7 +5250,7 @@ msgstr "Jednotky projektu (UN): způsob zobrazení a odečítání délek; aktu�
 #: crates/ui-egui/src/camera.rs:38
 #: crates/ui-egui/src/objectstyles.rs:56
 #: crates/ui-egui/src/objectstyles.rs:63
-#: crates/ui-egui/src/standards.rs:198
+#: crates/ui-egui/src/standards.rs:200
 msgid "Projection"
 msgstr "Průmět"
 
@@ -5258,7 +5258,7 @@ msgstr "Průmět"
 msgid "Projection Lines"
 msgstr "Čáry průmětu"
 
-#: crates/ui-egui/src/standards.rs:45
+#: crates/ui-egui/src/standards.rs:47
 msgid "Projection Method:"
 msgstr ""
 
@@ -5266,7 +5266,7 @@ msgstr ""
 msgid "Projection Patterns"
 msgstr "Vzory průmětu"
 
-#: crates/ui-egui/src/standards.rs:192
+#: crates/ui-egui/src/standards.rs:194
 msgid "Projection Pen"
 msgstr ""
 
@@ -5437,7 +5437,7 @@ msgstr "Referenční podlaží"
 msgid "Region"
 msgstr "Oblast"
 
-#: crates/ui-egui/src/standards.rs:37
+#: crates/ui-egui/src/standards.rs:39
 msgid "Region / Country:"
 msgstr ""
 
@@ -5575,7 +5575,7 @@ msgstr "Obnovit dočasné skrytí/izolování"
 msgid "Reset Temporary Hide/Isolate (HR)"
 msgstr "Obnovit dočasné skrytí/izolování (HR)"
 
-#: crates/ui-egui/src/standards.rs:323
+#: crates/ui-egui/src/standards.rs:325
 msgid "Reset to NBR Defaults"
 msgstr ""
 
@@ -6373,19 +6373,19 @@ msgstr "Schodiště: klikněte na místo začátku a poté na konec ramene; pode
 msgid "Stair: click where it starts, then which way it climbs"
 msgstr "Schodiště: klikněte na místo začátku a poté na směr stoupání"
 
-#: crates/ui-egui/src/standards.rs:292
+#: crates/ui-egui/src/standards.rs:293
 msgid "Standard Preset"
 msgstr ""
 
-#: crates/ui-egui/src/standards.rs:280
+#: crates/ui-egui/src/standards.rs:281
 msgid "Standard Preset:"
 msgstr ""
 
-#: crates/ui-egui/src/standards.rs:257
+#: crates/ui-egui/src/standards.rs:259
 msgid "Standard elevation marker triangle"
 msgstr ""
 
-#: crates/ui-egui/src/standards.rs:59
+#: crates/ui-egui/src/standards.rs:61
 msgid "Standards Included in this Preset:"
 msgstr ""
 
@@ -6475,7 +6475,7 @@ msgstr ""
 msgid "Suffix:"
 msgstr ""
 
-#: crates/ui-egui/src/standards.rs:49
+#: crates/ui-egui/src/standards.rs:51
 msgid "Suggested Units:"
 msgstr ""
 
@@ -6647,7 +6647,7 @@ msgstr "Dočasně izolovat kategorii"
 msgid "Temporary Isolate Element"
 msgstr "Dočasně izolovat prvek"
 
-#: crates/ui-egui/src/canvas.rs:2696
+#: crates/ui-egui/src/canvas.rs:2699
 msgid "Temporary dimension {}"
 msgstr "Dočasná kóta {}"
 
@@ -6926,7 +6926,7 @@ msgstr "Dřevo"
 msgid "Title"
 msgstr "Název"
 
-#: crates/ui-egui/src/standards.rs:153
+#: crates/ui-egui/src/standards.rs:155
 msgid "Title Block Width:"
 msgstr ""
 
@@ -7040,7 +7040,7 @@ msgstr "Oříznout/prodloužit k rohu (TR): vyberte dvě stěny nebo dvě čáry
 msgid "Turn Snap Override Off"
 msgstr "Vypnout přepsání přichycení"
 
-#: crates/ui-egui/src/canvas.rs:2647
+#: crates/ui-egui/src/canvas.rs:2650
 msgid "Turn the wall about its {}: {}"
 msgstr "Otočit stěnu kolem jejího {}: {}"
 
@@ -7477,7 +7477,7 @@ msgstr "Tlusté čáry"
 msgid "Width"
 msgstr "Šířka"
 
-#: crates/ui-egui/src/standards.rs:109
+#: crates/ui-egui/src/standards.rs:111
 msgid "Width (mm)"
 msgstr ""
 
@@ -7533,7 +7533,7 @@ msgstr ""
 msgid "Witness Line Gap to Element"
 msgstr ""
 
-#: crates/ui-egui/src/standards.rs:239
+#: crates/ui-egui/src/standards.rs:241
 msgid "Witness Line Gap:"
 msgstr ""
 
@@ -7541,7 +7541,7 @@ msgstr ""
 msgid "Witness Line Length"
 msgstr ""
 
-#: crates/ui-egui/src/standards.rs:228
+#: crates/ui-egui/src/standards.rs:230
 msgid "Witness Line Overshoot:"
 msgstr ""
 
@@ -7581,15 +7581,15 @@ msgstr "Cik-cak"
 msgid "Zoom"
 msgstr "Zoom"
 
-#: crates/ui-egui/src/canvas.rs:1420
+#: crates/ui-egui/src/canvas.rs:1423
 msgid "Zoom In"
 msgstr "Přiblížit"
 
-#: crates/ui-egui/src/canvas.rs:1423
+#: crates/ui-egui/src/canvas.rs:1426
 msgid "Zoom Out"
 msgstr "Oddálit"
 
-#: crates/ui-egui/src/canvas.rs:1417
+#: crates/ui-egui/src/canvas.rs:1420
 #: crates/ui-egui/src/orbit.rs:419
 msgid "Zoom to Fit"
 msgstr "Přizpůsobit oknu"
@@ -7600,10 +7600,10 @@ msgstr "`{}` není platná výška"
 
 #: crates/ui-egui/src/camera.rs:52
 #: crates/ui-egui/src/camera.rs:62
-#: crates/ui-egui/src/canvas.rs:2465
-#: crates/ui-egui/src/canvas.rs:2845
-#: crates/ui-egui/src/canvas.rs:2919
-#: crates/ui-egui/src/canvas.rs:2939
+#: crates/ui-egui/src/canvas.rs:2468
+#: crates/ui-egui/src/canvas.rs:2848
+#: crates/ui-egui/src/canvas.rs:2922
+#: crates/ui-egui/src/canvas.rs:2942
 #: crates/ui-egui/src/draw.rs:258
 #: crates/ui-egui/src/draw.rs:259
 #: crates/ui-egui/src/draw.rs:260
@@ -7647,7 +7647,7 @@ msgstr "`{}` není rozměr, úhel ani odsazení"
 msgid "`{}` is not a spacing"
 msgstr "`{}` není platná rozteč"
 
-#: crates/ui-egui/src/canvas.rs:2674
+#: crates/ui-egui/src/canvas.rs:2677
 msgid "`{}` is not an angle"
 msgstr "`{}` není úhel"
 
@@ -7675,7 +7675,7 @@ msgstr ""
 msgid "a whole number"
 msgstr ""
 
-#: crates/ui-egui/src/canvas.rs:972
+#: crates/ui-egui/src/canvas.rs:975
 msgid "align"
 msgstr ""
 
@@ -7691,7 +7691,7 @@ msgstr "oblouk"
 msgid "begins with"
 msgstr "začíná na"
 
-#: crates/ui-egui/src/canvas.rs:2046
+#: crates/ui-egui/src/canvas.rs:2049
 msgid "ceiling: `{}` is not a height"
 msgstr "podhled: `{}` není platná výška"
 
@@ -7699,15 +7699,15 @@ msgstr "podhled: `{}` není platná výška"
 msgid "circle"
 msgstr "kružnice"
 
-#: crates/ui-egui/src/canvas.rs:2092
+#: crates/ui-egui/src/canvas.rs:2095
 msgid "click its line's end"
 msgstr "klikněte na konec její čáry"
 
-#: crates/ui-egui/src/canvas.rs:2116
+#: crates/ui-egui/src/canvas.rs:2119
 msgid "click where its run ends"
 msgstr "klikněte na místo, kde končí její rameno"
 
-#: crates/ui-egui/src/canvas.rs:1877
+#: crates/ui-egui/src/canvas.rs:1880
 msgid "column: {}"
 msgstr "sloup: {}"
 
@@ -7747,7 +7747,7 @@ msgstr "nekončí na"
 msgid "does not equal"
 msgstr "nerovná se"
 
-#: crates/ui-egui/src/canvas.rs:2010
+#: crates/ui-egui/src/canvas.rs:2013
 msgid "dormer: the width `{}`, the height `{}` and the slope `{}` must be numbers"
 msgstr "vikýř: šířka `{}`, výška `{}` a sklon `{}` musí být čísla"
 
@@ -7807,7 +7807,7 @@ msgstr "podlaží: `{}` není platná výšková kóta"
 msgid "line"
 msgstr "čára"
 
-#: crates/ui-egui/src/canvas.rs:2279
+#: crates/ui-egui/src/canvas.rs:2282
 msgid "mass: {}"
 msgstr "objem: {}"
 
@@ -7815,12 +7815,12 @@ msgstr "objem: {}"
 msgid "material"
 msgstr "materiál"
 
-#: crates/ui-egui/src/canvas.rs:1708
-#: crates/ui-egui/src/canvas.rs:2356
+#: crates/ui-egui/src/canvas.rs:1711
+#: crates/ui-egui/src/canvas.rs:2359
 msgid "offset: `{}` is not a distance"
 msgstr "odsazení: `{}` není platná vzdálenost"
 
-#: crates/ui-egui/src/canvas.rs:2352
+#: crates/ui-egui/src/canvas.rs:2355
 msgid "offset: it offsets straight walls"
 msgstr "odsazení: odsadí přímé stěny"
 
@@ -7848,23 +7848,23 @@ msgstr "obrázek"
 msgid "polyline"
 msgstr "křivka"
 
-#: crates/ui-egui/src/canvas.rs:2134
+#: crates/ui-egui/src/canvas.rs:2137
 msgid "ramp: `{}` is not a slope"
 msgstr "rampa: `{}` není platný sklon"
 
-#: crates/ui-egui/src/canvas.rs:2135
+#: crates/ui-egui/src/canvas.rs:2138
 msgid "ramp: `{}` is not a width"
 msgstr "rampa: `{}` není platná šířka"
 
-#: crates/ui-egui/src/canvas.rs:2136
+#: crates/ui-egui/src/canvas.rs:2139
 msgid "ramp: {}"
 msgstr "rampa: {}"
 
-#: crates/ui-egui/src/canvas.rs:2093
+#: crates/ui-egui/src/canvas.rs:2096
 msgid "roof: `{}` is not a slope"
 msgstr "střecha: `{}` není platný sklon"
 
-#: crates/ui-egui/src/canvas.rs:1962
+#: crates/ui-egui/src/canvas.rs:1965
 msgid "roof: the slope `{}` and the overhang `{}` must be numbers"
 msgstr "střecha: sklon `{}` a přesah `{}` musí být čísla"
 
@@ -7904,11 +7904,11 @@ msgstr "nejprve vyberte prvky ke skrytí nebo izolování"
 msgid "select what to move, copy, rotate or mirror first"
 msgstr "nejprve vyberte prvky k přesunutí, zkopírování, otočení nebo zrcadlení"
 
-#: crates/ui-egui/src/canvas.rs:2062
+#: crates/ui-egui/src/canvas.rs:2065
 msgid "shaft: {}"
 msgstr "šachta: {}"
 
-#: crates/ui-egui/src/canvas.rs:2080
+#: crates/ui-egui/src/canvas.rs:2083
 msgid "slope arrow: `{}` is not a slope"
 msgstr "šipka sklonu: `{}` není platný sklon"
 
@@ -7916,15 +7916,15 @@ msgstr "šipka sklonu: `{}` není platný sklon"
 msgid "spline"
 msgstr "křivka spline"
 
-#: crates/ui-egui/src/canvas.rs:2157
+#: crates/ui-egui/src/canvas.rs:2160
 msgid "stair: `{}` is not a width"
 msgstr "schodiště: `{}` není platná šířka"
 
-#: crates/ui-egui/src/standards.rs:245
+#: crates/ui-egui/src/standards.rs:247
 msgid "standard gap"
 msgstr ""
 
-#: crates/ui-egui/src/standards.rs:234
+#: crates/ui-egui/src/standards.rs:236
 msgid "standard overshoot"
 msgstr ""
 
@@ -7936,7 +7936,7 @@ msgstr "začátek"
 msgid "the next free name"
 msgstr "další volný název"
 
-#: crates/ui-egui/src/canvas.rs:2918
+#: crates/ui-egui/src/canvas.rs:2921
 msgid "the opening has to stay on its wall"
 msgstr "otvor musí zůstat na své stěně"
 
@@ -7983,7 +7983,7 @@ msgstr "vizuální styly jsou určeny pro 3D pohled: otevřete jej z Prohlíže�
 msgid "void"
 msgstr "vybrání"
 
-#: crates/ui-egui/src/canvas.rs:2500
+#: crates/ui-egui/src/canvas.rs:2503
 msgid "wall: {}"
 msgstr "stěna: {}"
 
@@ -8075,11 +8075,11 @@ msgstr "{} rodin čar"
 msgid "{} min ago"
 msgstr "Před {} min"
 
-#: crates/ui-egui/src/standards.rs:145
+#: crates/ui-egui/src/standards.rs:147
 msgid "{} mm for A0/A1"
 msgstr ""
 
-#: crates/ui-egui/src/standards.rs:146
+#: crates/ui-egui/src/standards.rs:148
 msgid "{} mm for A2-A4"
 msgstr ""
 
@@ -8087,7 +8087,7 @@ msgstr ""
 msgid "{} months ago"
 msgstr "Před {} měsíci"
 
-#: crates/ui-egui/src/canvas.rs:3009
+#: crates/ui-egui/src/canvas.rs:3012
 msgid "{} of {} risers"
 msgstr "{} z {} stupňů"
 
@@ -8119,7 +8119,7 @@ msgstr "Vybráno: {}."
 msgid "{} triangles, from a file"
 msgstr "{} trojúhelníků, ze souboru"
 
-#: crates/ui-egui/src/canvas.rs:3011
+#: crates/ui-egui/src/canvas.rs:3014
 msgid "{} up"
 msgstr "{} nahoru"
 
@@ -8227,71 +8227,71 @@ msgstr "{}: Barva: {}"
 msgid "{}; and {} more"
 msgstr "{}; a {} dalších"
 
-#: crates/ui-egui/src/standards.rs:178
+#: crates/ui-egui/src/standards.rs:180
 msgid "• 25 mm left binding margin is preserved without punching through drawing contents."
 msgstr ""
 
-#: crates/ui-egui/src/standards.rs:88
+#: crates/ui-egui/src/standards.rs:90
 msgid "• Annotation and hatching: 0.18 mm (Pen 3 / 4)."
 msgstr ""
 
-#: crates/ui-egui/src/standards.rs:86
+#: crates/ui-egui/src/standards.rs:88
 msgid "• Cut lines: 0.50 mm (Pen 10) for main building elements."
 msgstr ""
 
-#: crates/ui-egui/src/standards.rs:81
+#: crates/ui-egui/src/standards.rs:83
 msgid "• Extra fine line (0.13 mm — Pen 1): Material hatching and floor tile patterns."
 msgstr ""
 
-#: crates/ui-egui/src/standards.rs:176
+#: crates/ui-egui/src/standards.rs:178
 msgid "• Final folded format is A4 (210 mm x 297 mm) for vertical filing and binder archival."
 msgstr ""
 
-#: crates/ui-egui/src/standards.rs:80
+#: crates/ui-egui/src/standards.rs:82
 msgid "• Fine line (0.18 mm — Pen 3 / 4): Projections, dimension lines, witness lines, grid lines, and axes."
 msgstr ""
 
-#: crates/ui-egui/src/standards.rs:179
+#: crates/ui-egui/src/standards.rs:181
 msgid "• Large formats (A0, A1, A2) include a 105 mm triangular ear fold on top-left."
 msgstr ""
 
-#: crates/ui-egui/src/standards.rs:93
+#: crates/ui-egui/src/standards.rs:95
 msgid "• Medium (0.35 mm): Secondary elements, fixtures, and door swings."
 msgstr ""
 
-#: crates/ui-egui/src/standards.rs:79
+#: crates/ui-egui/src/standards.rs:81
 msgid "• Medium line (0.35 mm — Pen 7): Doors, windows, millwork, and stair risers."
 msgstr ""
 
-#: crates/ui-egui/src/standards.rs:87
+#: crates/ui-egui/src/standards.rs:89
 msgid "• Outlines in view: 0.25 mm (Pen 5) or 0.35 mm (Pen 7)."
 msgstr ""
 
-#: crates/ui-egui/src/standards.rs:98
+#: crates/ui-egui/src/standards.rs:100
 msgid "• Standard line groups: 0.18, 0.25, 0.35, 0.50, 0.70 mm."
 msgstr ""
 
-#: crates/ui-egui/src/standards.rs:85
+#: crates/ui-egui/src/standards.rs:87
 msgid "• Standard line width ratio 1 : √2 (0.18, 0.25, 0.35, 0.50, 0.70, 1.00 mm)."
 msgstr ""
 
-#: crates/ui-egui/src/standards.rs:77
+#: crates/ui-egui/src/standards.rs:79
 msgid "• Thick line (0.50 mm — Pen 10): Walls and structural elements cut in plan and section."
 msgstr ""
 
-#: crates/ui-egui/src/standards.rs:94
+#: crates/ui-egui/src/standards.rs:96
 msgid "• Thin / Fine (0.18 mm — 0.25 mm): Dimension lines, witness lines, text notes, and crosshatching."
 msgstr ""
 
-#: crates/ui-egui/src/standards.rs:177
+#: crates/ui-egui/src/standards.rs:179
 msgid "• Title block (legenda) is located at bottom right and remains visible on the folded cover."
 msgstr ""
 
-#: crates/ui-egui/src/standards.rs:78
+#: crates/ui-egui/src/standards.rs:80
 msgid "• Very thick line (0.70 mm — Pen 12): Prominent structural reinforced concrete columns and beams cut."
 msgstr ""
 
-#: crates/ui-egui/src/standards.rs:92
+#: crates/ui-egui/src/standards.rs:94
 msgid "• Wide / Heavy (0.50 mm — 0.70 mm): Cut walls and structural sections."
 msgstr ""
 

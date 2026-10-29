@@ -3,7 +3,9 @@
 
 use bimcraft_core::model::Model;
 use bimcraft_core::standards::TechnicalStandard;
-use egui::{Align, ComboBox, Context, Grid, Id as UiId, Layout, Modal, RichText, ScrollArea, Ui, WidgetInfo, WidgetType};
+use egui::{Align, ComboBox, Context, Grid, Id as UiId, Layout, RichText, ScrollArea, Ui, WidgetInfo, WidgetType};
+
+use crate::popup::{self, Modal};
 use serde_json::json;
 
 use crate::BimApp;
@@ -266,9 +268,8 @@ impl BimApp {
         let Some(mut d) = self.standards_dialog.take() else { return };
         let (mut ok, mut apply, mut cancel) = (false, false, false);
 
-        let r = Modal::new(UiId::new("technical-standards-dialog")).show(ctx, |ui| {
-            ui.set_width(740.0);
-            ui.label(RichText::new(t("Technical Standards")).heading());
+        let r = Modal::new(UiId::new("technical-standards-dialog"), t("Technical Standards")).width(740.0).show(ctx, |ui| {
+          popup::body(ui, |ui| {
             ui.add_space(4.0);
             ui.label(t(
                 "Configure national and international technical drawing standards (NBR, ISO, ANSI, EU). Adapting the program applies standard line weights, sheet formats, object styles, and dimensioning conventions.",
@@ -318,7 +319,8 @@ impl BimApp {
                 ui.checkbox(&mut d.adapt_units, t("Adapt Project Units"));
             });
 
-            ui.add_space(8.0);
+          });
+          popup::footer(ui, |ui| {
             ui.horizontal(|ui| {
                 if ui.button(t("Reset to NBR Defaults")).clicked() {
                     d.selected = TechnicalStandard::Nbr;
@@ -333,6 +335,7 @@ impl BimApp {
                     ok = ui.button(t("OK")).clicked();
                 });
             });
+          });
         });
 
         if ok || apply {

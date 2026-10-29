@@ -20,7 +20,7 @@ msgstr " Movido {}, {} mm para trazê-lo perto da origem."
 msgid "(none)"
 msgstr "(nenhum)"
 
-#: crates/ui-egui/src/standards.rs:136
+#: crates/ui-egui/src/standards.rs:138
 msgid "0.75 in (19.05 mm) binding margin"
 msgstr "0,75 pol (19,05 mm) margem de fixação"
 
@@ -45,7 +45,7 @@ msgstr "Vistas 3D"
 msgid "3D view resolution"
 msgstr "Resolução da vista 3D"
 
-#: crates/ui-egui/src/standards.rs:216
+#: crates/ui-egui/src/standards.rs:218
 msgid "45° Oblique Stroke (Tick)"
 msgstr "Traço oblíquo a 45° (Tick)"
 
@@ -148,11 +148,11 @@ msgstr "Uma vista sempre tem uma escala"
 msgid "A wall's centre line, so a wall drawn on it meets it"
 msgstr "O eixo central de uma parede, para que uma parede desenhada nele se encontre com ela"
 
-#: crates/ui-egui/src/standards.rs:160
+#: crates/ui-egui/src/standards.rs:162
 msgid "ASME / AIA: 180 mm"
 msgstr "ASME / AIA: 180 mm"
 
-#: crates/ui-egui/src/standards.rs:91
+#: crates/ui-egui/src/standards.rs:93
 msgid "ASME Y14.2 & AIA CAD National CAD Standard (NCS):"
 msgstr "ASME Y14.2 & AIA CAD National CAD Standard (NCS):"
 
@@ -162,7 +162,7 @@ msgstr "ASME Y14.2 & AIA CAD National CAD Standard (NCS):"
 msgid "Above"
 msgstr "Acima"
 
-#: crates/ui-egui/src/standards.rs:223
+#: crates/ui-egui/src/standards.rs:225
 msgid "Above dimension line (continuous)"
 msgstr "Acima da linha de cota (contínua)"
 
@@ -178,7 +178,7 @@ msgstr "Aceitar a principal"
 msgid "Accept Primary: the primary option's elements stay in the model; the others' elements and the set go"
 msgstr "Aceitar a principal: os elementos da opção principal ficam no modelo; os das outras e o conjunto saem"
 
-#: crates/ui-egui/src/standards.rs:167
+#: crates/ui-egui/src/standards.rs:169
 msgid "Active (NBR 17067: A4 module folding with ear)"
 msgstr "Ativas (NBR 17067: dobra em módulo A4 com orelha)"
 
@@ -202,15 +202,15 @@ msgstr "Largura real do lance"
 msgid "Actual Tread Depth"
 msgstr "Profundidade real do piso"
 
-#: crates/ui-egui/src/standards.rs:316
+#: crates/ui-egui/src/standards.rs:317
 msgid "Adapt Line Weights"
 msgstr "Adaptar espessuras de linha"
 
-#: crates/ui-egui/src/standards.rs:317
+#: crates/ui-egui/src/standards.rs:318
 msgid "Adapt Object Styles"
 msgstr "Adaptar estilos de objeto"
 
-#: crates/ui-egui/src/standards.rs:318
+#: crates/ui-egui/src/standards.rs:319
 msgid "Adapt Project Units"
 msgstr "Adaptar unidades do projeto"
 
@@ -433,7 +433,7 @@ msgstr "Categorias de anotação"
 msgid "Annotation Line Weights"
 msgstr "Espessuras de linha de anotação"
 
-#: crates/ui-egui/src/standards.rs:104
+#: crates/ui-egui/src/standards.rs:106
 msgid "Annotation Pens (mm on paper):"
 msgstr "Penas de anotação (mm no papel):"
 
@@ -447,7 +447,7 @@ msgstr "Pena de anotação {}"
 #: crates/ui-egui/src/lineweights.rs:150
 #: crates/ui-egui/src/objectstyles.rs:78
 #: crates/ui-egui/src/properties.rs:986
-#: crates/ui-egui/src/standards.rs:331
+#: crates/ui-egui/src/standards.rs:333
 #: crates/ui-egui/src/typeprops.rs:309
 msgid "Apply"
 msgstr "Aplicar"
@@ -882,7 +882,7 @@ msgstr "Câmera"
 #: crates/ui-egui/src/reinforce.rs:469
 #: crates/ui-egui/src/shortcuts.rs:398
 #: crates/ui-egui/src/shortcuts.rs:526
-#: crates/ui-egui/src/standards.rs:332
+#: crates/ui-egui/src/standards.rs:334
 #: crates/ui-egui/src/typeprops.rs:310
 msgid "Cancel"
 msgstr "Cancelar"
@@ -927,7 +927,7 @@ msgstr "As categorias sem substituição são desenhadas como os Estilos de obje
 #: crates/ui-egui/src/editor.rs:926
 #: crates/ui-egui/src/objectstyles.rs:55
 #: crates/ui-egui/src/properties.rs:1533
-#: crates/ui-egui/src/standards.rs:191
+#: crates/ui-egui/src/standards.rs:193
 msgid "Category"
 msgstr "Categoria"
 
@@ -975,7 +975,7 @@ msgstr "Arco centro-extremidades"
 msgid "Center-ends Arc: click its centre, its start, then where it ends"
 msgstr "Arco centro-extremidades: clique no centro, no início e depois onde termina"
 
-#: crates/ui-egui/src/standards.rs:224
+#: crates/ui-egui/src/standards.rs:226
 msgid "Centered in dimension line break"
 msgstr "Centralizado na quebra da linha de cota"
 
@@ -1622,7 +1622,7 @@ msgstr "Eletrodutos e fios"
 msgid "Conduit (CN): click its start and its end; a chain of clicks makes a conduit for each step"
 msgstr "Eletroduto (CN): clique no início e no fim; uma sequência de cliques faz um eletroduto para cada trecho"
 
-#: crates/ui-egui/src/standards.rs:274
+#: crates/ui-egui/src/standards.rs:275
 msgid "Configure national and international technical drawing standards (NBR, ISO, ANSI, EU). Adapting the program applies standard line weights, sheet formats, object styles, and dimensioning conventions."
 msgstr "Configure normas técnicas nacionais e internacionais de desenho (NBR, ISO, ANSI, EU). Adaptar o programa aplica espessuras de linha, formatos de folha, estilos de objeto e convenções de cotagem padrão."
 
@@ -1872,7 +1872,7 @@ msgstr "Personalizada"
 
 #: crates/ui-egui/src/objectstyles.rs:57
 #: crates/ui-egui/src/objectstyles.rs:64
-#: crates/ui-egui/src/standards.rs:199
+#: crates/ui-egui/src/standards.rs:201
 msgid "Cut"
 msgstr "Corte"
 
@@ -1888,7 +1888,7 @@ msgstr "Padrão de corte"
 msgid "Cut Patterns"
 msgstr "Padrões de corte"
 
-#: crates/ui-egui/src/standards.rs:193
+#: crates/ui-egui/src/standards.rs:195
 msgid "Cut Pen"
 msgstr "Pena de corte"
 
@@ -1960,7 +1960,7 @@ msgstr "Casas decimais"
 msgid "Default 3D View"
 msgstr "Vista 3D padrão"
 
-#: crates/ui-egui/src/standards.rs:53
+#: crates/ui-egui/src/standards.rs:55
 msgid "Default Sheet Size:"
 msgstr "Formato padrão de folha:"
 
@@ -2174,7 +2174,7 @@ msgstr "Extensão da linha de cota"
 msgid "Dimension String Type"
 msgstr "Tipo de cadeia de cotas"
 
-#: crates/ui-egui/src/standards.rs:214
+#: crates/ui-egui/src/standards.rs:216
 msgid "Dimension Terminator:"
 msgstr "Terminador de cota:"
 
@@ -2182,11 +2182,11 @@ msgstr "Terminador de cota:"
 msgid "Dimension Text"
 msgstr "Texto da cota"
 
-#: crates/ui-egui/src/standards.rs:221
+#: crates/ui-egui/src/standards.rs:223
 msgid "Dimension Text Placement:"
 msgstr "Posicionamento do texto de cota:"
 
-#: crates/ui-egui/src/standards.rs:208
+#: crates/ui-egui/src/standards.rs:210
 msgid "Dimension lines, witness lines, terminators, text placement, and level marker symbols."
 msgstr "Linhas de cota, linhas de extensão, terminadores, posicionamento de texto e símbolos de nível."
 
@@ -2540,7 +2540,7 @@ msgstr "Insira um nome para cada tipo e padrão."
 msgid "Entities"
 msgstr "Entidades"
 
-#: crates/ui-egui/src/canvas.rs:2767
+#: crates/ui-egui/src/canvas.rs:2770
 msgid "Equal"
 msgstr "Igual"
 
@@ -2703,7 +2703,7 @@ msgstr "Padrões de preenchimento"
 msgid "Fill patterns exported to {}"
 msgstr "Padrões de preenchimento exportados para {}"
 
-#: crates/ui-egui/src/standards.rs:217
+#: crates/ui-egui/src/standards.rs:219
 msgid "Filled Arrowhead"
 msgstr "Seta cheia"
 
@@ -2904,7 +2904,7 @@ msgstr "Pasta para novos projetos"
 msgid "Folding"
 msgstr "Camarão"
 
-#: crates/ui-egui/src/standards.rs:165
+#: crates/ui-egui/src/standards.rs:167
 msgid "Folding Marks:"
 msgstr "Marcas de dobramento:"
 
@@ -3070,7 +3070,7 @@ msgstr "Geometria"
 msgid "Glass"
 msgstr "Vidro"
 
-#: crates/ui-egui/src/standards.rs:41
+#: crates/ui-egui/src/standards.rs:43
 msgid "Governing Body:"
 msgstr "Órgão normalizador:"
 
@@ -3285,15 +3285,15 @@ msgstr "GlobalId IFC"
 msgid "IFC…"
 msgstr "IFC…"
 
-#: crates/ui-egui/src/standards.rs:84
+#: crates/ui-egui/src/standards.rs:86
 msgid "ISO 128 / EN ISO 128 Line Series:"
 msgstr "Série de linhas ISO 128 / EN ISO 128:"
 
-#: crates/ui-egui/src/standards.rs:135
+#: crates/ui-egui/src/standards.rs:137
 msgid "ISO 5457: 20 mm filing margin"
 msgstr "ISO 5457: margem de 20 mm para arquivamento"
 
-#: crates/ui-egui/src/standards.rs:159
+#: crates/ui-egui/src/standards.rs:161
 msgid "ISO 7200: 180 mm"
 msgstr "ISO 7200: 180 mm"
 
@@ -3345,7 +3345,7 @@ msgstr "Na biblioteca, não elementos a selecionar: {}"
 msgid "In this plan only, not in every plan of its level"
 msgstr "Somente nesta planta, não em todas as plantas do seu nível"
 
-#: crates/ui-egui/src/standards.rs:168
+#: crates/ui-egui/src/standards.rs:170
 msgid "Inactive (flat storage)"
 msgstr "Inativas (armazenamento plano)"
 
@@ -3471,7 +3471,7 @@ msgstr "O meio dele na origem do projeto e a base dele no nível"
 msgid "Its origin on the project's origin, where its file's coordinates put it"
 msgstr "Sua origem na origem do projeto, onde as coordenadas do arquivo o colocam"
 
-#: crates/ui-egui/src/standards.rs:97
+#: crates/ui-egui/src/standards.rs:99
 msgid "JIS Z 8310 / JIS A 0150 Line Standards:"
 msgstr "Normas de linhas JIS Z 8310 / JIS A 0150:"
 
@@ -3557,7 +3557,7 @@ msgstr "Material da folha"
 msgid "Leaf Thickness"
 msgstr "Espessura da folha"
 
-#: crates/ui-egui/src/standards.rs:129
+#: crates/ui-egui/src/standards.rs:131
 msgid "Left Filing / Binding Margin:"
 msgstr "Margem esquerda de fixação / arquivamento:"
 
@@ -3603,7 +3603,7 @@ msgstr "Nível acima"
 msgid "Level Elevation"
 msgstr "Elevação do nível"
 
-#: crates/ui-egui/src/standards.rs:254
+#: crates/ui-egui/src/standards.rs:256
 msgid "Level Marker Symbol:"
 msgstr "Símbolo de nível:"
 
@@ -3805,7 +3805,7 @@ msgstr "Linha de localização"
 msgid "Location Line:"
 msgstr "Linha de localização:"
 
-#: crates/ui-egui/src/canvas.rs:2734
+#: crates/ui-egui/src/canvas.rs:2737
 msgid "Lock segment {}"
 msgstr "Bloquear segmento {}"
 
@@ -4081,31 +4081,31 @@ msgstr "Várias categorias"
 msgid "Multiple Categories ({})"
 msgstr "Várias categorias ({})"
 
-#: crates/ui-egui/src/standards.rs:134
+#: crates/ui-egui/src/standards.rs:136
 msgid "NBR 16752: 25 mm on all formats"
 msgstr "NBR 16752: 25 mm em todos os formatos"
 
-#: crates/ui-egui/src/standards.rs:158
+#: crates/ui-egui/src/standards.rs:160
 msgid "NBR 16752: max 178 mm"
 msgstr "NBR 16752: máx. 178 mm"
 
-#: crates/ui-egui/src/standards.rs:76
+#: crates/ui-egui/src/standards.rs:78
 msgid "NBR 16861 / NBR 6492 Architectural Line Hierarchy:"
 msgstr "Hierarquia de linhas arquitetônicas da NBR 16861 / NBR 6492:"
 
-#: crates/ui-egui/src/standards.rs:175
+#: crates/ui-egui/src/standards.rs:177
 msgid "NBR 17067 Folding Rules (Dobramento de Folha):"
 msgstr "Regras de dobramento da NBR 17067:"
 
-#: crates/ui-egui/src/standards.rs:244
+#: crates/ui-egui/src/standards.rs:246
 msgid "NBR 17068: 1 to 2 mm clearance"
 msgstr "NBR 17068: afastamento de 1 a 2 mm"
 
-#: crates/ui-egui/src/standards.rs:233
+#: crates/ui-egui/src/standards.rs:235
 msgid "NBR 17068: 2 to 3 mm extension"
 msgstr "NBR 17068: prolongamento de 2 a 3 mm"
 
-#: crates/ui-egui/src/standards.rs:256
+#: crates/ui-egui/src/standards.rs:258
 msgid "NBR 6492: Target in plan (±0.00), equilateral triangle in section"
 msgstr "NBR 6492: Alvo em planta (±0,00), triângulo equilátero em corte"
 
@@ -4271,7 +4271,7 @@ msgstr "Sem textura"
 msgid "No view templates yet: Create from This View makes one."
 msgstr "Ainda não há modelos de vista: Criar a partir desta vista cria um."
 
-#: crates/ui-egui/src/standards.rs:250
+#: crates/ui-egui/src/standards.rs:252
 msgid "Nominal Text Height:"
 msgstr "Altura nominal do texto:"
 
@@ -4353,7 +4353,7 @@ msgstr "Número"
 #: crates/ui-egui/src/properties.rs:2528
 #: crates/ui-egui/src/properties.rs:2721
 #: crates/ui-egui/src/reinforce.rs:470
-#: crates/ui-egui/src/standards.rs:333
+#: crates/ui-egui/src/standards.rs:335
 #: crates/ui-egui/src/typeprops.rs:311
 msgid "OK"
 msgstr "OK"
@@ -4492,7 +4492,7 @@ msgstr "Guias ortogonais"
 msgid "Other"
 msgstr "Outros"
 
-#: crates/ui-egui/src/standards.rs:141
+#: crates/ui-egui/src/standards.rs:143
 msgid "Other Borders (Top, Right, Bottom):"
 msgstr "Outras margens (superior, direita, inferior):"
 
@@ -4565,7 +4565,7 @@ msgstr "Pintar (PT): aplica um material, e sua textura, na face clicada na vista
 msgid "Palettes"
 msgstr "Paletas"
 
-#: crates/ui-egui/src/standards.rs:122
+#: crates/ui-egui/src/standards.rs:124
 msgid "Paper sizes, sheet borders, filing margins, title blocks, and folding specifications."
 msgstr "Formatos de papel, margens de folha, margens de fixação, carimbos e especificações de dobramento."
 
@@ -4656,15 +4656,15 @@ msgstr "Padrões de um arquivo PAT, do AutoCAD e do Revit"
 
 #: crates/ui-egui/src/lineweights.rs:49
 #: crates/ui-egui/src/lineweights.rs:111
-#: crates/ui-egui/src/standards.rs:108
+#: crates/ui-egui/src/standards.rs:110
 msgid "Pen"
 msgstr "Pena"
 
-#: crates/ui-egui/src/standards.rs:185
+#: crates/ui-egui/src/standards.rs:187
 msgid "Pen assignments by model category: how walls, columns, doors, windows, and floors draw."
 msgstr "Atribuição de penas por categoria de modelo: como paredes, pilares, portas, janelas e pisos desenham."
 
-#: crates/ui-egui/src/standards.rs:71
+#: crates/ui-egui/src/standards.rs:73
 msgid "Pen widths conforming to the selected standard: fine, medium, and heavy line hierarchies on paper."
 msgstr "Espessuras de traço em conformidade com a norma selecionada: hierarquia de linhas finas, médias e grossas no papel."
 
@@ -4737,7 +4737,7 @@ msgstr "Fases (PH): as fases do projeto em ordem, os filtros de fase que as most
 msgid "Pick Faces"
 msgstr "Selecionar faces"
 
-#: crates/ui-egui/src/canvas.rs:1620
+#: crates/ui-egui/src/canvas.rs:1623
 msgid "Pick Faces: click a face of a mass"
 msgstr "Selecionar faces: clique uma face de um volume"
 
@@ -5251,7 +5251,7 @@ msgstr "Unidades do projeto (UN): como os comprimentos aparecem e são lidos; ag
 #: crates/ui-egui/src/camera.rs:38
 #: crates/ui-egui/src/objectstyles.rs:56
 #: crates/ui-egui/src/objectstyles.rs:63
-#: crates/ui-egui/src/standards.rs:198
+#: crates/ui-egui/src/standards.rs:200
 msgid "Projection"
 msgstr "Projeção"
 
@@ -5259,7 +5259,7 @@ msgstr "Projeção"
 msgid "Projection Lines"
 msgstr "Linhas de projeção"
 
-#: crates/ui-egui/src/standards.rs:45
+#: crates/ui-egui/src/standards.rs:47
 msgid "Projection Method:"
 msgstr "Método de projeção:"
 
@@ -5267,7 +5267,7 @@ msgstr "Método de projeção:"
 msgid "Projection Patterns"
 msgstr "Padrões de projeção"
 
-#: crates/ui-egui/src/standards.rs:192
+#: crates/ui-egui/src/standards.rs:194
 msgid "Projection Pen"
 msgstr "Pena de projeção"
 
@@ -5438,7 +5438,7 @@ msgstr "Nível de referência"
 msgid "Region"
 msgstr "Região"
 
-#: crates/ui-egui/src/standards.rs:37
+#: crates/ui-egui/src/standards.rs:39
 msgid "Region / Country:"
 msgstr "Região / País:"
 
@@ -5576,7 +5576,7 @@ msgstr "Redefinir Ocultar/Isolar Temporário"
 msgid "Reset Temporary Hide/Isolate (HR)"
 msgstr "Redefinir Ocultar/Isolar Temporário (HR)"
 
-#: crates/ui-egui/src/standards.rs:323
+#: crates/ui-egui/src/standards.rs:325
 msgid "Reset to NBR Defaults"
 msgstr "Redefinir para padrão NBR"
 
@@ -6374,19 +6374,19 @@ msgstr "Escada: clique onde ela começa e depois onde o lance termina; um patama
 msgid "Stair: click where it starts, then which way it climbs"
 msgstr "Escada: clique onde ela começa e depois na direção em que sobe"
 
-#: crates/ui-egui/src/standards.rs:292
+#: crates/ui-egui/src/standards.rs:293
 msgid "Standard Preset"
 msgstr "Conjunto de normas"
 
-#: crates/ui-egui/src/standards.rs:280
+#: crates/ui-egui/src/standards.rs:281
 msgid "Standard Preset:"
 msgstr "Conjunto de normas:"
 
-#: crates/ui-egui/src/standards.rs:257
+#: crates/ui-egui/src/standards.rs:259
 msgid "Standard elevation marker triangle"
 msgstr "Triângulo padrão de elevação"
 
-#: crates/ui-egui/src/standards.rs:59
+#: crates/ui-egui/src/standards.rs:61
 msgid "Standards Included in this Preset:"
 msgstr "Normas incluídas neste conjunto:"
 
@@ -6476,7 +6476,7 @@ msgstr "Sufixo"
 msgid "Suffix:"
 msgstr "Sufixo:"
 
-#: crates/ui-egui/src/standards.rs:49
+#: crates/ui-egui/src/standards.rs:51
 msgid "Suggested Units:"
 msgstr "Unidades sugeridas:"
 
@@ -6648,7 +6648,7 @@ msgstr "Isolar Categoria Temporariamente"
 msgid "Temporary Isolate Element"
 msgstr "Isolar Elemento Temporariamente"
 
-#: crates/ui-egui/src/canvas.rs:2696
+#: crates/ui-egui/src/canvas.rs:2699
 msgid "Temporary dimension {}"
 msgstr "Cota temporária {}"
 
@@ -6927,7 +6927,7 @@ msgstr "Madeira"
 msgid "Title"
 msgstr "Título"
 
-#: crates/ui-egui/src/standards.rs:153
+#: crates/ui-egui/src/standards.rs:155
 msgid "Title Block Width:"
 msgstr "Largura da legenda / carimbo:"
 
@@ -7041,7 +7041,7 @@ msgstr "Aparar/Estender para canto (TR): escolha duas paredes ou duas linhas, na
 msgid "Turn Snap Override Off"
 msgstr "Cancelar a exceção de snap"
 
-#: crates/ui-egui/src/canvas.rs:2647
+#: crates/ui-egui/src/canvas.rs:2650
 msgid "Turn the wall about its {}: {}"
 msgstr "Girar a parede em torno do seu {}: {}"
 
@@ -7478,7 +7478,7 @@ msgstr "Linhas grossas"
 msgid "Width"
 msgstr "Largura"
 
-#: crates/ui-egui/src/standards.rs:109
+#: crates/ui-egui/src/standards.rs:111
 msgid "Width (mm)"
 msgstr "Espessura (mm)"
 
@@ -7534,7 +7534,7 @@ msgstr "Extensão da linha de chamada"
 msgid "Witness Line Gap to Element"
 msgstr "Afastamento da linha de chamada ao elemento"
 
-#: crates/ui-egui/src/standards.rs:239
+#: crates/ui-egui/src/standards.rs:241
 msgid "Witness Line Gap:"
 msgstr "Afastamento da linha de chamada:"
 
@@ -7542,7 +7542,7 @@ msgstr "Afastamento da linha de chamada:"
 msgid "Witness Line Length"
 msgstr "Comprimento da linha de chamada"
 
-#: crates/ui-egui/src/standards.rs:228
+#: crates/ui-egui/src/standards.rs:230
 msgid "Witness Line Overshoot:"
 msgstr "Prolongamento da linha de chamada:"
 
@@ -7582,15 +7582,15 @@ msgstr "Zigue-zague"
 msgid "Zoom"
 msgstr "Zoom"
 
-#: crates/ui-egui/src/canvas.rs:1420
+#: crates/ui-egui/src/canvas.rs:1423
 msgid "Zoom In"
 msgstr "Aproximar"
 
-#: crates/ui-egui/src/canvas.rs:1423
+#: crates/ui-egui/src/canvas.rs:1426
 msgid "Zoom Out"
 msgstr "Afastar"
 
-#: crates/ui-egui/src/canvas.rs:1417
+#: crates/ui-egui/src/canvas.rs:1420
 #: crates/ui-egui/src/orbit.rs:419
 msgid "Zoom to Fit"
 msgstr "Zoom para ajustar"
@@ -7601,10 +7601,10 @@ msgstr "`{}` não é uma altura"
 
 #: crates/ui-egui/src/camera.rs:52
 #: crates/ui-egui/src/camera.rs:62
-#: crates/ui-egui/src/canvas.rs:2465
-#: crates/ui-egui/src/canvas.rs:2845
-#: crates/ui-egui/src/canvas.rs:2919
-#: crates/ui-egui/src/canvas.rs:2939
+#: crates/ui-egui/src/canvas.rs:2468
+#: crates/ui-egui/src/canvas.rs:2848
+#: crates/ui-egui/src/canvas.rs:2922
+#: crates/ui-egui/src/canvas.rs:2942
 #: crates/ui-egui/src/draw.rs:258
 #: crates/ui-egui/src/draw.rs:259
 #: crates/ui-egui/src/draw.rs:260
@@ -7648,7 +7648,7 @@ msgstr "`{}` não é um tamanho, um ângulo nem um deslocamento"
 msgid "`{}` is not a spacing"
 msgstr "`{}` não é um espaçamento"
 
-#: crates/ui-egui/src/canvas.rs:2674
+#: crates/ui-egui/src/canvas.rs:2677
 msgid "`{}` is not an angle"
 msgstr "`{}` não é um ângulo"
 
@@ -7676,7 +7676,7 @@ msgstr "uma medida em mm"
 msgid "a whole number"
 msgstr "um número inteiro"
 
-#: crates/ui-egui/src/canvas.rs:972
+#: crates/ui-egui/src/canvas.rs:975
 msgid "align"
 msgstr "alinhar"
 
@@ -7692,7 +7692,7 @@ msgstr "arco"
 msgid "begins with"
 msgstr "começa com"
 
-#: crates/ui-egui/src/canvas.rs:2046
+#: crates/ui-egui/src/canvas.rs:2049
 msgid "ceiling: `{}` is not a height"
 msgstr "forro: `{}` não é uma altura"
 
@@ -7700,15 +7700,15 @@ msgstr "forro: `{}` não é uma altura"
 msgid "circle"
 msgstr "círculo"
 
-#: crates/ui-egui/src/canvas.rs:2092
+#: crates/ui-egui/src/canvas.rs:2095
 msgid "click its line's end"
 msgstr "clique no fim da linha"
 
-#: crates/ui-egui/src/canvas.rs:2116
+#: crates/ui-egui/src/canvas.rs:2119
 msgid "click where its run ends"
 msgstr "clique onde o lance termina"
 
-#: crates/ui-egui/src/canvas.rs:1877
+#: crates/ui-egui/src/canvas.rs:1880
 msgid "column: {}"
 msgstr "pilar: {}"
 
@@ -7748,7 +7748,7 @@ msgstr "não termina com"
 msgid "does not equal"
 msgstr "não é igual a"
 
-#: crates/ui-egui/src/canvas.rs:2010
+#: crates/ui-egui/src/canvas.rs:2013
 msgid "dormer: the width `{}`, the height `{}` and the slope `{}` must be numbers"
 msgstr "água-furtada: a largura `{}`, a altura `{}` e a inclinação `{}` precisam ser números"
 
@@ -7808,7 +7808,7 @@ msgstr "nível: `{}` não é uma elevação"
 msgid "line"
 msgstr "linha"
 
-#: crates/ui-egui/src/canvas.rs:2279
+#: crates/ui-egui/src/canvas.rs:2282
 msgid "mass: {}"
 msgstr "massa: {}"
 
@@ -7816,12 +7816,12 @@ msgstr "massa: {}"
 msgid "material"
 msgstr "material"
 
-#: crates/ui-egui/src/canvas.rs:1708
-#: crates/ui-egui/src/canvas.rs:2356
+#: crates/ui-egui/src/canvas.rs:1711
+#: crates/ui-egui/src/canvas.rs:2359
 msgid "offset: `{}` is not a distance"
 msgstr "deslocamento: `{}` não é uma distância"
 
-#: crates/ui-egui/src/canvas.rs:2352
+#: crates/ui-egui/src/canvas.rs:2355
 msgid "offset: it offsets straight walls"
 msgstr "deslocamento: só desloca paredes retas"
 
@@ -7849,23 +7849,23 @@ msgstr "imagem"
 msgid "polyline"
 msgstr "polilinha"
 
-#: crates/ui-egui/src/canvas.rs:2134
+#: crates/ui-egui/src/canvas.rs:2137
 msgid "ramp: `{}` is not a slope"
 msgstr "rampa: `{}` não é uma inclinação"
 
-#: crates/ui-egui/src/canvas.rs:2135
+#: crates/ui-egui/src/canvas.rs:2138
 msgid "ramp: `{}` is not a width"
 msgstr "rampa: `{}` não é uma largura"
 
-#: crates/ui-egui/src/canvas.rs:2136
+#: crates/ui-egui/src/canvas.rs:2139
 msgid "ramp: {}"
 msgstr "rampa: {}"
 
-#: crates/ui-egui/src/canvas.rs:2093
+#: crates/ui-egui/src/canvas.rs:2096
 msgid "roof: `{}` is not a slope"
 msgstr "telhado: `{}` não é uma inclinação"
 
-#: crates/ui-egui/src/canvas.rs:1962
+#: crates/ui-egui/src/canvas.rs:1965
 msgid "roof: the slope `{}` and the overhang `{}` must be numbers"
 msgstr "telhado: a inclinação `{}` e o beiral `{}` precisam ser números"
 
@@ -7905,11 +7905,11 @@ msgstr "selecione primeiro o que ocultar ou isolar"
 msgid "select what to move, copy, rotate or mirror first"
 msgstr "selecione primeiro o que mover, copiar, rotacionar ou espelhar"
 
-#: crates/ui-egui/src/canvas.rs:2062
+#: crates/ui-egui/src/canvas.rs:2065
 msgid "shaft: {}"
 msgstr "shaft: {}"
 
-#: crates/ui-egui/src/canvas.rs:2080
+#: crates/ui-egui/src/canvas.rs:2083
 msgid "slope arrow: `{}` is not a slope"
 msgstr "seta de inclinação: `{}` não é uma inclinação"
 
@@ -7917,15 +7917,15 @@ msgstr "seta de inclinação: `{}` não é uma inclinação"
 msgid "spline"
 msgstr "spline"
 
-#: crates/ui-egui/src/canvas.rs:2157
+#: crates/ui-egui/src/canvas.rs:2160
 msgid "stair: `{}` is not a width"
 msgstr "escada: `{}` não é uma largura"
 
-#: crates/ui-egui/src/standards.rs:245
+#: crates/ui-egui/src/standards.rs:247
 msgid "standard gap"
 msgstr "afastamento padrão"
 
-#: crates/ui-egui/src/standards.rs:234
+#: crates/ui-egui/src/standards.rs:236
 msgid "standard overshoot"
 msgstr "prolongamento padrão"
 
@@ -7937,7 +7937,7 @@ msgstr "início"
 msgid "the next free name"
 msgstr "o próximo nome livre"
 
-#: crates/ui-egui/src/canvas.rs:2918
+#: crates/ui-egui/src/canvas.rs:2921
 msgid "the opening has to stay on its wall"
 msgstr "a abertura tem de ficar na parede"
 
@@ -7984,7 +7984,7 @@ msgstr "os estilos visuais são da vista 3D: abra-a pelo Navegador de Projeto"
 msgid "void"
 msgstr "vazio"
 
-#: crates/ui-egui/src/canvas.rs:2500
+#: crates/ui-egui/src/canvas.rs:2503
 msgid "wall: {}"
 msgstr "parede: {}"
 
@@ -8076,11 +8076,11 @@ msgstr "{} famílias de linhas"
 msgid "{} min ago"
 msgstr "há {} min"
 
-#: crates/ui-egui/src/standards.rs:145
+#: crates/ui-egui/src/standards.rs:147
 msgid "{} mm for A0/A1"
 msgstr "{} mm para A0/A1"
 
-#: crates/ui-egui/src/standards.rs:146
+#: crates/ui-egui/src/standards.rs:148
 msgid "{} mm for A2-A4"
 msgstr "{} mm para A2-A4"
 
@@ -8088,7 +8088,7 @@ msgstr "{} mm para A2-A4"
 msgid "{} months ago"
 msgstr "há {} meses"
 
-#: crates/ui-egui/src/canvas.rs:3009
+#: crates/ui-egui/src/canvas.rs:3012
 msgid "{} of {} risers"
 msgstr "{} de {} espelhos"
 
@@ -8120,7 +8120,7 @@ msgstr "{} selecionados."
 msgid "{} triangles, from a file"
 msgstr "{} triângulos, de um arquivo"
 
-#: crates/ui-egui/src/canvas.rs:3011
+#: crates/ui-egui/src/canvas.rs:3014
 msgid "{} up"
 msgstr "{} de subida"
 
@@ -8228,71 +8228,71 @@ msgstr "{}: Cor de {}"
 msgid "{}; and {} more"
 msgstr "{}; e mais {}"
 
-#: crates/ui-egui/src/standards.rs:178
+#: crates/ui-egui/src/standards.rs:180
 msgid "• 25 mm left binding margin is preserved without punching through drawing contents."
 msgstr "• A margem esquerda de 25 mm é preservada para fixação sem perfurar o conteúdo do desenho."
 
-#: crates/ui-egui/src/standards.rs:88
+#: crates/ui-egui/src/standards.rs:90
 msgid "• Annotation and hatching: 0.18 mm (Pen 3 / 4)."
 msgstr "• Anotação e hachuras: 0,18 mm (Pena 3 / 4)."
 
-#: crates/ui-egui/src/standards.rs:86
+#: crates/ui-egui/src/standards.rs:88
 msgid "• Cut lines: 0.50 mm (Pen 10) for main building elements."
 msgstr "• Linhas de corte: 0,50 mm (Pena 10) para os principais elementos da edificação."
 
-#: crates/ui-egui/src/standards.rs:81
+#: crates/ui-egui/src/standards.rs:83
 msgid "• Extra fine line (0.13 mm — Pen 1): Material hatching and floor tile patterns."
 msgstr "• Linha extrafina (0,13 mm — Pena 1): Hachuras de materiais e paginação de piso."
 
-#: crates/ui-egui/src/standards.rs:176
+#: crates/ui-egui/src/standards.rs:178
 msgid "• Final folded format is A4 (210 mm x 297 mm) for vertical filing and binder archival."
 msgstr "• Formato final dobrado é A4 (210 mm x 297 mm) para arquivamento vertical em pastas."
 
-#: crates/ui-egui/src/standards.rs:80
+#: crates/ui-egui/src/standards.rs:82
 msgid "• Fine line (0.18 mm — Pen 3 / 4): Projections, dimension lines, witness lines, grid lines, and axes."
 msgstr "• Linha fina (0,18 mm — Pena 3 / 4): Projeções, linhas de cota, linhas de extensão, eixos e malhas."
 
-#: crates/ui-egui/src/standards.rs:179
+#: crates/ui-egui/src/standards.rs:181
 msgid "• Large formats (A0, A1, A2) include a 105 mm triangular ear fold on top-left."
 msgstr "• Formatos grandes (A0, A1, A2) incluem dobra triangular de orelha de 105 mm no canto superior esquerdo."
 
-#: crates/ui-egui/src/standards.rs:93
+#: crates/ui-egui/src/standards.rs:95
 msgid "• Medium (0.35 mm): Secondary elements, fixtures, and door swings."
 msgstr "• Médio (0,35 mm): Elementos secundários, louças e abertura de portas."
 
-#: crates/ui-egui/src/standards.rs:79
+#: crates/ui-egui/src/standards.rs:81
 msgid "• Medium line (0.35 mm — Pen 7): Doors, windows, millwork, and stair risers."
 msgstr "• Linha média (0,35 mm — Pena 7): Portas, janelas, marcenaria e espelhos de escada em vista."
 
-#: crates/ui-egui/src/standards.rs:87
+#: crates/ui-egui/src/standards.rs:89
 msgid "• Outlines in view: 0.25 mm (Pen 5) or 0.35 mm (Pen 7)."
 msgstr "• Contornos em vista: 0,25 mm (Pena 5) ou 0,35 mm (Pena 7)."
 
-#: crates/ui-egui/src/standards.rs:98
+#: crates/ui-egui/src/standards.rs:100
 msgid "• Standard line groups: 0.18, 0.25, 0.35, 0.50, 0.70 mm."
 msgstr "• Grupos de linha padrão: 0,18, 0,25, 0,35, 0,50, 0,70 mm."
 
-#: crates/ui-egui/src/standards.rs:85
+#: crates/ui-egui/src/standards.rs:87
 msgid "• Standard line width ratio 1 : √2 (0.18, 0.25, 0.35, 0.50, 0.70, 1.00 mm)."
 msgstr "• Razão de largura de linha padrão 1 : √2 (0,18, 0,25, 0,35, 0,50, 0,70, 1,00 mm)."
 
-#: crates/ui-egui/src/standards.rs:77
+#: crates/ui-egui/src/standards.rs:79
 msgid "• Thick line (0.50 mm — Pen 10): Walls and structural elements cut in plan and section."
 msgstr "• Linha grossa (0,50 mm — Pena 10): Alvenarias e elementos estruturais cortados em planta e corte."
 
-#: crates/ui-egui/src/standards.rs:94
+#: crates/ui-egui/src/standards.rs:96
 msgid "• Thin / Fine (0.18 mm — 0.25 mm): Dimension lines, witness lines, text notes, and crosshatching."
 msgstr "• Fino (0,18 mm — 0,25 mm): Linhas de cota, linhas de extensão, notas de texto e hachuras cruzadas."
 
-#: crates/ui-egui/src/standards.rs:177
+#: crates/ui-egui/src/standards.rs:179
 msgid "• Title block (legenda) is located at bottom right and remains visible on the folded cover."
 msgstr "• A legenda fica no canto inferior direito e permanece visível na face frontal da folha dobrada."
 
-#: crates/ui-egui/src/standards.rs:78
+#: crates/ui-egui/src/standards.rs:80
 msgid "• Very thick line (0.70 mm — Pen 12): Prominent structural reinforced concrete columns and beams cut."
 msgstr "• Linha muito grossa (0,70 mm — Pena 12): Pilares e vigas estruturais proeminentes de concreto armado cortados."
 
-#: crates/ui-egui/src/standards.rs:92
+#: crates/ui-egui/src/standards.rs:94
 msgid "• Wide / Heavy (0.50 mm — 0.70 mm): Cut walls and structural sections."
 msgstr "• Largo / Grosso (0,50 mm — 0,70 mm): Paredes cortadas e seções estruturais."
 
