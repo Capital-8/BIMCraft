@@ -2485,7 +2485,7 @@ msgstr "Encontra {}; nada tem estes: {}"
 msgid "Fine"
 msgstr "Fino"
 
-#: crates/core/src/import.rs:1049
+#: crates/core/src/import.rs:1075
 #: crates/ui-egui/src/notes.rs:449
 msgid "Finish"
 msgstr "Acabamento"
@@ -3049,7 +3049,7 @@ msgstr "Instalando o BIMCraft {}…"
 msgid "Instance"
 msgstr "Instância"
 
-#: crates/core/src/import.rs:1048
+#: crates/core/src/import.rs:1074
 #: crates/ui-egui/src/draw.rs:645
 msgid "Insulation"
 msgstr "Isolamento"
@@ -3560,7 +3560,7 @@ msgstr "Médio"
 msgid "Medium Lines"
 msgstr "Linhas médias"
 
-#: crates/core/src/import.rs:1051
+#: crates/core/src/import.rs:1077
 msgid "Membrane"
 msgstr "Membrana"
 
@@ -5814,7 +5814,7 @@ msgstr "Estilo"
 msgid "Styles"
 msgstr "Estilos"
 
-#: crates/core/src/import.rs:1050
+#: crates/core/src/import.rs:1076
 msgid "Substrate"
 msgstr "Substrato"
 

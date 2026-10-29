@@ -2485,7 +2485,7 @@ msgstr "找到 {}；以下没有对应的图元：{}"
 msgid "Fine"
 msgstr "精细"
 
-#: crates/core/src/import.rs:1049
+#: crates/core/src/import.rs:1075
 #: crates/ui-egui/src/notes.rs:449
 msgid "Finish"
 msgstr "面层"
@@ -3049,7 +3049,7 @@ msgstr "正在安装 BIMCraft {}…"
 msgid "Instance"
 msgstr "实例"
 
-#: crates/core/src/import.rs:1048
+#: crates/core/src/import.rs:1074
 #: crates/ui-egui/src/draw.rs:645
 msgid "Insulation"
 msgstr "保温层"
@@ -3560,7 +3560,7 @@ msgstr "中等"
 msgid "Medium Lines"
 msgstr ""
 
-#: crates/core/src/import.rs:1051
+#: crates/core/src/import.rs:1077
 msgid "Membrane"
 msgstr "薄膜层"
 
@@ -5814,7 +5814,7 @@ msgstr "样式"
 msgid "Styles"
 msgstr "样式"
 
-#: crates/core/src/import.rs:1050
+#: crates/core/src/import.rs:1076
 msgid "Substrate"
 msgstr "基层"
 

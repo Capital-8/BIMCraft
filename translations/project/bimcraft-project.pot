@@ -260,7 +260,7 @@ msgstr ""
 msgid "Inspection Box"
 msgstr ""
 
-#: crates/core/src/import.rs:1048
+#: crates/core/src/import.rs:1074
 msgid "Insulation"
 msgstr ""
 
@@ -313,7 +313,7 @@ msgstr ""
 msgid "Medium Lines"
 msgstr ""
 
-#: crates/core/src/import.rs:1051
+#: crates/core/src/import.rs:1077
 msgid "Membrane"
 msgstr ""
 

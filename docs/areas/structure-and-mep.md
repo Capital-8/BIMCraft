@@ -71,3 +71,14 @@ writes each as an `IfcReinforcingBar` (`SteelGrade`, `NominalDiameter`, `CrossSe
 import reads the same back, with the host found by the aggregation. The 3D view draws a tube along each straight piece
 (`rebar::tubes`, built with a round run's tube), which the concrete round a bar hides: look at bars with their host hidden. A section draws each bar it cuts as a
 dot over the host's poché (`render::section_in` keeps them out of the host's pieces, which would swallow them); plans do not draw bars yet.
+
+Importing a structural program's IFC (Eberick, Cype and the like; tests in `eberick_tests.rs`, written by hand, never from anyone's project). Each
+product is named by its mark, so a name that is not its type's (BIMCraft names a product by its type, and writes it as its object type too) is its
+`Mark` parameter, for the categories in `import::MARKED` (beams, columns, structural columns, footings, strip footings and floors; not stairs,
+which BIMCraft calls "Stair"). The single values of every property set that is not BIMCraft's (`BIMCraft_*`, `RoomSeparation`; `Project Parameters`
+is read by its names as written) are project parameters named for the property, a character a formula can't say turned into a space
+(`parameter_name`: "Cargas de parede (G2)" is "Cargas de parede G2"), lengths in the file's unit made millimetres; `LoadBearing` is left out because
+it already makes a column or a floor structural. The cover Eberick sets (`Cobrimento`, `ConcreteCover`) is therefore on the host as a length, for the
+rules that will arm it. A run is found in its body as the way it spreads furthest, except where the body is one extruded profile and the extrusion is
+not up: then it runs along the extrusion (`Reader::extrusion`), because a beam between two columns can be shallower than it is deep, and its body then
+spreads furthest up. A strip footing, a plan outline stood up, is still read by its shape. A landing slab that belongs to no stair is a floor.
