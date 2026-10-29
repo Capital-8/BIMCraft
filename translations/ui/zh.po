@@ -768,6 +768,10 @@ msgstr "按视图"
 msgid "CAD drawing"
 msgstr ""
 
+#: crates/ui-egui/src/cad.rs:51
+msgid "CAD drawings (DWG, DXF)"
+msgstr "CAD 图纸（DWG、DXF）"
+
 #: crates/core/src/commands.rs:464
 msgid "Cable Tray"
 msgstr "电缆桥架"
@@ -1831,10 +1835,6 @@ msgstr "圆柱体"
 msgid "DN"
 msgstr "下"
 
-#: crates/ui-egui/src/cad.rs:51
-msgid "DXF drawings"
-msgstr "DXF 图纸"
-
 #: crates/ui-egui/src/settings.rs:310
 msgid "Dark"
 msgstr "深色"
@@ -1967,7 +1967,7 @@ msgstr "拆除 (DW)：单击图元，在视图阶段中将其拆除；再次单�
 msgid "Demolished"
 msgstr "已拆除"
 
-#: crates/core/src/commands.rs:7029
+#: crates/core/src/commands.rs:7038
 msgid "Dependent"
 msgstr "相关"
 
@@ -3205,8 +3205,8 @@ msgid "Import CAD"
 msgstr "导入 CAD"
 
 #: crates/ui-egui/src/lib.rs:3401
-msgid "Import CAD: a DXF drawing brought into the project, drawn under the model in the plans of a level, its layers, colours and linetypes kept, and snapped to"
-msgstr "导入 CAD：导入项目的 DXF 图纸，绘制在某标高平面图的模型之下，保留其图层、颜色和线型，并可捕捉"
+msgid "Import CAD: a DWG or DXF drawing brought into the project, drawn under the model in the plans of a level, its layers, colours and linetypes kept, and snapped to"
+msgstr "导入 CAD：导入项目的 DWG 或 DXF 图纸，绘制在某标高平面图的模型之下，保留其图层、颜色和线型，并可捕捉"
 
 #: crates/ui-egui/src/cad.rs:105
 msgid "Import units"
@@ -3616,8 +3616,8 @@ msgid "Link CAD"
 msgstr "链接 CAD"
 
 #: crates/ui-egui/src/lib.rs:3393
-msgid "Link CAD: a DXF drawing shown in the plans of a level, read again from its file on Reload and when the project opens"
-msgstr "链接 CAD：在某标高的平面图中显示的 DXF 图纸，重新载入时及打开项目时从其文件再次读取"
+msgid "Link CAD: a DWG or DXF drawing shown in the plans of a level, read again from its file on Reload and when the project opens"
+msgstr "链接 CAD：在某标高的平面图中显示的 DWG 或 DXF 图纸，重新载入时及打开项目时从其文件再次读取"
 
 #: crates/ui-egui/src/lib.rs:3383
 #: crates/ui-egui/src/lib.rs:3499
@@ -5028,7 +5028,7 @@ msgstr "主选项（{}）"
 msgid "Profile"
 msgstr "轮廓"
 
-#: apps/bimcraft/src/main.rs:219
+#: apps/bimcraft/src/main.rs:248
 msgid "Project"
 msgstr "项目"
 
@@ -6956,7 +6956,7 @@ msgstr "单位"
 msgid "Units Format"
 msgstr "单位格式"
 
-#: crates/core/src/commands.rs:7170
+#: crates/core/src/commands.rs:7179
 msgid "Unnamed"
 msgstr "未命名"
 
@@ -8484,3 +8484,12 @@ msgstr "导线"
 #: crates/ui-egui/src/lib.rs:3066
 #~ msgid "Radial Dimension: pick a round column, then click where the radius goes"
 #~ msgstr "半径尺寸标注：选取圆形柱，然后单击半径标注的位置"
+#: crates/ui-egui/src/cad.rs:51
+#~ msgid "DXF drawings"
+#~ msgstr "DXF 图纸"
+#: crates/ui-egui/src/lib.rs:3401
+#~ msgid "Import CAD: a DXF drawing brought into the project, drawn under the model in the plans of a level, its layers, colours and linetypes kept, and snapped to"
+#~ msgstr "导入 CAD：导入项目的 DXF 图纸，绘制在某标高平面图的模型之下，保留其图层、颜色和线型，并可捕捉"
+#: crates/ui-egui/src/lib.rs:3393
+#~ msgid "Link CAD: a DXF drawing shown in the plans of a level, read again from its file on Reload and when the project opens"
+#~ msgstr "链接 CAD：在某标高的平面图中显示的 DXF 图纸，重新载入时及打开项目时从其文件再次读取"

@@ -768,6 +768,10 @@ msgstr "Por vista"
 msgid "CAD drawing"
 msgstr ""
 
+#: crates/ui-egui/src/cad.rs:51
+msgid "CAD drawings (DWG, DXF)"
+msgstr "Dibujos CAD (DWG, DXF)"
+
 #: crates/core/src/commands.rs:464
 msgid "Cable Tray"
 msgstr "Bandeja portacables"
@@ -1831,10 +1835,6 @@ msgstr "Cilindro"
 msgid "DN"
 msgstr "BAJA"
 
-#: crates/ui-egui/src/cad.rs:51
-msgid "DXF drawings"
-msgstr "Dibujos DXF"
-
 #: crates/ui-egui/src/settings.rs:310
 msgid "Dark"
 msgstr "Oscuro"
@@ -1967,7 +1967,7 @@ msgstr "Demoler (DW): haga clic en un elemento para demolerlo en la fase de la v
 msgid "Demolished"
 msgstr "Demolido"
 
-#: crates/core/src/commands.rs:7029
+#: crates/core/src/commands.rs:7038
 msgid "Dependent"
 msgstr "Dependiente"
 
@@ -3205,8 +3205,8 @@ msgid "Import CAD"
 msgstr "Importar CAD"
 
 #: crates/ui-egui/src/lib.rs:3401
-msgid "Import CAD: a DXF drawing brought into the project, drawn under the model in the plans of a level, its layers, colours and linetypes kept, and snapped to"
-msgstr "Importar CAD: un dibujo DXF traído al proyecto, dibujado bajo el modelo en las plantas de un nivel, con sus capas, colores y tipos de línea, y con referencias a objetos"
+msgid "Import CAD: a DWG or DXF drawing brought into the project, drawn under the model in the plans of a level, its layers, colours and linetypes kept, and snapped to"
+msgstr "Importar CAD: un dibujo DWG o DXF traído al proyecto, dibujado bajo el modelo en las plantas de un nivel, con sus capas, colores y tipos de línea, y con referencias a objetos"
 
 #: crates/ui-egui/src/cad.rs:105
 msgid "Import units"
@@ -3616,8 +3616,8 @@ msgid "Link CAD"
 msgstr "Vincular CAD"
 
 #: crates/ui-egui/src/lib.rs:3393
-msgid "Link CAD: a DXF drawing shown in the plans of a level, read again from its file on Reload and when the project opens"
-msgstr "Vincular CAD: un dibujo DXF mostrado en las plantas de un nivel, leído de nuevo de su archivo al Recargar y cuando se abre el proyecto"
+msgid "Link CAD: a DWG or DXF drawing shown in the plans of a level, read again from its file on Reload and when the project opens"
+msgstr "Vincular CAD: un dibujo DWG o DXF mostrado en las plantas de un nivel, leído de nuevo de su archivo al Recargar y cuando se abre el proyecto"
 
 #: crates/ui-egui/src/lib.rs:3383
 #: crates/ui-egui/src/lib.rs:3499
@@ -5028,7 +5028,7 @@ msgstr "Principal ({})"
 msgid "Profile"
 msgstr "Perfil"
 
-#: apps/bimcraft/src/main.rs:219
+#: apps/bimcraft/src/main.rs:248
 msgid "Project"
 msgstr "Proyecto"
 
@@ -6956,7 +6956,7 @@ msgstr "Unidades"
 msgid "Units Format"
 msgstr "Formato de unidades"
 
-#: crates/core/src/commands.rs:7170
+#: crates/core/src/commands.rs:7179
 msgid "Unnamed"
 msgstr "Sin nombre"
 
@@ -8484,3 +8484,12 @@ msgstr "Cables"
 #: crates/ui-egui/src/lib.rs:3066
 #~ msgid "Radial Dimension: pick a round column, then click where the radius goes"
 #~ msgstr "Cota radial: elige una columna redonda y haz clic donde va el radio"
+#: crates/ui-egui/src/cad.rs:51
+#~ msgid "DXF drawings"
+#~ msgstr "Dibujos DXF"
+#: crates/ui-egui/src/lib.rs:3401
+#~ msgid "Import CAD: a DXF drawing brought into the project, drawn under the model in the plans of a level, its layers, colours and linetypes kept, and snapped to"
+#~ msgstr "Importar CAD: un dibujo DXF traído al proyecto, dibujado bajo el modelo en las plantas de un nivel, con sus capas, colores y tipos de línea, y con referencias a objetos"
+#: crates/ui-egui/src/lib.rs:3393
+#~ msgid "Link CAD: a DXF drawing shown in the plans of a level, read again from its file on Reload and when the project opens"
+#~ msgstr "Vincular CAD: un dibujo DXF mostrado en las plantas de un nivel, leído de nuevo de su archivo al Recargar y cuando se abre el proyecto"

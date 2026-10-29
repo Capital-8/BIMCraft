@@ -316,7 +316,7 @@ more to say.
 | IO-11 | **COBie export** for facility handover | Revit (add-in), Archicad | 3 | ●● | COBie is a public IFC subset and spreadsheet format |
 | IO-12 | **Visual programming**: a node editor over BIMCraft's commands and queries, for parametric design without code | Dynamo, Grasshopper (Archicad live connection), Marionette | 5 | ●●● | Each node is a command or query; a graph is a script with data flow. Possibly a separate crate on top of `Session` |
 | IO-13 | **Grasshopper / Rhino.Inside-style live link**: an external parametric tool drives BIMCraft elements live | Archicad–Grasshopper, Rhino.Inside.Revit | 3 | ●● | MCP or a local socket already gives the transport |
-| IO-14 | **DWG** | Every commercial tool | 5 | ●● | Roadmap risk: no permissive library; DXF first |
+| IO-14 | **DWG** | Every commercial tool | 5 | ●● | Read through acadrust (MPL-2.0, unmodified; `crates/dwg`); writing still open |
 
 ## 13. Site and urban context
 

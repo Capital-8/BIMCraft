@@ -767,6 +767,10 @@ msgstr "Podle pohledu"
 msgid "CAD drawing"
 msgstr "Výkres CAD"
 
+#: crates/ui-egui/src/cad.rs:51
+msgid "CAD drawings (DWG, DXF)"
+msgstr ""
+
 #: crates/core/src/commands.rs:464
 msgid "Cable Tray"
 msgstr "Kabelový žlab"
@@ -1830,10 +1834,6 @@ msgstr "Válec"
 msgid "DN"
 msgstr "DOLŮ"
 
-#: crates/ui-egui/src/cad.rs:51
-msgid "DXF drawings"
-msgstr "Výkresy DXF"
-
 #: crates/ui-egui/src/settings.rs:310
 msgid "Dark"
 msgstr "Tmavý"
@@ -1966,7 +1966,7 @@ msgstr "Zbourat (DW): klikněte na prvek, který chcete zbourat ve fázi pohledu
 msgid "Demolished"
 msgstr "Zbourané"
 
-#: crates/core/src/commands.rs:7029
+#: crates/core/src/commands.rs:7038
 msgid "Dependent"
 msgstr "Závislý"
 
@@ -3204,8 +3204,8 @@ msgid "Import CAD"
 msgstr "Importovat CAD"
 
 #: crates/ui-egui/src/lib.rs:3401
-msgid "Import CAD: a DXF drawing brought into the project, drawn under the model in the plans of a level, its layers, colours and linetypes kept, and snapped to"
-msgstr "Importovat CAD: výkres DXF vložený do projektu, vykreslený pod modelem v půdorysech podlaží, se zachováním vrstev, barev a typů čar a možností uchopování"
+msgid "Import CAD: a DWG or DXF drawing brought into the project, drawn under the model in the plans of a level, its layers, colours and linetypes kept, and snapped to"
+msgstr ""
 
 #: crates/ui-egui/src/cad.rs:105
 msgid "Import units"
@@ -3615,8 +3615,8 @@ msgid "Link CAD"
 msgstr "Připojit CAD"
 
 #: crates/ui-egui/src/lib.rs:3393
-msgid "Link CAD: a DXF drawing shown in the plans of a level, read again from its file on Reload and when the project opens"
-msgstr "Připojit CAD: výkres DXF zobrazený v půdorysech podlaží, znovu načítaný ze souboru při opětovném načtení a při otevření projektu"
+msgid "Link CAD: a DWG or DXF drawing shown in the plans of a level, read again from its file on Reload and when the project opens"
+msgstr ""
 
 #: crates/ui-egui/src/lib.rs:3383
 #: crates/ui-egui/src/lib.rs:3499
@@ -5027,7 +5027,7 @@ msgstr "Primární ({})"
 msgid "Profile"
 msgstr "Profil"
 
-#: apps/bimcraft/src/main.rs:219
+#: apps/bimcraft/src/main.rs:248
 msgid "Project"
 msgstr "Projekt"
 
@@ -6955,7 +6955,7 @@ msgstr "Jednotky"
 msgid "Units Format"
 msgstr ""
 
-#: crates/core/src/commands.rs:7170
+#: crates/core/src/commands.rs:7179
 msgid "Unnamed"
 msgstr "Nepojmenovaný"
 
@@ -8420,3 +8420,12 @@ msgstr "Vodiče"
 #: crates/ui-egui/src/lib.rs:3053
 #~ msgid "Radial Dimension: pick a round column, then click where the radius goes"
 #~ msgstr "Poloměrová kóta: vyberte kruhový sloup a poté klikněte na umístění kótovací čáry"
+#: crates/ui-egui/src/cad.rs:51
+#~ msgid "DXF drawings"
+#~ msgstr "Výkresy DXF"
+#: crates/ui-egui/src/lib.rs:3401
+#~ msgid "Import CAD: a DXF drawing brought into the project, drawn under the model in the plans of a level, its layers, colours and linetypes kept, and snapped to"
+#~ msgstr "Importovat CAD: výkres DXF vložený do projektu, vykreslený pod modelem v půdorysech podlaží, se zachováním vrstev, barev a typů čar a možností uchopování"
+#: crates/ui-egui/src/lib.rs:3393
+#~ msgid "Link CAD: a DXF drawing shown in the plans of a level, read again from its file on Reload and when the project opens"
+#~ msgstr "Připojit CAD: výkres DXF zobrazený v půdorysech podlaží, znovu načítaný ze souboru při opětovném načtení a při otevření projektu"

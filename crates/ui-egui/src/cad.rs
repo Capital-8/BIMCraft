@@ -8,7 +8,7 @@ use bimcraft_i18n::msg;
 use std::path::PathBuf;
 
 use egui::{Align, Button, Checkbox, ComboBox, Context, Grid, Id as UiId, Layout, RichText, TextEdit};
-use serde_json::json;
+use serde_json::{Value, json};
 
 use crate::BimApp;
 use crate::lang::t;
@@ -48,7 +48,7 @@ impl CadBox {
 impl BimApp {
     /// Insert > Import CAD or Link CAD: the file the user picks, then the box for it.
     pub(crate) fn import_cad_dialog(&mut self, ctx: &Context, link: bool) {
-        let dialog = rfd::AsyncFileDialog::new().add_filter(t("DXF drawings"), &["dxf", "dwg"]);
+        let dialog = rfd::AsyncFileDialog::new().add_filter(t("CAD drawings (DWG, DXF)"), &["dxf", "dwg"]);
         self.ask_files(ctx, dialog, move |app, paths| {
             if let Some(path) = paths.into_iter().next() {
                 app.import_cad_path(path, link);
@@ -166,6 +166,12 @@ impl BimApp {
             Some(v) => {
                 self.cad_box = None;
                 self.selection = v["id"].as_u64().into_iter().collect();
+                // What the drawing's read left out, and entities far from the rest, on the status bar.
+                let said: Vec<&str> =
+                    v["notes"].as_array().into_iter().flatten().chain([&v["warning"]]).filter_map(Value::as_str).collect();
+                if !said.is_empty() {
+                    self.status = crate::Status { text: said.join("; "), error: false };
+                }
             }
             // Said in the box, not on the status bar under it.
             None => {

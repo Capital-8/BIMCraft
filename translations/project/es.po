@@ -103,7 +103,7 @@ msgstr "Trazo y punto"
 msgid "Data Outlet"
 msgstr "Punto de datos"
 
-#: crates/core/src/commands.rs:7029
+#: crates/core/src/commands.rs:7038
 msgid "Dependent"
 msgstr "Dependiente"
 
@@ -167,8 +167,8 @@ msgstr "Este"
 msgid "Elbow 90"
 msgstr "Codo 90"
 
-#: crates/core/src/commands.rs:6813
-#: crates/core/src/commands.rs:8480
+#: crates/core/src/commands.rs:6822
+#: crates/core/src/commands.rs:8489
 msgid "Elevation"
 msgstr "Elevación"
 
@@ -306,7 +306,7 @@ msgstr "Marca"
 msgid "Masking"
 msgstr "Máscara"
 
-#: crates/core/src/commands.rs:5351
+#: crates/core/src/commands.rs:5360
 msgid "Mass"
 msgstr "Masa"
 
@@ -414,7 +414,7 @@ msgstr "Contrahuellas"
 msgid "Roof tiles"
 msgstr "Tejas"
 
-#: crates/core/src/commands.rs:5576
+#: crates/core/src/commands.rs:5585
 msgid "Room"
 msgstr "Habitación"
 
@@ -442,8 +442,8 @@ msgstr "Recrecido"
 msgid "Seat Height"
 msgstr "Altura del asiento"
 
-#: crates/core/src/commands.rs:6790
-#: crates/core/src/commands.rs:8479
+#: crates/core/src/commands.rs:6799
+#: crates/core/src/commands.rs:8488
 msgid "Section"
 msgstr "Sección"
 
@@ -559,7 +559,7 @@ msgstr "Tipo"
 msgid "UP"
 msgstr "SUBE"
 
-#: crates/core/src/commands.rs:7170
+#: crates/core/src/commands.rs:7179
 msgid "Unnamed"
 msgstr "Sin nombre"
 

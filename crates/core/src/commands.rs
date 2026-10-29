@@ -141,14 +141,14 @@ pub static ALL: &[Command] = &[
         "Import CAD",
         &[],
         "{path | cad, name?, level?, view?, at?: [x, y], position?, units?, scale?, angle?, layers?, colors?, link?} brings in a \
-         DXF drawing (`path`: an ASCII DXF of any version; save a DWG as DXF first) or places one the project holds again (`cad`, \
+         DXF drawing (`path`: an ASCII DXF of any version, or a DWG, which the desktop and the command line read as DXF) or places one the project holds again (`cad`, \
          its name), as an element in every plan of `level`, or with `view` (a plan) in that view only. `units` of the drawing: \
          auto (the default: what its file says, else mm), mm, cm, m, in or ft; or `scale`, mm to each of its units. `position`: \
          center (the default: the middle of the drawing on `at`, the origin unless given) or origin (its origin on `at`); \
          `angle` turns it about `at`, degrees. `layers`: visible (the default: those its file has on and thawed), all, or a list \
          of those to show. `colors`: preserve (the default), invert or black. `link: true` remembers the file, so `reload_cad` \
          and opening the project read it again. Returns its id, the drawing's name, its unit, entities and layers, its extents \
-         in the model, how many entities lie far from the rest (they're left out of its extents) and what was left out",
+         in the model, how many entities lie far from the rest (they're left out of its extents) and what was left out, with `notes` on what a DWG's read left out",
         import_cad,
     ),
     edit(
@@ -4483,17 +4483,21 @@ fn beside(s: &Session, path: &str) -> PathBuf {
     }
 }
 
-/// The bytes of the DXF file `path`, or why it can't be brought in.
-fn read_dxf_file(s: &Session, path: &str) -> Result<Vec<u8>, String> {
+/// The bytes of the DXF file `path` (a DWG's, read by the session's DWG reader, as the DXF it becomes) and notes on what a
+/// DWG's read left out, or why it can't be brought in.
+fn read_dxf_file(s: &Session, path: &str) -> Result<(Vec<u8>, Vec<String>), String> {
     let full = beside(s, path);
     match ext(&full).as_str() {
         "dxf" => {}
         "dwg" => {
-            return Err(format!(
-                "{}: BIMCraft doesn't read DWG yet; save it as DXF (any version, ASCII) from the program that made it, \
-                 or convert it with a DWG to DXF converter, and bring that in",
-                full.display()
-            ));
+            let Some(read) = &s.dwg else {
+                return Err(format!(
+                    "{}: this BIMCraft has no DWG reader built in; save it as DXF (any version, ASCII) from the program that \
+                     made it, or convert it with a DWG to DXF converter, and bring that in",
+                    full.display()
+                ));
+            };
+            return read(&full).map_err(|e| format!("{}: {e}", full.display()));
         }
         other => return Err(format!("{}: a .{other} file isn't a CAD drawing BIMCraft reads; it reads DXF", full.display())),
     }
@@ -4501,7 +4505,7 @@ fn read_dxf_file(s: &Session, path: &str) -> Result<Vec<u8>, String> {
     if len > crate::dxf::MAX_BYTES as u64 {
         return Err(format!("{} is too large ({len} bytes; up to {})", full.display(), crate::dxf::MAX_BYTES));
     }
-    std::fs::read(&full).map_err(|e| format!("{}: {e}", full.display()))
+    std::fs::read(&full).map(|bytes| (bytes, Vec::new())).map_err(|e| format!("{}: {e}", full.display()))
 }
 
 /// The CAD import `id` names, by id or GUID.
@@ -4573,6 +4577,7 @@ fn import_cad(s: &mut Session, p: &Value) -> R {
         (level, Some(plan.unwrap_or(level)))
     };
     let link = flag(c, p, "link")?;
+    let mut notes = Vec::new();
     let (name, cad, new) = match (string(c, p, "path")?, string(c, p, "cad")?) {
         (Some(_), Some(_)) => return Err(bad(c, "give `path`, a DXF file to bring in, or `cad`, a drawing the project holds; not both")),
         (None, None) => return Err(bad(c, "give `path`, a DXF file to bring in, or `cad`, the name of a drawing the project holds")),
@@ -4606,7 +4611,8 @@ fn import_cad(s: &mut Session, p: &Value) -> R {
                     format!("the project holds {} CAD drawings already; delete the imports of one first", crate::cad::MAX_CADS),
                 ));
             }
-            let bytes = read_dxf_file(s, &path).map_err(|e| bad(c, e))?;
+            let (bytes, read_notes) = read_dxf_file(s, &path).map_err(|e| bad(c, e))?;
+            notes = read_notes;
             let held: usize = m.cads.values().map(Cad::len).sum();
             if held + bytes.len() > crate::cad::MAX_HELD {
                 return Err(bad(
@@ -4683,6 +4689,9 @@ fn import_cad(s: &mut Session, p: &Value) -> R {
         "id": id, "cad": name, "source": source, "unit": unit, "scale": scale, "entities": entities, "layers": layers,
         "extents": extents, "far": far, "left_out": left_out,
     });
+    if !notes.is_empty() {
+        reply["notes"] = json!(notes);
+    }
     if far > 0 {
         reply["warning"] = json!(format!(
             "{far} of its entities lie far from the rest of the drawing: they're drawn where they are, and left out of its extents. \
@@ -4753,7 +4762,7 @@ fn reload_cad(s: &mut Session, p: &Value) -> R {
         .path()
         .map(str::to_string)
         .ok_or_else(|| bad(c, format!("CAD drawing `{name}` isn't linked; bring it in again with `import_cad` and `link`")))?;
-    let bytes = read_dxf_file(s, &path).map_err(|e| bad(c, e))?;
+    let (bytes, _) = read_dxf_file(s, &path).map_err(|e| bad(c, e))?;
     if cad.same_bytes(&bytes) {
         return Ok(json!({"cad": name, "changed": false}));
     }
@@ -4769,7 +4778,7 @@ fn relink_cads(s: &mut Session) -> Vec<Value> {
     let linked: Vec<(String, String)> = s.model.cads.iter().filter_map(|(n, cad)| Some((n.clone(), cad.path()?.to_string()))).collect();
     let mut failed = Vec::new();
     for (name, path) in linked {
-        let read = read_dxf_file(s, &path).and_then(|bytes| {
+        let read = read_dxf_file(s, &path).and_then(|(bytes, _)| {
             let held = s.model.cads.get(&name);
             if held.is_some_and(|h| h.same_bytes(&bytes)) {
                 return Ok(None);

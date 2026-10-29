@@ -768,6 +768,10 @@ msgstr "Par vue"
 msgid "CAD drawing"
 msgstr "Dessin CAO"
 
+#: crates/ui-egui/src/cad.rs:51
+msgid "CAD drawings (DWG, DXF)"
+msgstr "Dessins CAO (DWG, DXF)"
+
 #: crates/core/src/commands.rs:464
 msgid "Cable Tray"
 msgstr "Chemin de câbles"
@@ -1831,10 +1835,6 @@ msgstr "Cylindre"
 msgid "DN"
 msgstr "DN"
 
-#: crates/ui-egui/src/cad.rs:51
-msgid "DXF drawings"
-msgstr "Dessins DXF"
-
 #: crates/ui-egui/src/settings.rs:310
 msgid "Dark"
 msgstr "Sombre"
@@ -1967,7 +1967,7 @@ msgstr "Démolir (DW): cliquer sur un élément pour le démolir dans la phase d
 msgid "Demolished"
 msgstr "Démoli"
 
-#: crates/core/src/commands.rs:7029
+#: crates/core/src/commands.rs:7038
 msgid "Dependent"
 msgstr "Dépendante"
 
@@ -3205,8 +3205,8 @@ msgid "Import CAD"
 msgstr "Importer CAO"
 
 #: crates/ui-egui/src/lib.rs:3401
-msgid "Import CAD: a DXF drawing brought into the project, drawn under the model in the plans of a level, its layers, colours and linetypes kept, and snapped to"
-msgstr "Importer CAO: un dessin DXF amené dans le projet, dessiné sous le modèle dans les plans d'un niveau, avec ses calques, couleurs et types de ligne conservés, et sur lequel s'accrocher"
+msgid "Import CAD: a DWG or DXF drawing brought into the project, drawn under the model in the plans of a level, its layers, colours and linetypes kept, and snapped to"
+msgstr "Importer CAO: un dessin DWG ou DXF amené dans le projet, tracé sous le modèle dans les plans d'un niveau, avec ses calques, couleurs et types de ligne conservés, et accrochable"
 
 #: crates/ui-egui/src/cad.rs:105
 msgid "Import units"
@@ -3616,8 +3616,8 @@ msgid "Link CAD"
 msgstr "Lier CAO"
 
 #: crates/ui-egui/src/lib.rs:3393
-msgid "Link CAD: a DXF drawing shown in the plans of a level, read again from its file on Reload and when the project opens"
-msgstr "Lier CAO: un dessin DXF affiché dans les plans d'un niveau, relu depuis son fichier au rechargement et à l'ouverture du projet"
+msgid "Link CAD: a DWG or DXF drawing shown in the plans of a level, read again from its file on Reload and when the project opens"
+msgstr "Lier CAO: un dessin DWG ou DXF affiché dans les plans d'un niveau, relu depuis son fichier au rechargement et à l'ouverture du projet"
 
 #: crates/ui-egui/src/lib.rs:3383
 #: crates/ui-egui/src/lib.rs:3499
@@ -5028,7 +5028,7 @@ msgstr "Principal ({})"
 msgid "Profile"
 msgstr "Profil"
 
-#: apps/bimcraft/src/main.rs:219
+#: apps/bimcraft/src/main.rs:248
 msgid "Project"
 msgstr "Projet"
 
@@ -6956,7 +6956,7 @@ msgstr "Unités"
 msgid "Units Format"
 msgstr "Format des unités"
 
-#: crates/core/src/commands.rs:7170
+#: crates/core/src/commands.rs:7179
 msgid "Unnamed"
 msgstr "Sans nom"
 
@@ -8403,3 +8403,12 @@ msgctxt "category-plural"
 msgid "Wires"
 msgstr "Câbles"
 
+#: crates/ui-egui/src/cad.rs:51
+#~ msgid "DXF drawings"
+#~ msgstr "Dessins DXF"
+#: crates/ui-egui/src/lib.rs:3401
+#~ msgid "Import CAD: a DXF drawing brought into the project, drawn under the model in the plans of a level, its layers, colours and linetypes kept, and snapped to"
+#~ msgstr "Importer CAO: un dessin DXF amené dans le projet, dessiné sous le modèle dans les plans d'un niveau, avec ses calques, couleurs et types de ligne conservés, et sur lequel s'accrocher"
+#: crates/ui-egui/src/lib.rs:3393
+#~ msgid "Link CAD: a DXF drawing shown in the plans of a level, read again from its file on Reload and when the project opens"
+#~ msgstr "Lier CAO: un dessin DXF affiché dans les plans d'un niveau, relu depuis son fichier au rechargement et à l'ouverture du projet"
