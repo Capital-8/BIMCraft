@@ -5,14 +5,16 @@
 //! draws is the core's: the note as it will be (`render::sketch`), laid out by `render::note_layout`, so the caret and
 //! the selection stand on its letters. And Text Type Properties, the dialog Edit Type opens for a note.
 
+use crate::popup::Modal;
+
 use bimcraft_core::geom::P2;
 use bimcraft_core::model::{Element, Id, Model, Note};
 use bimcraft_core::render::{self, Drawing};
 use bimcraft_core::text::{self, Format, Layout, Style, TextType};
 use bimcraft_i18n::msg;
 use egui::{
-    Button, ComboBox, Context, DragValue, Event, Id as UiId, Key, Modal, PointerButton, Pos2, Response, RichText, Shape, Stroke, TextEdit,
-    Ui, vec2,
+    Button, ComboBox, Context, DragValue, Event, Id as UiId, Key, PointerButton, Pos2, Response, RichText, Shape, Stroke, TextEdit, Ui,
+    vec2,
 };
 use serde_json::{Value, json};
 
@@ -496,52 +498,56 @@ impl BimApp {
         let names: Vec<String> = model.text_types.keys().cloned().collect();
         let fonts = text::families();
         let (mut ok, mut cancel, mut apply, mut asked) = (false, false, false, None);
-        Modal::new(UiId::new("text-type-properties")).show(ctx, |ui| {
-            typeprops::title(ui);
-            asked = typeprops::head(ui, "text-type", &tf("System Family: {}", &[t("Text")]), &names, &d.name, &mut d.naming, true);
-            let below = typeprops::foot_height(ui, d.error.is_some());
-            typeprops::table(ui, "text-type", below, |tb| {
-                // As Revit's: how it's drawn, then its lettering.
-                tb.group("Graphics");
-                tb.color(t("Color"), &mut d.t.color);
-                tb.drag(t("Border Line Weight"), DragValue::new(&mut d.t.border_pen.0).range(0..=bimcraft_core::pen::MAX_PEN));
-                tb.check(t("Show Border"), &mut d.t.border);
-                tb.drag(
-                    t("Leader/Border Offset"),
-                    DragValue::new(&mut d.t.border_offset).range(0.0..=50.0).speed(0.1).max_decimals(2).suffix(" mm"),
-                );
-                tb.group("Text");
-                let font = &mut d.t.font;
-                let find = &mut d.find;
-                tb.row(t("Text Font"), |ui, l| {
-                    ComboBox::from_id_salt("text-type-font")
-                        .selected_text(font.as_str())
-                        .width(ui.available_width())
-                        .height(320.0)
-                        .show_ui(ui, |ui| {
-                            ui.add(TextEdit::singleline(find).hint_text(t("Search fonts")).desired_width(180.0));
-                            let find = find.trim().to_lowercase();
-                            for f in fonts.iter().filter(|f| f.to_lowercase().contains(&find)) {
-                                ui.selectable_value(font, f.clone(), f);
-                            }
-                        })
-                        .response
-                        .labelled_by(l)
+        let r = Modal::new(UiId::new("text-type-properties"), t("Type Properties")).width(crate::typeprops::WIDTH).show(ctx, |ui| {
+            crate::popup::body(ui, |ui| {
+                asked = typeprops::head(ui, "text-type", &tf("System Family: {}", &[t("Text")]), &names, &d.name, &mut d.naming, true);
+                let below = typeprops::foot_height(ui, d.error.is_some());
+                typeprops::table(ui, "text-type", below, |tb| {
+                    // As Revit's: how it's drawn, then its lettering.
+                    tb.group("Graphics");
+                    tb.color(t("Color"), &mut d.t.color);
+                    tb.drag(t("Border Line Weight"), DragValue::new(&mut d.t.border_pen.0).range(0..=bimcraft_core::pen::MAX_PEN));
+                    tb.check(t("Show Border"), &mut d.t.border);
+                    tb.drag(
+                        t("Leader/Border Offset"),
+                        DragValue::new(&mut d.t.border_offset).range(0.0..=50.0).speed(0.1).max_decimals(2).suffix(" mm"),
+                    );
+                    tb.group("Text");
+                    let font = &mut d.t.font;
+                    let find = &mut d.find;
+                    tb.row(t("Text Font"), |ui, l| {
+                        ComboBox::from_id_salt("text-type-font")
+                            .selected_text(font.as_str())
+                            .width(ui.available_width())
+                            .height(320.0)
+                            .show_ui(ui, |ui| {
+                                ui.add(TextEdit::singleline(find).hint_text(t("Search fonts")).desired_width(180.0));
+                                let find = find.trim().to_lowercase();
+                                for f in fonts.iter().filter(|f| f.to_lowercase().contains(&find)) {
+                                    ui.selectable_value(font, f.clone(), f);
+                                }
+                            })
+                            .response
+                            .labelled_by(l)
+                    });
+                    // What letters it on this system, where that is another font.
+                    let drawn = text::resolve(&d.t.font, false, false);
+                    if !drawn.family().eq_ignore_ascii_case(d.t.font.trim()) {
+                        tb.shown("", &tf("Not on this system: drawn with {}", &[drawn.family()]));
+                    }
+                    tb.drag(t("Text Size"), DragValue::new(&mut d.t.size).range(0.1..=100.0).speed(0.1).max_decimals(2).suffix(" mm"));
+                    tb.check(t("Bold"), &mut d.t.bold);
+                    tb.check(t("Italic"), &mut d.t.italic);
+                    tb.check(t("Underline"), &mut d.t.underline);
+                    tb.drag(t("Width Factor"), DragValue::new(&mut d.t.width_factor).range(0.1..=10.0).speed(0.01).max_decimals(2));
                 });
-                // What letters it on this system, where that is another font.
-                let drawn = text::resolve(&d.t.font, false, false);
-                if !drawn.family().eq_ignore_ascii_case(d.t.font.trim()) {
-                    tb.shown("", &tf("Not on this system: drawn with {}", &[drawn.family()]));
-                }
-                tb.drag(t("Text Size"), DragValue::new(&mut d.t.size).range(0.1..=100.0).speed(0.1).max_decimals(2).suffix(" mm"));
-                tb.check(t("Bold"), &mut d.t.bold);
-                tb.check(t("Italic"), &mut d.t.italic);
-                tb.check(t("Underline"), &mut d.t.underline);
-                tb.drag(t("Width Factor"), DragValue::new(&mut d.t.width_factor).range(0.1..=10.0).speed(0.01).max_decimals(2));
+                typeprops::error(ui, d.error.as_deref());
             });
-            (ok, cancel, apply) = typeprops::foot(ui, d.error.as_deref());
+            crate::popup::footer(ui, |ui| {
+                (ok, cancel, apply) = typeprops::foot(ui);
+            });
         });
-        if cancel || ctx.input(|i| i.key_pressed(Key::Escape)) {
+        if cancel || r.should_close() {
             return;
         }
         match asked {

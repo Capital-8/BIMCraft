@@ -5,11 +5,13 @@
 //! window's size, the background autosave interval, and the colour High Contrast Point Clouds draws scans in.
 //! The pages for what is still to come (performance and graphics) show what they will hold, greyed out.
 
+use crate::popup::Modal;
+
 use bimcraft_i18n::msg;
 
 use std::path::{Path, PathBuf};
 
-use egui::{Align, ComboBox, Context, Id as UiId, Layout, Modal, RichText, ScrollArea, ThemePreference, Ui, vec2};
+use egui::{Align, ComboBox, Context, Id as UiId, Layout, RichText, ScrollArea, ThemePreference, Ui, vec2};
 use serde_json::{Value, json};
 
 use crate::BimApp;
@@ -267,33 +269,34 @@ impl BimApp {
     pub(crate) fn settings_window(&mut self, ctx: &Context) {
         let Some(mut page) = self.settings_page else { return };
         let mut close = false;
-        let r = Modal::new(UiId::new("settings")).show(ctx, |ui| {
-            ui.set_width(660.0);
-            ui.label(RichText::new(t("Settings")).heading());
-            ui.add_space(6.0);
-            // A fixed size, so the window doesn't grow or move under the pointer from one frame or page to the next.
-            ui.allocate_ui_with_layout(vec2(660.0, 380.0), Layout::left_to_right(Align::Min), |ui| {
-                ui.vertical(|ui| {
-                    ui.set_width(150.0);
-                    for p in Page::ALL {
-                        if ui.selectable_label(page == p, t(p.name())).clicked() {
-                            page = p;
+        let r = Modal::new(UiId::new("settings"), t("Settings")).width(660.0).show(ctx, |ui| {
+            crate::popup::body(ui, |ui| {
+                ui.add_space(6.0);
+                // A fixed size, so the window doesn't grow or move under the pointer from one frame or page to the next.
+                ui.allocate_ui_with_layout(vec2(660.0, 380.0), Layout::left_to_right(Align::Min), |ui| {
+                    ui.vertical(|ui| {
+                        ui.set_width(150.0);
+                        for p in Page::ALL {
+                            if ui.selectable_label(page == p, t(p.name())).clicked() {
+                                page = p;
+                            }
                         }
-                    }
-                });
-                ui.separator();
-                ui.vertical(|ui| {
-                    ScrollArea::vertical().id_salt("settings-page").auto_shrink([false, false]).show(ui, |ui| match page {
-                        Page::Interface => self.interface_page(ui, ctx),
-                        Page::Performance => self.performance_page(ui),
-                        Page::Graphics => self.graphics_page(ui),
-                        Page::Files => self.files_page(ui),
-                        Page::Updates => self.updates_page(ui),
+                    });
+                    ui.separator();
+                    ui.vertical(|ui| {
+                        ScrollArea::vertical().id_salt("settings-page").auto_shrink([false, false]).show(ui, |ui| match page {
+                            Page::Interface => self.interface_page(ui, ctx),
+                            Page::Performance => self.performance_page(ui),
+                            Page::Graphics => self.graphics_page(ui),
+                            Page::Files => self.files_page(ui),
+                            Page::Updates => self.updates_page(ui),
+                        });
                     });
                 });
             });
-            ui.separator();
-            ui.with_layout(Layout::right_to_left(Align::Min), |ui| close = ui.button(t("Close")).clicked());
+            crate::popup::footer(ui, |ui| {
+                ui.with_layout(Layout::right_to_left(Align::Min), |ui| close = ui.button(t("Close")).clicked());
+            });
         });
         self.settings_page = if close || r.should_close() { None } else { Some(page) };
     }

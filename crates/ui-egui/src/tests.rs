@@ -5199,6 +5199,7 @@ mod notes;
 mod objectstyles;
 mod patterns;
 mod planviews;
+mod popup;
 mod purge;
 mod reinforce;
 mod revit;

@@ -220,7 +220,7 @@ pub const ERROR_HEIGHT: f32 = 40.0;
 /// a window too small for a dialog scrolls it, and its buttons stay in reach.
 pub fn dialog_room(ui: &Ui, below: f32) -> f32 {
     let used = ui.cursor().top() - ui.min_rect().top();
-    (ui.ctx().content_rect().height() - DIALOG_MARGIN - used - below).max(80.0)
+    (ui.ctx().content_rect().height() - DIALOG_MARGIN - used - below).min(ui.available_height() - below).max(80.0)
 }
 
 /// The height of a row of buttons or fields in a dialog, with the gap above it.

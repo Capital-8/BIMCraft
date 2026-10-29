@@ -51,13 +51,6 @@ pub(crate) enum Head {
     Rename(String),
 }
 
-/// The dialog's title.
-pub(crate) fn title(ui: &mut Ui) {
-    ui.set_width(WIDTH);
-    ui.label(RichText::new(t("Type Properties")).heading());
-    ui.add_space(8.0);
-}
-
 /// Family and Type, with Duplicate and Rename beside the type; `naming`, the name typed for either, in a row under it. `family`
 /// is shown, not picked: a type's family is what Edit Type opened it for. `rename` is false where the type can't be renamed.
 pub(crate) fn head(
@@ -300,13 +293,16 @@ impl Table<'_> {
     }
 }
 
-/// What stopped OK or Apply, said in the dialog; then OK, Cancel and Apply. Which were clicked.
-pub(crate) fn foot(ui: &mut Ui, error: Option<&str>) -> (bool, bool, bool) {
+/// What stopped OK or Apply, shown above the fixed footer.
+pub(crate) fn error(ui: &mut Ui, error: Option<&str>) {
     if let Some(e) = error {
         ui.add_space(6.0);
         crate::style::boxed_text(ui, "type-properties-error", pal().error, e, crate::style::ERROR_HEIGHT);
     }
-    ui.add_space(10.0);
+}
+
+/// OK, Cancel and Apply in the fixed footer. Which were clicked.
+pub(crate) fn foot(ui: &mut Ui) -> (bool, bool, bool) {
     let (mut ok, mut cancel, mut apply) = (false, false, false);
     ui.with_layout(Layout::right_to_left(Align::Min), |ui| {
         let size = vec2(76.0, 0.0);

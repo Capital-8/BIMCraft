@@ -5,6 +5,8 @@
 //! selection, the Options Bar, Properties over the Project Browser on the left, views in tabs
 //! (plans, the 3D view, schedules), and the tool's prompt in the status bar.
 
+use crate::popup::Modal;
+
 use bimcraft_i18n::msg;
 
 mod browser;
@@ -37,6 +39,7 @@ mod objectstyles;
 mod orbit;
 mod paper;
 mod phasing;
+mod popup;
 mod properties;
 mod purge;
 pub mod recent;
@@ -73,7 +76,7 @@ use bimcraft_core::{element_json, render, schedule, stairs};
 use egui::containers::menu::{MenuButton, SubMenuButton};
 use egui::{
     Align, Align2, Area, CentralPanel, Color32, ComboBox, Context, CornerRadius, Event, FontId, Frame, Grid, Id as UiId, Key,
-    KeyboardShortcut, Layout, Margin, Modal, Modifiers, Order, Panel, Popup, Pos2, Rect, Response, RichText, ScrollArea, Sense, Stroke,
+    KeyboardShortcut, Layout, Margin, Modifiers, Order, Panel, Popup, Pos2, Rect, Response, RichText, ScrollArea, Sense, Stroke,
     StrokeKind, TextEdit, Ui, ViewportCommand, WidgetInfo, WidgetType, pos2, vec2,
 };
 use serde_json::{Value, json};
@@ -4197,7 +4200,7 @@ impl BimApp {
         }
         let (title, color) = if self.status.error { (t("Error"), pal().error) } else { (t("Note"), pal().accent_ink) };
         let at = self.view_rect.right_bottom() - vec2(16.0, 16.0);
-        Area::new(UiId::new("warning")).order(Order::Foreground).fixed_pos(at).pivot(Align2::RIGHT_BOTTOM).show(ctx, |ui| {
+        Area::new(UiId::new("warning")).order(Order::Middle).fixed_pos(at).pivot(Align2::RIGHT_BOTTOM).show(ctx, |ui| {
             Frame::popup(ui.style()).fill(pal().surface).stroke(Stroke::new(1.0, color)).show(ui, |ui| {
                 ui.set_max_width(380.0);
                 ui.horizontal(|ui| {
@@ -4433,16 +4436,18 @@ impl BimApp {
         }
         let mut choice = None;
         let name = self.session.model.name.clone();
-        let r = Modal::new(UiId::new("unsaved")).show(ctx, |ui| {
-            ui.label(RichText::new(tf("Save changes to {}?", &[&name])).strong());
-            ui.label(t("If you don't, the changes since it was last saved are lost."));
-            ui.add_space(8.0);
-            ui.horizontal(|ui| {
-                for (label, c) in [("Save", Choice::Save), (msg!("Don't Save"), Choice::Discard), ("Cancel", Choice::Cancel)] {
-                    if ui.button(t(label)).clicked() {
-                        choice = Some(c);
+        let r = Modal::new(UiId::new("unsaved"), tf("Save changes to {}?", &[&name])).width(580.0).show(ctx, |ui| {
+            crate::popup::body(ui, |ui| {
+                ui.label(t("If you don't, the changes since it was last saved are lost."));
+            });
+            crate::popup::footer(ui, |ui| {
+                ui.horizontal(|ui| {
+                    for (label, c) in [("Save", Choice::Save), (msg!("Don't Save"), Choice::Discard), ("Cancel", Choice::Cancel)] {
+                        if ui.button(t(label)).clicked() {
+                            choice = Some(c);
+                        }
                     }
-                }
+                });
             });
         });
         if choice.is_some() || r.should_close() {
