@@ -375,11 +375,13 @@ pub static ALL: &[Command] = &[
          unless told). A spacing is the most between bars: they are spread evenly, so the last is where the first is from the \
          other end. Beam: `bottom` and `top` {count, diameter, hook?} (`hook`, the straight leg in mm turned up from the bottom bars and down from the top ones at both ends, or {start, end}); `stirrup` {diameter, spacing, ends?: {length, spacing}, hook?} \
          (`ends` closer in the first and last `length` mm; `hook` a tail in mm at the ends); `skin` {diameter, spacing} up each \
-         side between the rows; `anchor` {start?, end?} mm the bars run past the ends (0 flush, none a cover short). Column \
-         (rectangular): `bars` {diameter, x?, y?, hook?} (`hook`, a leg turned into the section at the foot and the top, or {below, above}; bars along each face across its width and across its depth, corners counted, \
-         2 each), `stirrup`, `ties` {diameter} across the section between bars that are not at a corner, `anchor` {below?, above?}. \
-         Footing (rectangular): `mesh` {x?, y?: {diameter, spacing}, hook?} (hook turns the ends up). Floor (level): `bottom` and \
-         `top` {x?, y?: {diameter, spacing}}, bars along east and north, stopping a cover short of its outline and its openings. \
+         side between the rows; `anchor` {start?, end?} mm the bars run past the ends (0 flush, none a cover short). Column: \
+         `bars` {diameter, x?, y?, hook?} (`hook`, a leg turned into the section at the foot and the top, or {below, above}; bars along each face across its width and across its depth, corners counted, \
+         2 each; a round column takes `count` instead of x and y, evenly round its circle, with hoops of 24 sides), `stirrup`, `ties` {diameter, hook?} \
+         across a rectangular section between bars that are not at a corner (`hook`, a tail in mm at each end), `anchor` {below?, above?}. \
+         Footing: `mesh` {x?, y?: {diameter, spacing}, hook?} (hook turns the ends up; a round footing's bars stop at its circle). Floor: `bottom` and \
+         `top` {x?, y?: {diameter, spacing}, hook?} (bars along east and north; `hook`, a leg turned up from a bottom mesh and down from a top one), \
+         stopping a cover short of its outline and its openings; a sloped floor's bars follow its top, the cover square to it. \
          The bars are `rebar` elements of the host, each on a `layer`; reinforcing again replaces the ones it made and leaves \
          any drawn by hand. `preset` names a `reinforcement_preset` of the host's kind, whose parameters stand for the ones not given here. `hosts` arms each of a list alike (up to 1000, and 20000 bars in all); if one refuses, none is armed, \
          and the refusal names it. Returns ids, count, hosts, removed and weight_kg",

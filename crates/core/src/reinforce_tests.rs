@@ -437,14 +437,10 @@ fn a_floors_bars_stop_at_its_outline_and_round_its_openings() {
 fn a_floor_that_cannot_be_armed_is_refused() {
     let mut s = Session::new();
     let host = slab(&mut s, json!({}));
-    let sloped = slab(&mut s, json!({"slope": 5, "arrow": [[0, 0], [4000, 0]]}));
     let bottom = json!({"x": {"diameter": 8, "spacing": 150}});
-    let e = fails(&mut s, "reinforce", json!({"host": sloped, "cover": 20, "bottom": bottom.clone()}));
-    assert!(e.contains("slope"), "{e}");
     for (extra, says) in [
         // 90 of cover at both faces in 200 of slab: the meshes meet.
         (json!({"cover": 90, "bottom": bottom.clone(), "top": bottom.clone()}), "meet"),
-        (json!({"bottom": {"x": {"diameter": 8, "spacing": 150}, "hook": 50}}), "hook"),
         (json!({"bottom": {}}), "nothing"),
         (json!({"stirrup": {"diameter": 5, "spacing": 150}, "bottom": bottom.clone()}), "stirrup"),
     ] {
@@ -466,7 +462,12 @@ fn a_floor_too_big_for_one_command_is_refused_not_cut_short() {
 #[test]
 fn hostile_parameters_for_every_kind_of_host_are_refused_or_made_never_a_crash() {
     let mut s = Session::new();
-    let hosts = [beam(&mut s), column(&mut s, 33.0), footing(&mut s), slab(&mut s, json!({}))];
+    s.model_mut().types.footing.insert("Round 1000".into(), crate::model::ColumnType { width: 1000.0, depth: 1000.0, round: true });
+    let round_column =
+        run(&mut s, "structural_column", json!({"at": [9000, 0], "type": "Concrete Round 400", "height": 3000}))["id"].as_u64().unwrap();
+    let round_footing = run(&mut s, "footing", json!({"at": [9000, 5000], "type": "Round 1000"}))["id"].as_u64().unwrap();
+    let sloped = slab(&mut s, json!({"slope": 7, "arrow": [[0, 0], [4000, 3000]]}));
+    let hosts = [beam(&mut s), column(&mut s, 33.0), footing(&mut s), slab(&mut s, json!({})), round_column, round_footing, sloped];
     let row = |k: Value, d: Value| json!({"count": k, "diameter": d});
     let pitch = |d: Value, sp: Value| json!({"diameter": d, "spacing": sp});
     let mut hostile = Vec::new();
@@ -484,6 +485,12 @@ fn hostile_parameters_for_every_kind_of_host_are_refused_or_made_never_a_crash()
         hostile.push(json!({"cover": 25, "bottom": row(json!(2), json!(16)), "top": {"count": 2, "diameter": 16, "hook": {"start": n.clone()}}, "bars": {"diameter": 16, "hook": {"below": n.clone(), "above": n.clone()}}}));
         hostile.push(
             json!({"cover": 25, "bottom": {"count": 2, "diameter": 16, "hook": n.clone()}, "bars": {"diameter": 16, "hook": n.clone()}}),
+        );
+        hostile.push(
+            json!({"cover": 25, "bars": {"diameter": 16, "count": n.clone(), "hook": n.clone()}, "stirrup": pitch(json!(5), json!(150)), "ties": {"diameter": 5, "hook": n.clone()}}),
+        );
+        hostile.push(
+            json!({"cover": 25, "bottom": {"x": pitch(json!(8), json!(150)), "hook": n.clone()}, "top": {"y": pitch(json!(8), json!(150)), "hook": n.clone()}}),
         );
         hostile.push(json!({"cover": 25, "bars": {"diameter": 16}, "anchor": {"start": n.clone(), "end": n.clone(), "below": n.clone(), "above": n.clone()}, "skin": pitch(json!(8), n.clone()), "clearance": n}));
     }
@@ -797,4 +804,215 @@ fn a_preset_that_is_not_one_of_a_kind_of_host_is_refused() {
     }
     let e = fails(&mut s, "reinforcement_preset", json!({"name": "one too many", "kind": "beam", "params": {"cover": 25}}));
     assert!(e.contains(&crate::reinforce::MAX_PRESETS.to_string()), "{e}");
+}
+
+fn distance_from(b: &Value, i: usize, x: f64, y: f64) -> f64 {
+    let (px, py, _) = xy(b, i);
+    (px - x).hypot(py - y)
+}
+
+#[test]
+fn a_round_column_gets_bars_round_a_circle_and_round_hoops() {
+    let mut s = Session::new();
+    let host =
+        run(&mut s, "structural_column", json!({"at": [1000, 2000], "type": "Concrete Round 400", "height": 3000}))["id"].as_u64().unwrap();
+    run(
+        &mut s,
+        "reinforce",
+        json!({"host": host, "cover": 25, "stirrup": {"diameter": 5, "spacing": 150, "hook": 50}, "bars": {"diameter": 16, "count": 8, "hook": {"below": 100}}}),
+    );
+    // Eight bars on a circle 162 mm from the middle (200 less 25 of cover, 5 of hoop, 8 for half the bar), a leg at the foot.
+    let bars = on(&s, host, "bars");
+    assert_eq!(bars.len(), 8);
+    for b in &bars {
+        assert_eq!(b["path"].as_array().map(Vec::len), Some(3), "{b}");
+        assert!((distance_from(b, 1, 1000.0, 2000.0) - 162.0).abs() < 1e-6, "{b}");
+        // The leg runs 100 toward the middle: 62 from it.
+        assert!((distance_from(b, 0, 1000.0, 2000.0) - 62.0).abs() < 1e-6, "{b}");
+        assert!(near(&b["length"], 2950.0 + 100.0), "{b}");
+    }
+    assert!(bars.iter().any(|b| (xy(b, 1).0 - 1162.0).abs() < 1e-6 && (xy(b, 1).1 - 2000.0).abs() < 1e-6));
+    // Hoops of 24 sides 172.5 from the middle, a tail of 50 at each end: 27 points, the perimeter and the tails.
+    let hoops = on(&s, host, "stirrup");
+    assert_eq!(hoops.len(), 21);
+    let side = 2.0 * 172.5 * (std::f64::consts::PI / 24.0).sin();
+    assert!(
+        hoops
+            .iter()
+            .all(|b| b["path"].as_array().map(Vec::len) == Some(27) && near(&b["length"], ((24.0 * side + 100.0) * 100.0).round() / 100.0)),
+        "{:?}",
+        hoops.first()
+    );
+}
+
+#[test]
+fn a_round_column_takes_a_count_and_a_rectangular_one_takes_x_and_y() {
+    let mut s = Session::new();
+    let round =
+        run(&mut s, "structural_column", json!({"at": [5000, 0], "type": "Concrete Round 400", "height": 3000}))["id"].as_u64().unwrap();
+    let rect = column(&mut s, 0.0);
+    for (host, extra, says) in [
+        (round, json!({"bars": {"diameter": 16, "x": 3}}), "round"),
+        (round, json!({"bars": {"diameter": 16}}), "count"),
+        (round, json!({"bars": {"diameter": 16, "count": 2}}), "count"),
+        (round, json!({"bars": {"diameter": 16, "count": 60}}), "clearance"),
+        (round, json!({"bars": {"diameter": 16, "count": 8}, "stirrup": {"diameter": 5, "spacing": 150}, "ties": {"diameter": 5}}), "tie"),
+        (round, json!({"bars": {"diameter": 16, "count": 8, "hook": 500}}), "hook"),
+        (round, json!({"cover": 195, "bars": {"diameter": 16, "count": 8}}), "narrow"),
+        (rect, json!({"bars": {"diameter": 16, "count": 8}}), "rectangular"),
+    ] {
+        let mut p = json!({"host": host, "cover": 25});
+        p.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+        let e = fails(&mut s, "reinforce", p);
+        assert!(e.contains(says), "{extra}: {e}");
+    }
+}
+
+#[test]
+fn a_round_footing_gets_a_mesh_whose_bars_stop_at_its_circle() {
+    let mut s = Session::new();
+    s.model_mut().types.footing.insert("Round 1000".into(), crate::model::ColumnType { width: 1000.0, depth: 1000.0, round: true });
+    let host = run(&mut s, "footing", json!({"at": [3000, 3000], "type": "Round 1000"}))["id"].as_u64().unwrap();
+    run(
+        &mut s,
+        "reinforce",
+        json!({"host": host, "cover": 50, "mesh": {"x": {"diameter": 10, "spacing": 150}, "y": {"diameter": 10, "spacing": 150}, "hook": 100}}),
+    );
+    let (mx, my) = (on(&s, host, "mesh x"), on(&s, host, "mesh y"));
+    // 890 mm between the outer bars at no more than 150: six gaps, seven bars each way.
+    assert_eq!((mx.len(), my.len()), (7, 7));
+    for b in mx.iter().chain(&my) {
+        // Each bar runs from the circle 450 from the middle (500 less the cover) to the circle, a leg of 100 turned up at each end.
+        assert_eq!(b["path"].as_array().map(Vec::len), Some(4), "{b}");
+        for i in [1, 2] {
+            assert!((distance_from(b, i, 3000.0, 3000.0) - 450.0).abs() < 1e-6, "{b}");
+        }
+    }
+    // The middle bar crosses the whole circle: 900, and its legs 200.
+    assert!(mx.iter().any(|b| near(&b["length"], 1100.0)), "{:?}", mx.iter().map(|b| b["length"].clone()).collect::<Vec<_>>());
+    let e = fails(&mut s, "reinforce", json!({"host": host, "cover": 500, "mesh": {"x": {"diameter": 10, "spacing": 150}}}));
+    assert!(e.contains("fit") || e.contains("small") || e.contains("inside"), "{e}");
+}
+
+#[test]
+fn a_sloped_floors_bars_follow_its_top_a_perpendicular_cover_below_it() {
+    let mut s = Session::new();
+    let host = slab(&mut s, json!({"slope": 5, "arrow": [[0, 0], [4000, 0]]}));
+    run(
+        &mut s,
+        "reinforce",
+        json!({"host": host, "cover": 20, "bottom": {"x": {"diameter": 8, "spacing": 150}, "y": {"diameter": 8, "spacing": 200}}}),
+    );
+    let (tan, sec) = (5f64.to_radians().tan(), 1.0 / 5f64.to_radians().cos());
+    let (bx, by) = (on(&s, host, "bottom x"), on(&s, host, "bottom y"));
+    assert_eq!((bx.len(), by.len()), (21, 21));
+    // The top rises with x from z 0 at x 0; the bars lie 20 + 4 mm from the underside, 176 from the top, square to it, which is
+    // 176 / cos 5 plumb. They run from x 20 to 3980 along the slope.
+    for b in &bx {
+        let (z0, z1) = (xy(b, 0).2, xy(b, 1).2);
+        assert!((z0 - (20.0 * tan - 176.0 * sec)).abs() < 1e-6 && (z1 - (3980.0 * tan - 176.0 * sec)).abs() < 1e-6, "{b}");
+        assert!(near(&b["length"], ((3960.0 * (1.0 + tan * tan).sqrt()) * 100.0).round() / 100.0), "{b}");
+    }
+    // Across the slope the bars are level, on the layer above: 168 from the top.
+    for b in &by {
+        let x = xy(b, 0).0;
+        assert!((xy(b, 0).2 - (x * tan - 168.0 * sec)).abs() < 1e-6 && (xy(b, 1).2 - xy(b, 0).2).abs() < 1e-9, "{b}");
+    }
+    // A mesh that does not fit the thickness is refused as on a level floor.
+    let e = fails(
+        &mut s,
+        "reinforce",
+        json!({"host": host, "cover": 90, "bottom": {"x": {"diameter": 8, "spacing": 150}}, "top": {"x": {"diameter": 8, "spacing": 200}}}),
+    );
+    assert!(e.contains("meet"), "{e}");
+}
+
+#[test]
+fn a_floors_bars_end_in_hooks_up_at_the_bottom_and_down_at_the_top() {
+    let mut s = Session::new();
+    let host = slab(&mut s, json!({}));
+    run(
+        &mut s,
+        "reinforce",
+        json!({"host": host, "cover": 20, "bottom": {"x": {"diameter": 8, "spacing": 150}, "hook": 100}, "top": {"x": {"diameter": 6.3, "spacing": 200}, "hook": 60}}),
+    );
+    for b in on(&s, host, "bottom x") {
+        assert_eq!(b["path"].as_array().map(Vec::len), Some(4), "{b}");
+        assert!(near(&b["length"], 3960.0 + 200.0), "{b}");
+        assert!((xy(&b, 0).2 + 76.0).abs() < 1e-6 && (xy(&b, 1).2 + 176.0).abs() < 1e-6, "{b}");
+    }
+    for b in on(&s, host, "top x") {
+        assert!(near(&b["length"], 3960.0 + 120.0), "{b}");
+        assert!((xy(&b, 0).2 - (-23.15 - 60.0)).abs() < 1e-6, "{b}");
+    }
+    // A leg past the cover on the other face, or no length, is refused.
+    for hook in [json!(160), json!(-1), json!(1e300)] {
+        let e =
+            fails(&mut s, "reinforce", json!({"host": host, "cover": 20, "bottom": {"x": {"diameter": 8, "spacing": 150}, "hook": hook}}));
+        assert!(e.contains("hook"), "{e}");
+    }
+}
+
+#[test]
+fn a_tie_ends_in_tails_when_it_is_told_to() {
+    let mut s = Session::new();
+    let host = column(&mut s, 0.0);
+    run(
+        &mut s,
+        "reinforce",
+        json!({"host": host, "cover": 25, "stirrup": {"diameter": 5, "spacing": 150}, "bars": {"diameter": 16, "x": 3, "y": 3}, "ties": {"diameter": 6.3, "hook": 50}}),
+    );
+    let ties = on(&s, host, "tie");
+    assert_eq!(ties.len(), 42);
+    // Across 240 between the bars' outer faces, and a tail of 50 at each end.
+    assert!(ties.iter().all(|b| b["path"].as_array().map(Vec::len) == Some(4) && near(&b["length"], 240.0 + 100.0)), "{:?}", ties.first());
+    let e = fails(
+        &mut s,
+        "reinforce",
+        json!({"host": host, "cover": 25, "stirrup": {"diameter": 5, "spacing": 150}, "bars": {"diameter": 16, "x": 3, "y": 3}, "ties": {"diameter": 6.3, "hook": -1}}),
+    );
+    assert!(e.contains("hook"), "{e}");
+}
+
+#[test]
+fn a_bar_lying_in_a_sections_plane_is_drawn_along_it_and_one_it_crosses_as_a_dot() {
+    let mut s = Session::new();
+    let host = beam(&mut s);
+    run(
+        &mut s,
+        "reinforce",
+        json!({"host": host, "cover": 25, "bottom": {"count": 1, "diameter": 16}, "stirrup": {"diameter": 5, "spacing": 1000}}),
+    );
+    let along = run(&mut s, "section", json!({"start": [-500, 0], "end": [6500, 0]}))["id"].as_u64().unwrap();
+    let view = render::section_fit(&s.model, along, 1400, 600);
+    let d = render::section(&s.model, along, view);
+    // The one bar below, in the plane y 0 of the beam's axis: a strip from one end to the other, 25 in from each.
+    let bar = on(&s, host, "bottom")[0]["id"].as_u64().unwrap();
+    let fills: Vec<(f64, f64)> = d
+        .prims
+        .iter()
+        .zip(&d.owners)
+        .filter(|(_, o)| **o == Some(bar))
+        .filter_map(|(p, _)| if let Prim::Fill { rings, .. } = p { Some(rings) } else { None })
+        .map(|rings| {
+            let xs: Vec<f64> = rings.iter().flatten().map(|q| d.view.mm(*q).0).collect();
+            (xs.iter().copied().fold(f64::MAX, f64::min), xs.iter().copied().fold(f64::MIN, f64::max))
+        })
+        .collect();
+    assert!(fills.iter().any(|(lo, hi)| hi - lo > 5900.0 && hi - lo < 6000.0), "{fills:?}");
+    // The section across the beam cuts the same bar once, a dot of about its thickness.
+    let across = run(&mut s, "section", json!({"start": [3000, -1000], "end": [3000, 1000]}))["id"].as_u64().unwrap();
+    let d = render::section(&s.model, across, render::section_fit(&s.model, across, 1400, 600));
+    let dots: Vec<f64> = d
+        .prims
+        .iter()
+        .zip(&d.owners)
+        .filter(|(_, o)| **o == Some(bar))
+        .filter_map(|(p, _)| if let Prim::Fill { rings, .. } = p { Some(rings) } else { None })
+        .map(|rings| {
+            let xs: Vec<f64> = rings.iter().flatten().map(|q| d.view.mm(*q).0).collect();
+            xs.iter().copied().fold(f64::MIN, f64::max) - xs.iter().copied().fold(f64::MAX, f64::min)
+        })
+        .collect();
+    assert!(dots.iter().any(|w| (10.0..30.0).contains(w)), "{dots:?}");
 }

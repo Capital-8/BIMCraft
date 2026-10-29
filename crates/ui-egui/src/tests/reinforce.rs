@@ -250,3 +250,62 @@ fn a_preset_is_saved_from_the_fields_chosen_for_another_beam_and_deleted() {
     assert!(h.state().session.model.reinforcement.is_empty());
     press(&mut h, "Cancel");
 }
+
+#[test]
+fn a_round_column_a_floors_hooks_and_a_ties_tails_have_their_fields() {
+    let mut h = app(&format!(
+        "{BOX}\nstructural_column {{\"at\": [2000, 2000], \"type\": \"Concrete Round 400\", \"height\": 3000}}\nstructural_column {{\"at\": [6000, 2000], \"height\": 3000}}\nfloor {{\"boundary\": [[0, 0], [4000, 0], [4000, 3000], [0, 3000]]}}"
+    ));
+    let cols = ids(&h, "structuralcolumn");
+    // A round column: bars are counted, and there are no ties; a rectangular one has the others.
+    select(&mut h, cols[0]);
+    shortcut(&mut h, "RF");
+    assert!(
+        h.query_by_label("Bars: Count").is_some()
+            && h.query_by_label("Bars: Along width").is_none()
+            && h.query_by_label("Ties: Diameter").is_none()
+    );
+    fill(
+        &mut h,
+        &[("Cover", "25"), ("Bars: Diameter", "16"), ("Bars: Count", "8"), ("Stirrups: Diameter", "5"), ("Stirrups: Spacing", "150")],
+    );
+    press(&mut h, "OK");
+    assert_eq!(bars(&h).len(), 8 + 21);
+    select(&mut h, cols[1]);
+    shortcut(&mut h, "RF");
+    assert!(h.query_by_label("Bars: Count").is_none() && h.query_by_label("Bars: Along width").is_some());
+    fill(
+        &mut h,
+        &[
+            ("Cover", "25"),
+            ("Bars: Diameter", "16"),
+            ("Bars: Along width", "3"),
+            ("Bars: Along depth", "3"),
+            ("Stirrups: Diameter", "5"),
+            ("Stirrups: Spacing", "150"),
+            ("Ties: Diameter", "6.3"),
+            ("Ties: Hook", "50"),
+        ],
+    );
+    press(&mut h, "OK");
+    let tied: Vec<Id> = bars(&h).into_iter().filter(|id| field(&h, *id, "layer") == json!("tie")).collect();
+    assert_eq!(tied.len(), 42);
+    assert!(tied.iter().all(|id| field(&h, *id, "path").as_array().map(Vec::len) == Some(4)));
+    // A floor: a hook turned up from the bottom bars.
+    let floor = ids(&h, "floor")[0];
+    select(&mut h, floor);
+    shortcut(&mut h, "RF");
+    fill(
+        &mut h,
+        &[
+            ("Cover", "20"),
+            ("Bottom, bars along east: Diameter", "8"),
+            ("Bottom, bars along east: Spacing", "150"),
+            ("Bottom ends turned up: Hook", "100"),
+        ],
+    );
+    press(&mut h, "OK");
+    let low: Vec<Id> = bars(&h).into_iter().filter(|id| field(&h, *id, "layer") == json!("bottom x")).collect();
+    assert_eq!(low.len(), 21);
+    assert!(low.iter().all(|id| field(&h, *id, "path").as_array().map(Vec::len) == Some(4)));
+}

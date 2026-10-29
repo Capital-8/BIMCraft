@@ -93,7 +93,26 @@ const COLUMN: &[Group] = &[
         ],
     },
     STIRRUPS,
-    Group { name: msg!("Ties"), fields: &[field("ties.diameter", msg!("Diameter"), Kind::Diameter)] },
+    Group {
+        name: msg!("Ties"),
+        fields: &[field("ties.diameter", msg!("Diameter"), Kind::Diameter), field("ties.hook", msg!("Hook"), Kind::Length)],
+    },
+    Group {
+        name: msg!("Anchor"),
+        fields: &[field("anchor.below", msg!("Below"), Kind::Length), field("anchor.above", msg!("Above"), Kind::Length)],
+    },
+];
+/// A round column: the bars are counted round its circle, and it has no ties.
+const ROUND_COLUMN: &[Group] = &[
+    Group {
+        name: msg!("Bars"),
+        fields: &[
+            field("bars.diameter", msg!("Diameter"), Kind::Diameter),
+            field("bars.count", msg!("Count"), Kind::Count),
+            field("bars.hook", msg!("Hook"), Kind::Length),
+        ],
+    },
+    STIRRUPS,
     Group {
         name: msg!("Anchor"),
         fields: &[field("anchor.below", msg!("Below"), Kind::Length), field("anchor.above", msg!("Above"), Kind::Length)],
@@ -111,6 +130,8 @@ const FOOTING: &[Group] = &[
     Group { name: msg!("Ends turned up"), fields: &[field("mesh.hook", msg!("Hook"), Kind::Length)] },
 ];
 const FLOOR: &[Group] = &[
+    Group { name: msg!("Bottom ends turned up"), fields: &[field("bottom.hook", msg!("Hook"), Kind::Length)] },
+    Group { name: msg!("Top ends turned down"), fields: &[field("top.hook", msg!("Hook"), Kind::Length)] },
     Group {
         name: msg!("Bottom, bars along east"),
         fields: &[field("bottom.x.diameter", msg!("Diameter"), Kind::Diameter), field("bottom.x.spacing", msg!("Spacing"), Kind::Length)],
@@ -138,14 +159,16 @@ const COVER: [(&str, &str); 4] =
 pub(crate) enum Form {
     Beam,
     Column,
+    RoundColumn,
     Footing,
     Floor,
 }
 
 impl Form {
-    fn of(e: &Element) -> Option<Form> {
+    fn of(m: &bimcraft_core::model::Model, e: &Element) -> Option<Form> {
         match e {
             Element::Beam(_) => Some(Form::Beam),
+            Element::Column(_) | Element::StructuralColumn(_) if m.column_type(e).is_some_and(|t| t.round) => Some(Form::RoundColumn),
             Element::Column(_) | Element::StructuralColumn(_) => Some(Form::Column),
             Element::Footing(_) => Some(Form::Footing),
             Element::Floor(_) => Some(Form::Floor),
@@ -157,7 +180,7 @@ impl Form {
     fn kind(self) -> &'static str {
         match self {
             Form::Beam => "beam",
-            Form::Column => "column",
+            Form::Column | Form::RoundColumn => "column",
             Form::Footing => "footing",
             Form::Floor => "floor",
         }
@@ -167,6 +190,7 @@ impl Form {
         match self {
             Form::Beam => BEAM,
             Form::Column => COLUMN,
+            Form::RoundColumn => ROUND_COLUMN,
             Form::Footing => FOOTING,
             Form::Floor => FLOOR,
         }
@@ -318,8 +342,11 @@ impl BimApp {
     /// Reinforce (RF): the dialog for the elements selected, if they are ones that can be armed, all of one kind.
     pub(crate) fn open_reinforce(&mut self) {
         let m = &self.session.model;
-        let picked: Vec<(Id, &'static str, Form)> =
-            self.selection.iter().filter_map(|id| m.elements.get(*id).and_then(|e| Form::of(e).map(|f| (*id, e.category(), f)))).collect();
+        let picked: Vec<(Id, &'static str, Form)> = self
+            .selection
+            .iter()
+            .filter_map(|id| m.elements.get(*id).and_then(|e| Form::of(m, e).map(|f| (*id, e.category(), f))))
+            .collect();
         let Some(&(_, category, form)) = picked.first().filter(|_| picked.len() == self.selection.len()) else {
             self.status = Status { text: t("Select a beam, a column, a footing or a floor to reinforce first.").into(), error: true };
             return;

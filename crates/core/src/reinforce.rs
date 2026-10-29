@@ -10,6 +10,7 @@ use crate::geom::P2;
 use crate::model::{Element, MAX_COORD, MAX_TEXT, Model, TOL, heading};
 use crate::rebar::{DIAMETERS, GRADE, MAX_BARS};
 use crate::view3d::{P3, add, mul, sub, unit};
+use crate::walls::Plane;
 
 /// A bar to make: on `layer` of its host's, `diameter` mm thick, of steel `grade`, along `path` (mm, over the host's level).
 pub struct Bar {
@@ -108,6 +109,8 @@ struct ColumnBars {
     diameter: f64,
     x: Option<usize>,
     y: Option<usize>,
+    /// For a round column: how many, evenly round its circle.
+    count: Option<usize>,
     hook: Option<Value>,
 }
 
@@ -123,6 +126,8 @@ struct ColumnAnchor {
 #[serde(deny_unknown_fields)]
 struct Ties {
     diameter: f64,
+    /// The straight tail, mm, each end turns into the section.
+    hook: Option<f64>,
 }
 
 /// A footing's mesh: bars along its width (`x`, spread across its depth) and along its depth (`y`), the lower layer first, with
@@ -135,12 +140,13 @@ struct Mesh {
     hook: Option<f64>,
 }
 
-/// A floor's mesh: bars along east (`x`) and along north (`y`).
+/// A floor's mesh: bars along east (`x`) and along north (`y`), their ends turned `hook` mm up (a bottom mesh) or down (a top one).
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Grid {
     x: Option<Pitch>,
     y: Option<Pitch>,
+    hook: Option<f64>,
 }
 
 /// What every host takes, read before its own: the cover and the steel, and the room between bars.
@@ -291,17 +297,27 @@ fn stations(lo: f64, hi: f64, spacing: f64, ends: Option<&Ends>) -> Result<Vec<f
     Ok(first.into_iter().chain(middle.into_iter().skip(1).take(inner)).chain(last).collect())
 }
 
-/// A stirrup round `corners` (in order round the section): a closed loop, or with a `hook` a loop that goes on past its first
-/// corner to a tail turned into the section at each end, as the two ends of a stirrup are.
-fn stirrup(f: &Frame, t: f64, corners: [(f64, f64); 4], hook: f64) -> Vec<P3> {
-    let at = |(b, c): (f64, f64)| f.at(t, b, c);
-    let [p0, p1, p2, p3] = corners.map(at);
+/// A stirrup round `corners` (in order round the section, three or more): a closed loop, or with a `hook` a loop that goes on
+/// past its first corner to a tail turned into the section at each end, as the two ends of a stirrup are.
+fn stirrup(f: &Frame, t: f64, corners: &[(f64, f64)], hook: f64) -> Vec<P3> {
+    let mut pts: Vec<P3> = corners.iter().map(|&(b, c)| f.at(t, b, c)).collect();
+    let (Some(&p0), Some(&p1), Some(&last)) = (pts.first(), pts.get(1), pts.last()) else { return pts };
+    pts.push(p0);
     if hook <= TOL {
-        return vec![p0, p1, p2, p3, p0];
+        return pts;
     }
     // Toward the inside from the first corner: halfway between its two sides.
-    let tail = add(p0, mul(unit(add(unit(sub(p1, p0)), unit(sub(p3, p0)))), hook));
-    vec![tail, p0, p1, p2, p3, p0, tail]
+    let tail = add(p0, mul(unit(add(unit(sub(p1, p0)), unit(sub(last, p0)))), hook));
+    std::iter::once(tail).chain(pts).chain([tail]).collect()
+}
+
+/// A tie from `a` to `b`, with a tail of `hook` mm at each end, turned toward `side` at the first and away from it at the last.
+fn tie(a: P3, b: P3, side: P3, hook: f64) -> Vec<P3> {
+    if hook <= TOL {
+        return vec![a, b];
+    }
+    let (along, back) = (unit(sub(b, a)), unit(sub(a, b)));
+    vec![add(a, mul(unit(add(along, side)), hook)), a, b, add(b, mul(unit(add(back, mul(side, -1.0))), hook))]
 }
 
 /// The room a row of `n` bars of `d` mm leaves, at best: they go in `half` mm either side of the middle, and `gap` is the least
@@ -367,9 +383,6 @@ pub fn bars(m: &Model, host: &Element, p: &Value) -> Result<Vec<Bar>, String> {
         }
         Element::Column(col) | Element::StructuralColumn(col) => {
             let t = m.column_type(host).ok_or("reinforce: the column has no type")?;
-            if t.round {
-                return Err("reinforce: a round column isn't reinforced yet; a rectangular one is".into());
-            }
             let (bottom, top) = m.span(col.level, col.base_offset, col.top_level, col.height);
             let u = heading(col.angle);
             let f = Frame {
@@ -378,13 +391,10 @@ pub fn bars(m: &Model, host: &Element, p: &Value) -> Result<Vec<Bar>, String> {
                 b: [u.0, u.1, 0.0],
                 c: [-u.1, u.0, 0.0],
             };
-            column(&f, top - bottom, (t.width, t.depth), &x, a)?
+            column(&f, top - bottom, (t.width, t.depth), t.round, &x, a)?
         }
         Element::Footing(col) => {
             let t = m.column_type(host).ok_or("reinforce: the footing has no type")?;
-            if t.round {
-                return Err("reinforce: a round footing isn't reinforced yet; a rectangular one is".into());
-            }
             let (bottom, top) = m.span(col.level, col.base_offset, col.top_level, col.height);
             let u = heading(col.angle);
             let f = Frame {
@@ -393,18 +403,15 @@ pub fn bars(m: &Model, host: &Element, p: &Value) -> Result<Vec<Bar>, String> {
                 b: [-u.1, u.0, 0.0],
                 c: [0.0, 0.0, 1.0],
             };
-            footing(&f, top - bottom, (t.width, t.depth), &x, a)?
+            footing(&f, top - bottom, (t.width, t.depth), t.round, &x, a)?
         }
         Element::Floor(fl) => {
-            if fl.slope != 0.0 {
-                return Err("reinforce: a floor with a slope isn't reinforced yet; a level one is".into());
-            }
-            let thick = m.floor_depth(fl);
+            // Its thickness is square to its top, which may slope; the cover and the bars are measured from it.
+            let thick = m.types.floor.get(&fl.type_name).map_or(0.0, |t| t.thickness);
             if thick <= TOL {
                 return Err("reinforce: the floor's type has no thickness".into());
             }
-            let top = m.floor_top(fl).z - m.elevation(fl.level);
-            slab(fl, top, thick, &x, a)?
+            slab(fl, &m.floor_top(fl), m.elevation(fl.level), thick, &x, a)?
         }
         other => return Err(format!("reinforce: a {} can't be armed: a beam, a column, a footing or a floor can", other.category())),
     };
@@ -509,13 +516,13 @@ fn beam(f: &Frame, len: f64, (w, h): (f64, f64), x: &Common, mut a: Args) -> Res
             return Err("reinforce: the beam is too short for a stirrup inside that cover".into());
         }
         for t in stations(t0, len - t0, sp, st.ends.as_ref())? {
-            out.push("stirrup", dst, &x.grade_stirrup, stirrup(f, t, [(-bs, hi), (bs, hi), (bs, lo), (-bs, lo)], hook))?;
+            out.push("stirrup", dst, &x.grade_stirrup, stirrup(f, t, &[(-bs, hi), (bs, hi), (bs, lo), (-bs, lo)], hook))?;
         }
     }
     Ok(out.bars)
 }
 
-fn column(f: &Frame, len: f64, (w, d): (f64, f64), x: &Common, mut a: Args) -> Result<Vec<Bar>, String> {
+fn column(f: &Frame, len: f64, (w, d): (f64, f64), round: bool, x: &Common, mut a: Args) -> Result<Vec<Bar>, String> {
     let bars = a.take::<ColumnBars>("bars")?;
     let stir = a.take::<Stirrup>("stirrup")?;
     let ties = a.take::<Ties>("ties")?;
@@ -524,9 +531,12 @@ fn column(f: &Frame, len: f64, (w, d): (f64, f64), x: &Common, mut a: Args) -> R
     if bars.is_none() && stir.is_none() {
         return Err("reinforce: nothing to reinforce with: give `bars` or a `stirrup`".into());
     }
+    if round && ties.is_some() {
+        return Err("reinforce: a round column has no ties: they go across a rectangular section".into());
+    }
     let cv = &x.cover;
     let dst = stir.as_ref().map(|s| diameter("stirrup", s.diameter)).transpose()?.unwrap_or(0.0);
-    // Inside the stirrups: half the width and half the depth.
+    // Inside the stirrups: half the width and half the depth (round, the radius, in the width).
     let (half_b, half_c) = (w / 2.0 - cv.sides - dst, d / 2.0 - cv.sides - dst);
     if half_b <= 0.0 || half_c <= 0.0 {
         return Err("reinforce: the section is too narrow for that cover and stirrup".into());
@@ -542,41 +552,81 @@ fn column(f: &Frame, len: f64, (w, d): (f64, f64), x: &Common, mut a: Args) -> R
     let mut across: (Vec<f64>, Vec<f64>, f64, f64) = (Vec::new(), Vec::new(), 0.0, 0.0);
     if let Some(r) = bars {
         let dia = diameter("bars", r.diameter)?;
-        let (nx, ny) = (r.x.unwrap_or(2), r.y.unwrap_or(2));
-        for (key, n) in [("bars x", nx), ("bars y", ny)] {
-            if !(2..=MAX_BARS).contains(&n) {
-                return Err(format!("reinforce: `{key}` is {n} bars along a face; it is 2 (the corners) to {MAX_BARS}"));
-            }
-        }
         let gap = x.clearance.unwrap_or_else(|| dia.max(20.0));
-        let (bb, cc) = (half_b - dia / 2.0, half_c - dia / 2.0);
-        let (xs, ys) = (row(bb, nx, dia, gap, "x face")?, row(cc, ny, dia, gap, "y face")?);
-        // Hooks at the foot and the top turn into the section, along the way across the face the bar is on, and stop short of
-        // the middle.
         let (h0, h1) = legs("bars hook", r.hook.as_ref(), ["below", "above"])?;
-        for (leg, room) in [(h0, 2.0 * cc.min(bb)), (h1, 2.0 * cc.min(bb))] {
-            if leg > room + TOL {
-                return Err(format!("reinforce: a bars hook of {leg} mm doesn't fit in a section {room:.1} mm across between the bars"));
+        if round {
+            if r.x.is_some() || r.y.is_some() {
+                return Err("reinforce: a round column takes `count` bars round its circle, not `x` and `y`".into());
             }
-        }
-        for c in [-cc, cc] {
-            for &b in &xs {
-                let leg = |at: f64, leg: f64| (leg > TOL).then(|| f.at(at, b, c - c.signum() * leg));
+            let n = r.count.ok_or("reinforce: a round column needs `bars` count: how many round its circle")?;
+            if !(3..=MAX_BARS).contains(&n) {
+                return Err(format!("reinforce: `bars` count {n} isn't 3 to {MAX_BARS}"));
+            }
+            let rb = half_b - dia / 2.0;
+            if rb < 0.0 {
+                return Err(format!("reinforce: the section is too narrow for the bars of {dia} mm with that cover and stirrup"));
+            }
+            let clear = 2.0 * rb * (std::f64::consts::PI / n as f64).sin() - dia;
+            if clear < gap - TOL {
+                return Err(format!(
+                    "reinforce: {n} bars of {dia} mm leave {clear:.1} mm between them round the circle, less than the {gap} mm clearance: use fewer or thinner bars"
+                ));
+            }
+            for leg in [h0, h1] {
+                if leg > 2.0 * rb + TOL {
+                    return Err(format!(
+                        "reinforce: a bars hook of {leg} mm doesn't fit in a section {:.1} mm across between the bars",
+                        2.0 * rb
+                    ));
+                }
+            }
+            for i in 0..n {
+                let angle = std::f64::consts::TAU * i as f64 / n as f64;
+                let (b, c) = (rb * angle.cos(), rb * angle.sin());
+                // A leg runs straight toward the middle.
+                let leg = |at: f64, leg: f64| (leg > TOL).then(|| f.at(at, b * (rb - leg) / rb, c * (rb - leg) / rb));
                 out.push("bars", dia, &x.grade, with_legs(leg(a0, h0), f.at(a0, b, c), f.at(a1, b, c), leg(a1, h1)))?;
             }
-        }
-        for b in [-bb, bb] {
-            for &c in ys.iter().skip(1).take(ny.saturating_sub(2)) {
-                let leg = |at: f64, leg: f64| (leg > TOL).then(|| f.at(at, b - b.signum() * leg, c));
-                out.push("bars", dia, &x.grade, with_legs(leg(a0, h0), f.at(a0, b, c), f.at(a1, b, c), leg(a1, h1)))?;
+        } else {
+            if r.count.is_some() {
+                return Err("reinforce: a rectangular column takes `x` and `y` bars along its faces, not `count`".into());
             }
+            let (nx, ny) = (r.x.unwrap_or(2), r.y.unwrap_or(2));
+            for (key, n) in [("bars x", nx), ("bars y", ny)] {
+                if !(2..=MAX_BARS).contains(&n) {
+                    return Err(format!("reinforce: `{key}` is {n} bars along a face; it is 2 (the corners) to {MAX_BARS}"));
+                }
+            }
+            let (bb, cc) = (half_b - dia / 2.0, half_c - dia / 2.0);
+            let (xs, ys) = (row(bb, nx, dia, gap, "x face")?, row(cc, ny, dia, gap, "y face")?);
+            // Hooks at the foot and the top turn into the section, along the way across the face the bar is on, and stop short of
+            // the middle.
+            for (leg, room) in [(h0, 2.0 * cc.min(bb)), (h1, 2.0 * cc.min(bb))] {
+                if leg > room + TOL {
+                    return Err(format!(
+                        "reinforce: a bars hook of {leg} mm doesn't fit in a section {room:.1} mm across between the bars"
+                    ));
+                }
+            }
+            for c in [-cc, cc] {
+                for &b in &xs {
+                    let leg = |at: f64, leg: f64| (leg > TOL).then(|| f.at(at, b, c - c.signum() * leg));
+                    out.push("bars", dia, &x.grade, with_legs(leg(a0, h0), f.at(a0, b, c), f.at(a1, b, c), leg(a1, h1)))?;
+                }
+            }
+            for b in [-bb, bb] {
+                for &c in ys.iter().skip(1).take(ny.saturating_sub(2)) {
+                    let leg = |at: f64, leg: f64| (leg > TOL).then(|| f.at(at, b - b.signum() * leg, c));
+                    out.push("bars", dia, &x.grade, with_legs(leg(a0, h0), f.at(a0, b, c), f.at(a1, b, c), leg(a1, h1)))?;
+                }
+            }
+            across = (
+                xs.into_iter().skip(1).take(nx.saturating_sub(2)).collect(),
+                ys.into_iter().skip(1).take(ny.saturating_sub(2)).collect(),
+                bb + dia / 2.0,
+                cc + dia / 2.0,
+            );
         }
-        across = (
-            xs.into_iter().skip(1).take(nx.saturating_sub(2)).collect(),
-            ys.into_iter().skip(1).take(ny.saturating_sub(2)).collect(),
-            bb + dia / 2.0,
-            cc + dia / 2.0,
-        );
     }
     if let Some(st) = stir {
         let sp = spacing("stirrup", st.spacing, dst)?;
@@ -586,23 +636,32 @@ fn column(f: &Frame, len: f64, (w, d): (f64, f64), x: &Common, mut a: Args) -> R
             spacing("ends", e.spacing, dst)?;
         }
         let (bs, cs) = (w / 2.0 - cv.sides - dst / 2.0, d / 2.0 - cv.sides - dst / 2.0);
+        // A hoop of a round column is a polygon of 24 sides on the circle.
+        let corners: Vec<(f64, f64)> = if round {
+            (0..24).map(|k| std::f64::consts::TAU * f64::from(k) / 24.0).map(|angle| (bs * angle.cos(), bs * angle.sin())).collect()
+        } else {
+            vec![(-bs, cs), (bs, cs), (bs, -cs), (-bs, -cs)]
+        };
         let (t0, t1) = (cv.bottom + dst / 2.0, len - cv.top - dst / 2.0);
         if t1 - t0 <= TOL {
             return Err("reinforce: the column is too short for a stirrup inside that cover".into());
         }
-        let tie = ties.map(|t| diameter("ties", t.diameter)).transpose()?;
-        if tie.is_some() && (across.0.is_empty() && across.1.is_empty()) {
+        let tied = match ties {
+            Some(t) => Some((diameter("ties", t.diameter)?, reach("ties hook", t.hook)?.unwrap_or(0.0))),
+            None => None,
+        };
+        if tied.is_some() && (across.0.is_empty() && across.1.is_empty()) {
             return Err("reinforce: no tie to make: ties go across the section between bars that are not at a corner, so `bars` needs x or y over 2".into());
         }
         let (extra_b, extra_c) = (across.2, across.3);
         for t in stations(t0, t1, sp, st.ends.as_ref())? {
-            out.push("stirrup", dst, &x.grade_stirrup, stirrup(f, t, [(-bs, cs), (bs, cs), (bs, -cs), (-bs, -cs)], hook))?;
-            if let Some(td) = tie {
+            out.push("stirrup", dst, &x.grade_stirrup, stirrup(f, t, &corners, hook))?;
+            if let Some((td, tail)) = tied {
                 for &b in &across.0 {
-                    out.push("tie", td, &x.grade_stirrup, vec![f.at(t, b, -extra_c), f.at(t, b, extra_c)])?;
+                    out.push("tie", td, &x.grade_stirrup, tie(f.at(t, b, -extra_c), f.at(t, b, extra_c), f.b, tail))?;
                 }
                 for &c in &across.1 {
-                    out.push("tie", td, &x.grade_stirrup, vec![f.at(t, -extra_b, c), f.at(t, extra_b, c)])?;
+                    out.push("tie", td, &x.grade_stirrup, tie(f.at(t, -extra_b, c), f.at(t, extra_b, c), f.c, tail))?;
                 }
             }
         }
@@ -633,7 +692,7 @@ fn layer_at(lo: f64, hi: f64, p: &Pitch, gap: Option<f64>, what: &str) -> Result
     Ok((d, places))
 }
 
-fn footing(f: &Frame, thick: f64, (w, d): (f64, f64), x: &Common, mut a: Args) -> Result<Vec<Bar>, String> {
+fn footing(f: &Frame, thick: f64, (w, d): (f64, f64), round: bool, x: &Common, mut a: Args) -> Result<Vec<Bar>, String> {
     let mesh = a.take::<Mesh>("mesh")?;
     a.done("a footing; it takes cover, grade, clearance and mesh")?;
     let Some(mesh) = mesh.filter(|m| m.x.is_some() || m.y.is_some()) else {
@@ -646,6 +705,7 @@ fn footing(f: &Frame, thick: f64, (w, d): (f64, f64), x: &Common, mut a: Args) -
     let mut level = cv.bottom;
     for (layer, p, along, across) in [("mesh x", mesh.x, w, d), ("mesh y", mesh.y, d, w)] {
         let Some(p) = p else { continue };
+        // Round, a bar stops at the circle, 450 from the middle of a 1000 footing with 50 of cover.
         let reach_ = along / 2.0 - cv.sides;
         let (lo, hi) = (-across / 2.0 + cv.sides + p.diameter / 2.0, across / 2.0 - cv.sides - p.diameter / 2.0);
         let (dia, places) = layer_at(lo, hi, &p, x.clearance, layer)?;
@@ -660,12 +720,16 @@ fn footing(f: &Frame, thick: f64, (w, d): (f64, f64), x: &Common, mut a: Args) -
             ));
         }
         for q in places {
+            let half = if round { (reach_ * reach_ - q * q).max(0.0).sqrt() } else { reach_ };
+            if half <= TOL {
+                continue;
+            }
             // x bars run along the footing's width at q across it; y bars along its depth.
             let end = |s: f64, c: f64| if layer == "mesh x" { f.at(s, q, c) } else { f.at(q, s, c) };
-            let mut path = vec![end(-reach_, c), end(reach_, c)];
+            let mut path = vec![end(-half, c), end(half, c)];
             if hook > 0.0 {
-                path.insert(0, end(-reach_, c + hook));
-                path.push(end(reach_, c + hook));
+                path.insert(0, end(-half, c + hook));
+                path.push(end(half, c + hook));
             }
             out.push(layer, dia, &x.grade, path)?;
         }
@@ -694,7 +758,9 @@ fn chords(rings: &[&[P2]], c: f64, along_x: bool, inset: f64) -> Vec<(f64, f64)>
     hits.chunks(2).filter_map(|w| if let [a, b] = w { Some((a + inset, b - inset)) } else { None }).filter(|(a, b)| b - a > TOL).collect()
 }
 
-fn slab(fl: &crate::model::Floor, top: f64, thick: f64, x: &Common, mut a: Args) -> Result<Vec<Bar>, String> {
+/// A floor's mesh. Its top may slope (`plane`, `base` the level's height): each layer is `off` mm below the top face, square to it,
+/// which is `off` times the secant of the slope plumb; a leg of a hook runs square to it too.
+fn slab(fl: &crate::model::Floor, plane: &Plane, base: f64, thick: f64, x: &Common, mut a: Args) -> Result<Vec<Bar>, String> {
     let bottom = a.take::<Grid>("bottom")?.filter(|g| g.x.is_some() || g.y.is_some());
     let upper = a.take::<Grid>("top")?.filter(|g| g.x.is_some() || g.y.is_some());
     a.done("a floor; it takes cover, grade, clearance, bottom and top")?;
@@ -707,11 +773,20 @@ fn slab(fl: &crate::model::Floor, top: f64, thick: f64, x: &Common, mut a: Args)
     };
     let mut rings: Vec<&[P2]> = vec![&fl.boundary];
     rings.extend(fl.openings.iter().map(Vec::as_slice));
-    // Each layer's height, from the bottom face up and from the top face down, x bars before y.
-    let mut layers: Vec<(&'static str, bool, Pitch, f64)> = Vec::new();
-    let (mut up, mut down) = (top - thick + cv.bottom, top - cv.top);
+    // Each layer's distance below the top face, from the bottom face up and from the top face down, x bars before y.
+    struct Layer {
+        name: &'static str,
+        along_x: bool,
+        pitch: Pitch,
+        off: f64,
+        down: bool,
+        hook: f64,
+    }
+    let mut layers: Vec<Layer> = Vec::new();
+    let (mut up, mut down) = (cv.bottom, cv.top);
     for (name, grid) in [("bottom", bottom.as_ref()), ("top", upper.as_ref())] {
         let Some(g) = grid else { continue };
+        let hook = reach("hook", g.hook)?.unwrap_or(0.0);
         for (axis, p) in [("x", g.x.as_ref()), ("y", g.y.as_ref())] {
             let Some(p) = p else { continue };
             let d = diameter(name, p.diameter)?;
@@ -721,40 +796,64 @@ fn slab(fl: &crate::model::Floor, top: f64, thick: f64, x: &Common, mut a: Args)
                 (_, "x") => "top x",
                 _ => "top y",
             };
-            let c = if name == "bottom" { up + d / 2.0 } else { down - d / 2.0 };
+            let off = if name == "bottom" { thick - up - d / 2.0 } else { down + d / 2.0 };
             if name == "bottom" {
                 up += d;
             } else {
-                down -= d;
+                down += d;
             }
-            layers.push((layer, axis == "x", Pitch { diameter: p.diameter, spacing: p.spacing }, c));
+            layers.push(Layer {
+                name: layer,
+                along_x: axis == "x",
+                pitch: Pitch { diameter: p.diameter, spacing: p.spacing },
+                off,
+                down: name == "top",
+                hook,
+            });
         }
     }
-    let widest = layers.iter().map(|l| l.2.diameter).fold(0.0, f64::max);
+    let widest = layers.iter().map(|l| l.pitch.diameter).fold(0.0, f64::max);
     let gap = x.clearance.unwrap_or_else(|| widest.max(20.0));
     if bottom.is_some() && upper.is_some() {
-        if down - up < gap - TOL {
+        let between = (thick - up) - down;
+        if between < gap - TOL {
             return Err(format!(
-                "reinforce: the meshes at the top and the bottom meet: {:.1} mm between them, less than the {gap} mm clearance",
-                down - up
+                "reinforce: the meshes at the top and the bottom meet: {between:.1} mm between them, less than the {gap} mm clearance"
             ));
         }
-    } else if (bottom.is_some() && up + cv.top > top + TOL) || (upper.is_some() && down - cv.bottom < top - thick - TOL) {
+    } else if (bottom.is_some() && up + cv.top > thick + TOL) || (upper.is_some() && down + cv.bottom > thick + TOL) {
         return Err(format!("reinforce: the mesh doesn't fit the floor's {thick} mm thickness between the covers"));
     }
+    // The way square to the top, up: the slope leans it, and the secant stretches a distance from it plumb.
+    let secant = (1.0 + plane.g.dot(plane.g)).sqrt();
+    let normal = [-plane.g.0 / secant, -plane.g.1 / secant, 1.0 / secant];
     let mut out = Out { bars: Vec::new() };
-    for (layer, along_x, p, c) in layers {
-        let (lo, hi) = if along_x {
-            (y0 + cv.sides + p.diameter / 2.0, y1 - cv.sides - p.diameter / 2.0)
+    for l in layers {
+        let (lo, hi) = if l.along_x {
+            (y0 + cv.sides + l.pitch.diameter / 2.0, y1 - cv.sides - l.pitch.diameter / 2.0)
         } else {
-            (x0 + cv.sides + p.diameter / 2.0, x1 - cv.sides - p.diameter / 2.0)
+            (x0 + cv.sides + l.pitch.diameter / 2.0, x1 - cv.sides - l.pitch.diameter / 2.0)
         };
-        let (dia, places) = layer_at(lo, hi, &p, x.clearance, layer)?;
+        let (dia, places) = layer_at(lo, hi, &l.pitch, x.clearance, l.name)?;
+        // A leg turns up from a bottom layer and down from a top one, and stays inside the other face's cover.
+        let room = if l.down { thick - cv.bottom - dia / 2.0 - l.off } else { l.off - cv.top - dia / 2.0 };
+        if l.hook > room + TOL {
+            return Err(format!(
+                "reinforce: a hook of {} mm doesn't fit the {} bars, which have {room:.1} mm to the cover on the other face",
+                l.hook, l.name
+            ));
+        }
+        let turn = if l.down { -1.0 } else { 1.0 };
         let grade = &x.grade;
         for q in places {
-            for (s, e) in chords(&rings, q, along_x, cv.sides) {
-                let path = if along_x { vec![[s, q, c], [e, q, c]] } else { vec![[q, s, c], [q, e, c]] };
-                out.push(layer, dia, grade, path)?;
+            for (s, e) in chords(&rings, q, l.along_x, cv.sides) {
+                let at = |s: f64| {
+                    let p = if l.along_x { P2(s, q) } else { P2(q, s) };
+                    [p.0, p.1, plane.at(p) - base - l.off * secant]
+                };
+                let leg = |p: P3| (l.hook > TOL).then(|| add(p, mul(normal, turn * l.hook)));
+                let (a, b) = (at(s), at(e));
+                out.push(l.name, dia, grade, with_legs(leg(a), a, b, leg(b)))?;
             }
         }
     }
