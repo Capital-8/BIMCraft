@@ -58,10 +58,13 @@ fn type_into(h: &mut Harness<BimApp>, label: &str, text: &str) {
     h.run();
 }
 
-/// Of the widgets named `name`, the one highest up: a view tab over the browser's entry, a
-/// ribbon tab over the tool of the same name.
+/// Of the widgets named `name`, a view tab, else the one highest up: a view tab over the browser's entry and over what a view
+/// under the tabs draws, a ribbon tab over the tool of the same name.
 fn topmost(h: &mut Harness<BimApp>, name: &str) {
-    let top = h.get_all_by_label(name).min_by(|a, b| a.rect().top().total_cmp(&b.rect().top())).map(|n| n.rect().center());
+    let tabs: Vec<egui::Rect> = h.state().tab_rects.iter().map(|(_, r)| *r).collect();
+    let tab = h.get_all_by_label(name).map(|n| n.rect()).find(|r| tabs.iter().any(|t| t.contains(r.center())));
+    let top = tab.map(|r| r.center());
+    let top = top.or_else(|| h.get_all_by_label(name).min_by(|a, b| a.rect().top().total_cmp(&b.rect().top())).map(|n| n.rect().center()));
     let pos = top.unwrap();
     h.hover_at(pos);
     for pressed in [true, false] {
@@ -5205,6 +5208,7 @@ mod mep;
 mod notes;
 mod objectstyles;
 mod patterns;
+mod perspective;
 mod planviews;
 mod popup;
 mod purge;

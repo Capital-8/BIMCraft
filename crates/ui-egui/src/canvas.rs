@@ -108,6 +108,9 @@ pub struct Canvas {
     cams: BTreeMap<Id, Camera>,
     /// Where the plan was last shown, in points.
     rect: Rect,
+    /// How much of its height the cards floating over the view (its tabs at the top, its view control bar at the foot) take
+    /// between them, points: a view is fitted into the rest.
+    pub(crate) room: f32,
     /// The level shown last.
     level: Option<Id>,
     /// The model point under the cursor.
@@ -142,6 +145,7 @@ impl Default for Canvas {
             drawing: PlanCache::default(),
             cams: BTreeMap::new(),
             rect: Rect::ZERO,
+            room: 0.0,
             level: None,
             cursor: None,
             grab: None,
@@ -197,6 +201,7 @@ impl Canvas {
             drawing: self.drawing.clone(),
             cams: self.cams.clone(),
             rect: self.rect,
+            room: self.room,
             level: self.level,
             under: self.under.clone(),
             ..Canvas::default()
@@ -249,7 +254,8 @@ impl Canvas {
         self.rect = rect;
         self.level = Some(id);
         self.cams.entry(id).or_insert_with(|| {
-            let v = fit(rect.width().max(1.0) as u32, rect.height().max(1.0) as u32);
+            // Clear of the cards floating over its top and foot, which take as much of each.
+            let v = fit(rect.width().max(1.0) as u32, (rect.height() - self.room).max(1.0) as u32);
             Camera { scale: v.scale, cx: v.cx, cy: v.cy }
         });
         let (hover, wheel, pinch, middle) = ui.input(|i| {

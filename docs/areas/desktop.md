@@ -162,6 +162,14 @@ state and its commands: the project's own types and a family's in `properties.rs
 pattern's … opens the Patterns tab. The dialogs are one width, and the table's body one height where the window has room, known from the first frame:
 a body that fitted its rows grew over a few frames, and a click meant for one row landed on the next. A refusal is said in the dialog.
 
+The camera (`camera.rs`). The 3D view's Properties have a Camera group: Projection, a drop-down of Axonometric and Perspective that runs
+`perspective` (off or on), and in perspective the Focal Length (a camera's mm, whatever the project's units) and the Eye Elevation, a length in the project's units. Focal
+Length runs `perspective` with its `lens`; Eye Elevation is the camera's on screen, not the project's, and moves `Orbit::camera` by
+`Camera::with_eye_elevation`. Each frame `orbit.rs` sizes the camera to the view through the view's lens (`orbit::lens_of`,
+`Camera::sized`), so the eye stays where it stood as the lens or the window changes, and Home View and Zoom to Fit fit through it
+(`Scene::fit_from`). Picking, Modify, the level grips and the section box grips work in perspective as they do parallel; a grip or an edge of
+the box behind the eye isn't drawn.
+
 The section box (`section_box.rs`). The 3D view's Properties have an Extents group: Section Box, a checkbox, and while it's on the
 West, East, South, North, Bottom and Top faces as lengths in the project's units; BX turns it on or off (opening the 3D view). They run
 `section_box`. In the view, `orbit.rs` draws the box's edges and, in Modify, an arrow on each face pointing out along its axis (a square
@@ -197,11 +205,16 @@ carries it and both OFL.txt, as `copy_docs` in `packaging/env.sh`, `bimcraft.wxs
 `style::semibold` for titles and tabs (the body's face until the window has loaded it, a frame after `apply`). The semibold face is a
 family of its own, and egui does not fall back across families, so the Chinese font joins every family in `style::families` (`lang::use_chinese_font`). `BimApp::show` paints the active view's ground (`backdrop`) under everything, then the app bar (Home, File, the
 Quick Access Toolbar and the title, light on dark, `style::on_app_bar`), and the ribbon, the Options Bar, the status bar and each docked
-palette stack as cards, so the gaps between them read as the view going on beneath; the view control bar is a small card in the view's
-corner. The Options Bar (`BimApp::options_bar`) floats over the view's top left, an `Area` above it, while there's something on it (a
+palette stack as cards, so the gaps between them read as the view going on beneath. A drawn view (a plan, a section, the 3D view, a
+sheet) fills its pane from the top of the pane to its foot: its tabs float over its top left on a card of their own and the view control
+bar over its bottom left, each drawn after the view in a child `Ui` that takes no room of it (`Ui::new_child`; `scope_builder` would
+allocate it, and an auto-sized floating view window would grow a little every frame), so they are over it for the hand too. A schedule
+keeps its tab strip, so its first rows aren't under the tabs. A plan or a section is fitted into what the two cards leave clear
+(`Canvas::room`, `FLOATING_CARD`), the Options Bar comes below the tabs (`BimApp::tabs_foot`), and a palette docks along the view only below
+them. The Options Bar (`BimApp::options_bar`) floats over the view's top left, an `Area` above it, while there's something on it (a
 contextual tab's name, a tool's options): coming and going it takes no room, so the view never moves under a drag when a selection
 fills it, and a click on it never reaches the view. File > Settings > Layout picks Floating (the cards) or Compact (`BimApp::compact`, kept in `settings.json` as
-`layout`): the same pieces flush to the edges and square, `style::gap` and `style::card` reading it each frame (`style::follow`, given the `Look` the user kept: Compact and the Light Canvas).
+`layout`): the same pieces flush to the edges and square, the view's tabs and its control bar strips above and below it, `style::gap` and `style::card` reading it each frame (`style::follow`, given the `Look` the user kept: Compact and the Light Canvas).
 Text holds 4.5:1 and a focus ring or an icon 3:1 on what it sits on, in both themes (`style::tests` computes WCAG's ratio for every pair the
 window draws): `accent` is for fills, strokes and the drawing, `accent_ink` for the accent as text, an icon or a focus ring
 (`style::focus_ring`, which on the app bar is the bar's lettering colour), `on_context` for the open contextual tab's lettering. A new pair of

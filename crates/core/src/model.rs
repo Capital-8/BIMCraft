@@ -1019,9 +1019,27 @@ pub struct View3D {
     /// The box it is cut to, as Revit's Section Box: kept, with its extents, when it's turned off.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub section_box: Option<SectionBox>,
+    /// Seen in perspective, as through a camera, rather than parallel (axonometric): kept, with its lens, when it's turned off.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub perspective: Option<Perspective>,
+}
+
+/// A 3D view's perspective: the focal length of the lens it is seen through, mm on a 35 mm camera (whose film is the
+/// picture's width), while it is `on`.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Perspective {
+    pub lens: f64,
+    #[serde(default = "yes")]
+    pub on: bool,
 }
 
 impl View3D {
+    /// The lens it is seen through while it's in perspective; none while it's parallel.
+    pub fn lens(&self) -> Option<f64> {
+        self.perspective.filter(|p| p.on).map(|p| p.lens)
+    }
+
     /// The default 3D view, `{3D}`, as it is before anything changes it.
     pub fn default_view() -> View3D {
         View3D {
@@ -1030,6 +1048,7 @@ impl View3D {
             elevation: crate::view3d::ELEVATION,
             graphics: Graphics::default(),
             section_box: None,
+            perspective: None,
         }
     }
 }
@@ -5311,6 +5330,12 @@ impl Model {
                     v.graphics.check(self).map_err(|e| format!("{who}: {e}"))?;
                     if let Some(b) = &v.section_box {
                         section_box_ok(&who, b)?;
+                    }
+                    if let Some(p) = &v.perspective
+                        && !(crate::view3d::MIN_LENS..=crate::view3d::MAX_LENS).contains(&p.lens)
+                    {
+                        let (lo, hi) = (crate::view3d::MIN_LENS, crate::view3d::MAX_LENS);
+                        return Err(format!("{who}: a {} mm lens is no camera's; a perspective's lens is {lo} to {hi} mm", p.lens));
                     }
                     if !view_names.insert(v.name.as_str()) {
                         return Err(format!("{who}: another view is already named `{}`", v.name));
