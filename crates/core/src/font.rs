@@ -43,6 +43,8 @@ fn known(c: char) -> Option<Glyph> {
         'X' => &[&[(0, 0), (8, 12)], &[(0, 12), (8, 0)]],
         'Y' => &[&[(0, 12), (4, 6), (8, 12)], &[(4, 6), (4, 0)]],
         'Z' => &[&[(0, 12), (8, 12), (0, 0), (8, 0)]],
+        // Norwegian and Danish: an A grown into an E (its crossbar meets the stem).
+        'Æ' => &[&[(0, 0), (4, 12), (8, 12)], &[(4, 12), (4, 0), (8, 0)], &[(4, 6), (7, 6)], &[(1, 4), (4, 4)]],
         '0' => &[&[(2, 0), (1, 2), (1, 10), (2, 12), (6, 12), (7, 10), (7, 2), (6, 0), (2, 0)]],
         '1' => &[&[(2, 10), (4, 12), (4, 0)], &[(2, 0), (6, 0)]],
         '2' => &[&[(0, 10), (2, 12), (6, 12), (8, 10), (8, 8), (0, 0), (8, 0)]],
@@ -294,6 +296,15 @@ mod tests {
             assert!(!has(c), "{c}");
         }
         assert_eq!(strokes("Ő", 0.0, 0.0, 12.0).len(), strokes("O", 0.0, 0.0, 12.0).len() + 2, "a double acute");
+    }
+
+    #[test]
+    fn the_ae_ligature_is_drawn_not_questioned() {
+        let ae = strokes("Æ", 0.0, 0.0, 12.0);
+        assert_ne!(ae, strokes("?", 0.0, 0.0, 12.0));
+        assert_eq!(strokes("æ", 0.0, 0.0, 12.0), ae);
+        assert!(ae.len() > strokes("E", 0.0, 0.0, 12.0).len(), "an A grown into an E has more strokes than an E");
+        assert!(has('Æ'));
     }
 
     #[test]
