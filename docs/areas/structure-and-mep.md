@@ -101,3 +101,13 @@ and leaves the ones with none, which were drawn by hand, and one command makes u
 schedule (a field a bar schedule may show), not in IFC. What it does not do: hooks on a bar other than a stirrup, bends, laps and splices, and any check
 against a standard.
 
+The Reinforce dialog (`crates/ui-egui/src/reinforce.rs`, Structure > Reinforcement, RF; tests in `tests/reinforce.rs`). It opens on the one beam, column,
+structural column, footing or floor selected (anything else says what to select), with the form of its kind (`BEAM`, `COLUMN`, `FOOTING`, `FLOOR`: tables of
+groups of fields, each field the path of the parameter it sets, such as `bottom.count`). Every field is text: a count is a whole number, a bar size is mm,
+a length is read in the project's units (`Units::parse`); a field left empty is not sent, a group with none filled is left out, and the command is the one
+that says what is missing. OK builds the parameters and runs `reinforce` as one undo step; a refusal is the command's own words, shown inside the dialog
+(a status box in the view's corner could lie over its buttons) with the dialog left open and the project unchanged, and a field that is not a number is
+named before the command is asked. What was typed is kept for the next element of the same form (not in the project, not on disk). Remove Bars, shown
+when the element has bars the command made (those with a layer), deletes them and leaves the ones drawn by hand. The fields' accessible names are
+"Group: Field" (`Bottom bars: Count`), and the cover's is `Cover`, its label having a colon so that no two nodes carry the name.
+
