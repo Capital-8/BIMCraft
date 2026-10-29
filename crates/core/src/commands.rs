@@ -1436,6 +1436,106 @@ pub static ALL: &[Command] = &[
         undoable: false,
     },
     other(
+        "circuit",
+        "Size a Circuit",
+        "{load, apparent?, demand?, power_factor?, phases?: FN|FF|3F|3FN, system?: 127/220|220/380|230/400, use?: lighting|power, length?, \
+         method?, insulation?: pvc|epr, conductor?: flexible|rigid, ambient?, grouped?, bundle?, spacing?, soil?, section?, breaker?, \
+         drop_limit?, reduced_neutral?} one electrical circuit sized as NBR 5410:2004 asks, for copper: `load` in W (or VA with \
+         `apparent`), `demand` (0 to 1, 1) and `power_factor` (over 0 to 1, 1; a first value, not a claim about the load), `phases` \
+         (FN one phase and neutral, the default; FF; 3F; 3FN balanced), the voltage `system` (127/220), `use` (power: 2.5 mm² at least; \
+         lighting 1.5), `length` to the farthest load (mm; none: no drop is checked), the installation `method` of Tabela 33 (7: a \
+         conduit in masonry; also 1 to 8, 11, 11A, 61, 61A), `insulation` (pvc 70 °C, or epr 90 °C), `conductor` (flexible, the larger \
+         resistance; or rigid), `ambient` °C (30 in air, 20 in soil), `grouped` circuits in the conduit (this one included), `bundle` \
+         (method 11 cables bundled), `spacing` between buried conduits (mm) and `soil` resistivity (K·m/W), and a `section` (mm²) and \
+         `breaker` (A) already chosen, which are never made smaller. Replies with the design current, the section and breaker that give \
+         I_B ≤ I_n ≤ I_Z (which gives I_2 = 1.45 I_n ≤ 1.45 I_Z for the breakers of NBR NM 60898) with the drop within `drop_limit` (4 %), the current the section carries, the drop, \
+         the conductors (phases, neutral, protective), the factors, and what the chosen section and breaker give. It changes nothing; \
+         aluminium, trays, several layers, short circuit and harmonics are not checked. It has no shortcut: Revit has no tool for it",
+        circuit,
+    ),
+    other(
+        "conduit_fill",
+        "Conduit Fill",
+        "{section, phases?: FN|FF|3F|3FN, circuits?, reduced_neutral?, family?, size?} the fill of a conduit as NBR 5410 asks, for the \
+         conductors of a circuit (its phases, neutral and protective conductor, of `section` mm²) times `circuits` in the same conduit \
+         (1): their cross-sections by outside diameter over the conduit's inside, at most 53 % for one cable, 31 % for two, 40 % for \
+         three or more. `family` (pvc-thread, pvc-solder, steel-heavy, steel-rir; pvc-thread) and `size` (its mark, e.g. 3/4\"; none: \
+         the smallest that fits). The dimensions are the makers' own from their catalogues, each family naming maker, document, page \
+         and address; the inside diameter is the outside less twice the wall. The data covers the flexible 750 V PVC cable of 0.5 to \
+         240 mm² only: there is no `insulation` key, and a section above 240 mm² is `pending`, never guessed. `sections_mm2` lists the \
+         conductors of one circuit (`circuits` of them are in the conduit). Cable trays are not sized. It has no shortcut: Revit has no \
+         tool for it. It changes nothing",
+        conduit_fill,
+    ),
+    other(
+        "drain_size",
+        "Size a Sanitary Drain",
+        "{units?, fixtures?: {wc?, lav?, sink?, shower?, laundry?}, role?: branch|main|stack, slope?, floors?, min_dn?} the DN of a \
+         sanitary drain as NBR 8160 asks, by the fixture units (UHC) it carries: `units`, or `fixtures` counted (Tabela 3: a water \
+         closet 6 UHC and DN 100, a lavatory 1 and 40, a sink 3 and 50, a shower 2 and 40, a laundry tub 3 and 40; the drain is never \
+         smaller than the fixtures' own). `role`: a `branch` (ramal de esgoto, Tabela 5, the default), a `main` (subcoletor or coletor \
+         predial, Tabela 7 by `slope`, a fraction, 0.01 by default; DN 100 at least) or a `stack` (tubo de queda, Tabela 6 by the \
+         building's `floors`, up to three or more). `min_dn` is the largest drain flowing into it. Replies with the `dn`, what it \
+         carries (`capacity`) and the `minimum_dn` the fixtures ask. A blank in the standard's table means not allowed: DN 100 and 150 \
+         carry nothing in a building drain at 0.5 %, and a branch or a building drain never borrows the other's table. It has no \
+         shortcut: Revit has no tool for it. It changes nothing",
+        drain_size,
+    ),
+    other(
+        "vent_size",
+        "Size a Sanitary Vent",
+        "{units, wc?, stack_dn?, length?, trap_dn?} the DN of a sanitary vent as NBR 8160 asks, by the units (UHC) of what it vents: a \
+         branch vent (ramal de ventilação, Tabela 8; `wc` says a water closet is in the group), or, with `stack_dn` (the DN of the \
+         stack or drain served) and `length` (mm, from its foot to its open end), a vent stack or header (Tabela 2). `trap_dn` adds the \
+         longest run from a trap of that DN to its vent (Tabela 1). It has no shortcut: Revit has no tool for it. It changes nothing",
+        vent_size,
+    ),
+    other(
+        "hydrant_size",
+        "Size Hydrants",
+        "{column?: 1-5, area?, type?: 1|2|3|4-40|4-65|5, hydrants?, inside?, nominal?, material?: steel|copper|pvc|pex, length?, rise?} \
+         hydrants and hose reels as IT 22/2025 of the CBPMESP asks. With `column` (of Tabela 3, by the occupation) and `area` (m², \
+         built) it replies the system type and the fire reserve (m³). With `type` (Tabela 2; 4 comes as 4-40 or 4-65 by its nozzle) \
+         it replies the design flow, that of the two most unfavourable jets (`hydrants`, 2 by default), and the head at the nozzle; \
+         with `inside` (mm) it also replies the speed (5 m/s at most), the Hazen-Williams head loss over `length` (m) of the \
+         `material` (Tabela 1), the head needed at the start of the pipe with its `rise` (mm, up) and, with `nominal` (mm), whether \
+         the pipe is big enough (DN 65; DN 50 for types 1 and 2). `length` and `rise` are in millimetres. `need_mca` is the nozzle \
+         head + the head loss of the straight pipe + the rise: it leaves out the hose, the fittings and the pressure at the source \
+         (`need_covers` says so), and `ok` is only the nozzle head within 100 mca, the speed and the pipe's size (`ok_covers`), not \
+         a verdict on the design. A `type` that contradicts `column` and `area` is an error. `region` is SP, the only one: this is the \
+         São Paulo rule, and no other state's. It has no shortcut: Revit has no tool for it. It changes nothing",
+        hydrant_size,
+    ),
+    other(
+        "water_size",
+        "Size Cold Water Pipes",
+        "{fixtures?: {wc, lav, sink, shower, laundry: count}, flow?, method?: weights|sum, dn?, length?, fittings?: {elbow90, elbow45, \
+         tee_through, tee_side, gate, globe, check: count}, pressure?, rise?} a cold water pipe of PVC soldável as NBR 5626 asks. The \
+         flow is `flow` (L/s), or the design flow of the `fixtures` by the `method` the project chooses: weights (the empirical \
+         method, Q = 0.3 √ΣP, never more than the fixtures' own flows; the default) or sum (every fixture at once). The fixture \
+         flows and weights are Tigre's (Manual Técnico, page 198), not the standard's; `wc` is the WC with a flush tank only (a flush-valve WC \
+         is not in the table here). Without `dn` it replies the smallest DN chosen by speed alone (3 m/s at most; the pressure is \
+         not used to choose it); with `dn`, whether that pipe keeps the speed. The head loss is Darcy-Weisbach (Colebrook, PVC at \
+         20 °C) over `length` (mm) plus the equivalent length of the `fittings`; with `pressure` (kPa, dynamic, upstream) and `rise` \
+         (mm, up) it replies the pressure left at the end, 10 kPa at least at a point of use, and `ok` covers both. It has no \
+         shortcut: Revit has no tool for it. It changes nothing",
+        water_size,
+    ),
+    other(
+        "storm_size",
+        "Size a Storm Drain",
+        "{kind: downpipe|horizontal, area?, rainfall?, flow?, outlet?: edge|funnel, gutter?, length?, slope?, inside?} a storm drain as \
+         NBR 10844 asks. The flow is `flow` (L/min), or the rain on `area` (m², as the standard counts a roof) at `rainfall` (mm/h; \
+         150 by default, which the standard allows for up to 100 m² only: above that `rainfall` is required): Q = I·A/60. A `downpipe` (condutor vertical) takes the inner diameter of the \
+         standard's Figure 3 abacuses by Q, the water depth in the gutter `gutter` (50 to 100 mm), its `length` (mm, 0.3 m or more) \
+         and the gutter's `outlet` (edge: sharp-edged, the default; funnel); 70 mm inside at least. A `horizontal` drain takes \
+         Manning at two thirds full (n 0.011, the standard's Table 4) at its `slope` (a fraction, 0.005 at least): the inner \
+         diameter it needs, and with `inside` (mm) whether that pipe carries the flow. Off the abacuses (more than 150 mm inside) \
+         nothing is read. A key that does not apply to the `kind`, or `flow` together with `area`, is an error. It has no shortcut: \
+         Revit has no tool for it. It changes nothing",
+        storm_size,
+    ),
+    other(
         "library",
         "Library",
         "{kind?, name?} the project's library with its ids and GUIDs, as elements have them: each type (`kind` \
@@ -3632,6 +3732,549 @@ fn measure(_: &mut Session, p: &Value) -> R {
     let r = snap::ruler(point_req(c, p, "from")?, point_req(c, p, "to")?);
     let to = |x: f64, k: f64| (x * k).round() / k + 0.0;
     Ok(json!({"length": to(r.length, 100.0), "dx": to(r.dx, 100.0), "dy": to(r.dy, 100.0), "angle": to(r.angle, 1e4)}))
+}
+
+/// A number of `key` within `lo..=hi`, or `default` when absent.
+fn within(c: &str, p: &Value, key: &str, default: f64, lo: f64, hi: f64) -> Result<f64, String> {
+    match p.get(key) {
+        v if absent(v) => Ok(default),
+        Some(v) => v
+            .as_f64()
+            .filter(|x| x.is_finite() && *x >= lo && *x <= hi)
+            .ok_or_else(|| bad(c, format!("`{key}` must be a number from {lo} to {hi}, got {v}"))),
+        None => Ok(default),
+    }
+}
+
+/// A choice among `names`, as text; `default` when absent.
+fn choice<'a>(c: &str, p: &'a Value, key: &str, names: &[&str], default: &'a str) -> Result<&'a str, String> {
+    match p.get(key) {
+        v if absent(v) => Ok(default),
+        Some(Value::String(t)) if names.contains(&t.as_str()) => Ok(t.as_str()),
+        Some(v) => Err(bad(c, format!("`{key}` must be one of {}, got {v}", names.join(", ")))),
+        None => Ok(default),
+    }
+}
+
+fn circuit(_: &mut Session, p: &Value) -> R {
+    use crate::nbr5410::{self as e, Circuit, Insulation, Phases, Use};
+    let c = "circuit";
+    let o = p.as_object().ok_or_else(|| bad(c, "params must be an object"))?;
+    const KEYS: &[&str] = &[
+        "load",
+        "apparent",
+        "demand",
+        "power_factor",
+        "phases",
+        "system",
+        "use",
+        "length",
+        "method",
+        "insulation",
+        "conductor",
+        "ambient",
+        "grouped",
+        "bundle",
+        "spacing",
+        "soil",
+        "section",
+        "breaker",
+        "drop_limit",
+        "reduced_neutral",
+    ];
+    if let Some(key) = o.keys().find(|k| !KEYS.contains(&k.as_str())) {
+        return Err(bad(c, format!("unknown parameter `{key}`")));
+    }
+    let load = within(c, p, "load", 0.0, 0.0, 1.0e9)?;
+    if load <= 0.0 {
+        return Err(bad(c, "`load` (W, or VA with `apparent`) is required"));
+    }
+    let systems: Vec<&str> = e::SYSTEMS.iter().map(|s| s.0).collect();
+    let system = choice(c, p, "system", &systems, systems[0])?;
+    let methods = e::method_keys();
+    let sections_ok = |x: f64| e::SECTIONS.iter().any(|s| (s - x).abs() < 1e-9);
+    let section = within(c, p, "section", 0.0, 0.0, 1000.0)?;
+    if section > 0.0 && !sections_ok(section) {
+        return Err(bad(
+            c,
+            format!(
+                "`section` must be one of the standard's: {}",
+                e::SECTIONS.iter().map(|s| s.to_string()).collect::<Vec<_>>().join(", ")
+            ),
+        ));
+    }
+    let breaker = within(c, p, "breaker", 0.0, 0.0, 1000.0)?;
+    if breaker > 0.0 && !e::BREAKERS.iter().any(|b| (b - breaker).abs() < 1e-9) {
+        return Err(bad(
+            c,
+            format!("`breaker` must be one of: {}", e::BREAKERS.iter().map(|b| b.to_string()).collect::<Vec<_>>().join(", ")),
+        ));
+    }
+    let ambient = match p.get("ambient") {
+        v if absent(v) => None,
+        _ => Some(within(c, p, "ambient", 30.0, -50.0, 200.0)?),
+    };
+    let circuit = Circuit {
+        load,
+        apparent: flag(c, p, "apparent")?,
+        demand: within(c, p, "demand", 1.0, f64::MIN_POSITIVE, 1.0)?,
+        power_factor: within(c, p, "power_factor", 1.0, f64::MIN_POSITIVE, 1.0)?,
+        phases: Phases::parse(choice(c, p, "phases", &["FN", "FF", "3F", "3FN"], "FN")?).unwrap_or(Phases::PhaseNeutral),
+        system: systems.iter().position(|s| *s == system).unwrap_or(0),
+        use_: if choice(c, p, "use", &["power", "lighting"], "power")? == "lighting" { Use::Lighting } else { Use::Power },
+        length: within(c, p, "length", 0.0, 0.0, MAX_COORD)? / 1000.0,
+        method: choice(c, p, "method", &methods, "7")?.to_string(),
+        insulation: Insulation::parse(choice(c, p, "insulation", &["pvc", "epr"], "pvc")?).unwrap_or(Insulation::Pvc),
+        flexible: choice(c, p, "conductor", &["flexible", "rigid"], "flexible")? == "flexible",
+        ambient,
+        grouped: within(c, p, "grouped", 1.0, 1.0, 1000.0)?.round() as u32,
+        bundle: flag(c, p, "bundle")?,
+        spacing: within(c, p, "spacing", 0.0, 0.0, 100_000.0)? / 1000.0,
+        soil: within(c, p, "soil", 2.5, 0.0, 100.0)?,
+        section,
+        breaker,
+        drop_limit: within(c, p, "drop_limit", e::DROP_LIMIT, f64::MIN_POSITIVE, 100.0)?,
+        reduced_neutral: flag(c, p, "reduced_neutral")?,
+    };
+    let d = e::design(&circuit);
+    if let Some(fault) = d.fault {
+        return Err(bad(c, fault.message()));
+    }
+    let round = |x: f64, k: f64| (x * k).round() / k + 0.0;
+    let evaluation = |v: &e::Evaluation| {
+        json!({"section_mm2": v.section, "breaker_a": v.breaker, "carries_a": round(v.carries, 100.0), "carries_ok": v.ampacity_ok,
+               "breaker_ok": v.breaker_ok, "drop_percent": v.drop.map(|d| round(d.0, 100.0)), "drop_ok": v.drop.map(|d| d.1),
+               "minimum_section_ok": v.minimum_ok})
+    };
+    let Some(n) = d.needed else { return Err(bad(c, e::Fault::TooBig.message())) };
+    Ok(json!({
+        "current_a": round(d.current, 100.0),
+        "volts": d.volts,
+        "minimum_section_mm2": d.minimum,
+        "factors": d.factors.map(|f| json!({"temperature": f.temperature, "grouping": f.grouping, "soil": f.soil})),
+        "section_mm2": n.section,
+        "breaker_a": n.breaker,
+        "carries_a": round(n.carries, 100.0),
+        "drop_percent": n.drop.map(|d| round(d.0, 100.0)),
+        "conductors": e::cable_text(circuit.phases, n.section, circuit.reduced_neutral),
+        "grew": section < n.section - 1e-9 || breaker < n.breaker - 1e-9,
+        "chosen": d.chosen.as_ref().map(evaluation),
+    }))
+}
+
+fn conduit_fill(_: &mut Session, p: &Value) -> R {
+    use crate::conduit::{self, FAMILIES};
+    use crate::nbr5410::Phases;
+    let c = "conduit_fill";
+    let o = p.as_object().ok_or_else(|| bad(c, "params must be an object"))?;
+    const KEYS: &[&str] = &["section", "phases", "circuits", "reduced_neutral", "family", "size"];
+    if let Some(key) = o.keys().find(|k| !KEYS.contains(&k.as_str())) {
+        return Err(bad(c, format!("unknown parameter `{key}`")));
+    }
+    let section = within(c, p, "section", 0.0, 0.0, 1000.0)?;
+    if section <= 0.0 {
+        return Err(bad(c, "`section` (mm²) is required"));
+    }
+    let phases = Phases::parse(choice(c, p, "phases", &["FN", "FF", "3F", "3FN"], "FN")?).unwrap_or(Phases::PhaseNeutral);
+    let circuits = within(c, p, "circuits", 1.0, 1.0, 1000.0)?.round() as usize;
+    let keys: Vec<&str> = FAMILIES.iter().map(|f| f.key).collect();
+    let family = conduit::family(choice(c, p, "family", &keys, "pvc-thread")?).ok_or_else(|| bad(c, "no such family"))?;
+    let one = conduit::conductors(phases, section, flag(c, p, "reduced_neutral")?);
+    let all: Vec<f64> = (0..circuits).flat_map(|_| one.iter().copied()).collect();
+    let source = json!({"maker": family.maker, "document": family.document, "page": family.page, "url": family.url, "inside": "outside less twice the wall"});
+    if let Some(s) = one.iter().find(|s| conduit::cable_diameter(**s).is_none()) {
+        return Ok(
+            json!({"conductors": all.len(), "pending": format!("the catalogue has no outside diameter for a cable of {s} mm²"), "source": source}),
+        );
+    }
+    let round = |x: f64, k: f64| (x * k).round() / k + 0.0;
+    let smallest = conduit::smallest(family, &all).map(|s| s.0);
+    let size =
+        match string(c, p, "size")? {
+            None => None,
+            Some(mark) => Some(family.sizes.iter().find(|s| s.0 == mark).ok_or_else(|| {
+                bad(c, format!("`size` must be one of {}", family.sizes.iter().map(|s| s.0).collect::<Vec<_>>().join(", ")))
+            })?),
+        };
+    let fill = size.and_then(|s| conduit::fill(s, &all));
+    Ok(json!({
+        "conductors": all.len(),
+        "circuits": circuits,
+        "sections_mm2": one,
+        "smallest": smallest,
+        "size": size.map(|s| s.0),
+        "inside_mm": size.map(|s| round(conduit::inside(s), 100.0)),
+        "fill_percent": fill.map(|f| round(f.ratio * 100.0, 10.0)),
+        "limit_percent": fill.map(|f| round(f.limit * 100.0, 10.0)),
+        "ok": fill.map(|f| f.ok),
+        "source": source,
+    }))
+}
+
+fn drain_size(_: &mut Session, p: &Value) -> R {
+    use crate::drainage::{self, FIXTURES, Role};
+    let c = "drain_size";
+    let o = p.as_object().ok_or_else(|| bad(c, "params must be an object"))?;
+    const KEYS: &[&str] = &["units", "fixtures", "role", "slope", "floors", "min_dn"];
+    if let Some(key) = o.keys().find(|k| !KEYS.contains(&k.as_str())) {
+        return Err(bad(c, format!("unknown parameter `{key}`")));
+    }
+    let mut units = within(c, p, "units", 0.0, 0.0, 1.0e7)?;
+    let mut minimum = within(c, p, "min_dn", 0.0, 0.0, 1000.0)?;
+    let mut fixtures_dn = 0.0;
+    match p.get("fixtures") {
+        v if absent(v) => {}
+        Some(Value::Object(f)) => {
+            let mut sum = 0.0;
+            for (kind, n) in f {
+                let (u, dn) = drainage::fixture(kind).ok_or_else(|| {
+                    bad(c, format!("`fixtures`: no fixture `{kind}`, use {}", FIXTURES.iter().map(|x| x.0).collect::<Vec<_>>().join(", ")))
+                })?;
+                let n = n
+                    .as_f64()
+                    .filter(|n| n.is_finite() && *n >= 0.0 && *n <= 10_000.0 && n.fract() == 0.0)
+                    .ok_or_else(|| bad(c, format!("`fixtures`: `{kind}` must be a whole number from 0 to 10000, got {n}")))?;
+                sum += u * n;
+                if n > 0.0 {
+                    fixtures_dn = f64::max(fixtures_dn, dn);
+                }
+            }
+            units += sum;
+        }
+        Some(v) => return Err(bad(c, format!("`fixtures` must be an object {{kind: count}}, got {v}"))),
+        None => {}
+    }
+    if units <= 0.0 {
+        return Err(bad(c, "`units` (UHC) or `fixtures` is required"));
+    }
+    minimum = minimum.max(fixtures_dn);
+    let role = Role::parse(choice(c, p, "role", &["branch", "main", "stack"], "branch")?).unwrap_or(Role::Branch);
+    let slope = within(c, p, "slope", 0.01, 0.0, 1.0)?;
+    let floors = within(c, p, "floors", 1.0, 1.0, 1000.0)?.round() as u32;
+    let dn = drainage::smallest(units, slope, role, floors, minimum)
+        .ok_or_else(|| {
+        let most = drainage::DNS.iter().map(|dn| (*dn, drainage::capacity(*dn, slope, role, floors))).fold((0.0, 0.0), |a, b| if b.1 > a.1 { b } else { a });
+        bad(
+            c,
+            format!(
+                "{units} UHC is more than the tables of this version list for this role and slope: the most is DN {} at {} UHC (a blank in the standard's table means not allowed, not that the tables ended); split the load, or give a steeper `slope`",
+                most.0, most.1
+            ),
+        )
+    })?;
+    Ok(json!({"units": units, "dn": dn, "capacity": drainage::capacity(dn, slope, role, floors), "minimum_dn": minimum}))
+}
+
+fn vent_size(_: &mut Session, p: &Value) -> R {
+    use crate::drainage;
+    let c = "vent_size";
+    let o = p.as_object().ok_or_else(|| bad(c, "params must be an object"))?;
+    const KEYS: &[&str] = &["units", "wc", "stack_dn", "length", "trap_dn"];
+    if let Some(key) = o.keys().find(|k| !KEYS.contains(&k.as_str())) {
+        return Err(bad(c, format!("unknown parameter `{key}`")));
+    }
+    let units = within(c, p, "units", 0.0, 0.0, 1.0e7)?;
+    if units <= 0.0 {
+        return Err(bad(c, "`units` (UHC of what it vents) is required"));
+    }
+    let dns = drainage::DNS;
+    let mut out = serde_json::Map::new();
+    let dn = if absent(p.get("stack_dn")) {
+        drainage::branch_vent(units, flag(c, p, "wc")?)
+            .ok_or_else(|| bad(c, format!("{units} UHC is more than the table gives a branch vent (Tabela 8)")))?
+    } else {
+        let served = within(c, p, "stack_dn", 0.0, 0.0, 1000.0)?;
+        if !dns.iter().any(|d| (d - served).abs() < 1e-9) {
+            return Err(bad(c, format!("`stack_dn` must be one of {}", dns.iter().map(|d| d.to_string()).collect::<Vec<_>>().join(", "))));
+        }
+        if absent(p.get("length")) {
+            return Err(bad(c, "`length` (mm, from the foot to the open end) is required with `stack_dn`"));
+        }
+        let length = within(c, p, "length", 0.0, 0.0, MAX_COORD)? / 1000.0;
+        let dn = drainage::vent_stack(served, units, length)
+            .ok_or_else(|| bad(c, "no vent of the table (Tabela 2) is long enough for that, or the units pass its last row"))?;
+        out.insert("longest_m".into(), json!(drainage::vent_stack_limit(served, units, dn)));
+        dn
+    };
+    out.insert("dn".into(), json!(dn));
+    if !absent(p.get("trap_dn")) {
+        let t = within(c, p, "trap_dn", 0.0, 0.0, 1000.0)?;
+        let mm = drainage::trap_distance(t).ok_or_else(|| bad(c, "`trap_dn` must be 40, 50, 75 or 100 (Tabela 1)"))?;
+        out.insert("trap_to_vent_mm".into(), json!(mm));
+    }
+    Ok(Value::Object(out))
+}
+
+fn hydrant_size(_: &mut Session, p: &Value) -> R {
+    use crate::hydrant::{self, MATERIALS, MAX_NOZZLE_HEAD, MAX_SPEED, TYPE_KEYS};
+    let c = "hydrant_size";
+    let o = p.as_object().ok_or_else(|| bad(c, "params must be an object"))?;
+    const KEYS: &[&str] = &["region", "column", "area", "type", "hydrants", "inside", "nominal", "material", "length", "rise"];
+    if let Some(key) = o.keys().find(|k| !KEYS.contains(&k.as_str())) {
+        return Err(bad(c, format!("unknown parameter `{key}`")));
+    }
+    if string(c, p, "region")?.is_some_and(|r| r != "SP") {
+        return Err(bad(
+            c,
+            "`region` must be SP: only IT 22/2025 of the Corpo de Bombeiros of São Paulo is covered, no other state's rule",
+        ));
+    }
+    let round = |x: f64, k: f64| (x * k).round() / k + 0.0;
+    let (has_column, has_area) = (!absent(p.get("column")), !absent(p.get("area")));
+    let mut system: Option<(u8, f64)> = None;
+    if has_column || has_area {
+        if !has_column {
+            return Err(bad(c, "`column` (1 to 5, of IT 22's Tabela 3) is required with `area`"));
+        }
+        if !has_area {
+            return Err(bad(c, "`area` (m², built) is required with `column`"));
+        }
+        let column = within(c, p, "column", 1.0, 1.0, 5.0)?;
+        if column.fract() != 0.0 {
+            return Err(bad(c, "`column` must be a whole number from 1 to 5"));
+        }
+        let area = within(c, p, "area", 0.0, f64::MIN_POSITIVE, 1.0e8)?;
+        system = hydrant::system_for(column as u8, area);
+    }
+    let mut out = serde_json::Map::new();
+    if let Some((t, rti)) = system {
+        out.insert("system".into(), json!(t.to_string()));
+        out.insert("reserve_m3".into(), json!(rti));
+    }
+    let key = if absent(p.get("type")) {
+        match system {
+            Some((4, _)) if !absent(p.get("inside")) => {
+                return Err(bad(c, "the system is type 4: give `type` as 4-40 or 4-65, by the nozzle"));
+            }
+            Some((t, _)) if t != 4 => Some(t.to_string()),
+            Some(_) => None,
+            None => return Err(bad(c, "`type` (1, 2, 3, 4-40, 4-65 or 5) or `column` and `area` is required")),
+        }
+    } else {
+        let key = choice(c, p, "type", TYPE_KEYS, "")?;
+        if let (Some((t, _)), Some(row)) = (system, hydrant::kind(key))
+            && row.1 != t
+        {
+            return Err(bad(
+                c,
+                format!("`type` {key} contradicts `column` {} and `area`, which give type {t}: give one, or make them agree", p["column"]),
+            ));
+        }
+        Some(key.to_string())
+    };
+    let Some(key) = key else { return Ok(Value::Object(out)) };
+    let hydrants = within(c, p, "hydrants", 2.0, 1.0, 1000.0)?;
+    if hydrants.fract() != 0.0 {
+        return Err(bad(c, "`hydrants` must be a whole number from 1 to 1000"));
+    }
+    let Some(t) = hydrant::kind(&key) else { return Err(bad(c, format!("no system type `{key}`"))) };
+    let flow = hydrant::design_flow(&key, hydrants as u32);
+    out.insert("type".into(), json!(key));
+    out.insert("flow_lpm".into(), json!(flow));
+    out.insert("nozzle_head_mca".into(), json!(t.6));
+    out.insert("hose_dn_mm".into(), json!(t.3));
+    out.insert("hose_length_m".into(), json!(t.4));
+    let mut ok = t.6 <= MAX_NOZZLE_HEAD;
+    if absent(p.get("inside")) {
+        if !absent(p.get("nominal")) {
+            return Err(bad(c, "`nominal` needs the pipe's `inside` diameter (mm)"));
+        }
+        return Ok(Value::Object(out));
+    }
+    let inside = within(c, p, "inside", 0.0, f64::MIN_POSITIVE, 5000.0)?;
+    let material = choice(c, p, "material", &MATERIALS.iter().map(|m| m.0).collect::<Vec<_>>(), "steel")?;
+    let cf = hydrant::hazen_c(material).unwrap_or(120.0);
+    let length = within(c, p, "length", 0.0, 0.0, MAX_COORD)? / 1000.0;
+    let rise = within(c, p, "rise", 0.0, -MAX_COORD, MAX_COORD)? / 1000.0;
+    let (v, j) = (hydrant::speed(flow, inside), hydrant::hazen_j(flow, cf, inside));
+    let loss = j * length;
+    let speed_ok = v <= MAX_SPEED + 1e-9;
+    ok = ok && speed_ok;
+    out.insert("speed_ms".into(), json!(round(v, 100.0)));
+    out.insert("speed_ok".into(), json!(speed_ok));
+    out.insert("head_loss_m_per_m".into(), json!(round(j, 1.0e5)));
+    out.insert("loss_mca".into(), json!(round(loss, 100.0)));
+    out.insert("need_mca".into(), json!(round(t.6 + loss + rise, 100.0)));
+    out.insert(
+        "need_covers".into(),
+        json!("nozzle head + head loss of the straight pipe + rise: not the hose, the fittings or the pressure at the source"),
+    );
+    if !absent(p.get("nominal")) {
+        let nominal = within(c, p, "nominal", 0.0, f64::MIN_POSITIVE, 5000.0)?;
+        let size_ok = nominal + 1e-9 >= hydrant::min_nominal(&key);
+        ok = ok && size_ok;
+        out.insert("size_ok".into(), json!(size_ok));
+    }
+    out.insert("ok".into(), json!(ok));
+    out.insert(
+        "ok_covers".into(),
+        json!("nozzle head within 100 mca, speed within 5 m/s and the pipe's size only: it is not a verdict on the design"),
+    );
+    Ok(Value::Object(out))
+}
+
+fn water_size(_: &mut Session, p: &Value) -> R {
+    use crate::water::{self, FITTINGS, FIXTURES, MAX_SPEED, MIN_USE_KPA, Method};
+    let c = "water_size";
+    let o = p.as_object().ok_or_else(|| bad(c, "params must be an object"))?;
+    const KEYS: &[&str] = &["fixtures", "flow", "method", "dn", "length", "fittings", "pressure", "rise"];
+    if let Some(key) = o.keys().find(|k| !KEYS.contains(&k.as_str())) {
+        return Err(bad(c, format!("unknown parameter `{key}`")));
+    }
+    let whole = |key: &str, kind: &str, n: &Value| {
+        n.as_f64()
+            .filter(|n| n.is_finite() && *n >= 0.0 && *n <= 10_000.0 && n.fract() == 0.0)
+            .ok_or_else(|| bad(c, format!("`{key}`: `{kind}` must be a whole number from 0 to 10000, got {n}")))
+    };
+    let method = Method::parse(choice(c, p, "method", &["weights", "sum"], "weights")?).unwrap_or(Method::Weights);
+    let flow = match (absent(p.get("flow")), p.get("fixtures")) {
+        (false, f) if !absent(f) => return Err(bad(c, "give `flow` or `fixtures`, not both")),
+        (false, _) => within(c, p, "flow", 0.0, f64::MIN_POSITIVE, 1000.0)?,
+        (true, Some(Value::Object(f))) => {
+            let mut list: Vec<(&str, f64)> = Vec::new();
+            for (kind, n) in f {
+                if water::fixture(kind).is_none() {
+                    return Err(bad(
+                        c,
+                        format!("`fixtures`: no fixture `{kind}`, use {}", FIXTURES.iter().map(|x| x.0).collect::<Vec<_>>().join(", ")),
+                    ));
+                }
+                let n = whole("fixtures", kind, n)?;
+                list.push((kind.as_str(), n));
+            }
+            water::design_flow(method, &list)
+        }
+        (true, Some(v)) if !absent(Some(v)) => return Err(bad(c, format!("`fixtures` must be an object {{kind: count}}, got {v}"))),
+        _ => 0.0,
+    };
+    if flow <= 0.0 {
+        return Err(bad(c, "`flow` (L/s) or `fixtures` is required"));
+    }
+    let dn = if absent(p.get("dn")) {
+        water::smallest_dn(flow).ok_or_else(|| bad(c, "no DN of PVC soldável (20 to 110) keeps the speed within 3 m/s at that flow"))?
+    } else {
+        let dn = within(c, p, "dn", 0.0, 0.0, 1000.0)?;
+        water::inside(dn).map(|_| dn).ok_or_else(|| bad(c, "`dn` must be one of 20, 25, 32, 40, 50, 60, 75, 85, 110 (PVC soldável)"))?
+    };
+    let inside = water::inside(dn).ok_or_else(|| bad(c, "`dn` is not a PVC soldável size"))?;
+    let mut length = within(c, p, "length", 0.0, 0.0, MAX_COORD)? / 1000.0;
+    match p.get("fittings") {
+        v if absent(v) => {}
+        Some(Value::Object(f)) => {
+            for (kind, n) in f {
+                let le = water::equivalent_length(dn, kind)
+                    .ok_or_else(|| bad(c, format!("`fittings`: no fitting `{kind}`, use {}", FITTINGS.join(", "))))?;
+                length += le * whole("fittings", kind, n)?;
+            }
+        }
+        Some(v) => return Err(bad(c, format!("`fittings` must be an object {{fitting: count}}, got {v}"))),
+        None => {}
+    }
+    let (speed, j) = water::head_loss(flow, inside, water::EPS_PVC);
+    let loss = j * length * water::KPA_PER_M;
+    let round = |x: f64, k: f64| (x * k).round() / k + 0.0;
+    let mut ok = speed <= MAX_SPEED + 1e-9;
+    let end = if absent(p.get("pressure")) {
+        None
+    } else {
+        let pressure = within(c, p, "pressure", 0.0, 0.0, 1.0e5)?;
+        let rise = within(c, p, "rise", 0.0, -MAX_COORD, MAX_COORD)? / 1000.0;
+        let end = pressure - loss - rise * water::KPA_PER_M;
+        ok = ok && end >= MIN_USE_KPA;
+        Some(end)
+    };
+    Ok(json!({
+        "flow_lps": round(flow, 1000.0),
+        "dn": dn,
+        "inside_mm": round(inside, 10.0),
+        "speed_ms": round(speed, 100.0),
+        "head_loss_m_per_m": round(j, 1.0e5),
+        "equivalent_length_m": round(length, 100.0),
+        "loss_kpa": round(loss, 100.0),
+        "end_kpa": end.map(|e| round(e, 100.0)),
+        "ok": ok,
+    }))
+}
+
+fn storm_size(_: &mut Session, p: &Value) -> R {
+    use crate::storm::{self, DEFAULT_RAIN, MIN_SLOPE, N_PVC, Off, Outlet};
+    let c = "storm_size";
+    let o = p.as_object().ok_or_else(|| bad(c, "params must be an object"))?;
+    const KEYS: &[&str] = &["kind", "area", "rainfall", "flow", "outlet", "gutter", "length", "slope", "inside"];
+    if let Some(key) = o.keys().find(|k| !KEYS.contains(&k.as_str())) {
+        return Err(bad(c, format!("unknown parameter `{key}`")));
+    }
+    let kind = choice(c, p, "kind", &["downpipe", "horizontal"], "")?;
+    if kind.is_empty() {
+        return Err(bad(c, "`kind` (downpipe or horizontal) is required"));
+    }
+    let mine: &[&str] = if kind == "downpipe" { &["outlet", "gutter", "length"] } else { &["slope", "inside"] };
+    if let Some(key) = ["outlet", "gutter", "length", "slope", "inside"].into_iter().find(|k| o.contains_key(*k) && !mine.contains(k)) {
+        return Err(bad(c, format!("`{key}` does not apply to a {kind}")));
+    }
+    if !absent(p.get("flow"))
+        && let Some(key) = ["area", "rainfall"].into_iter().find(|k| o.contains_key(*k))
+    {
+        return Err(bad(c, format!("`{key}` and `flow` are two ways to give the flow: give one")));
+    }
+    let outlet = Outlet::parse(choice(c, p, "outlet", &["edge", "funnel"], "edge")?).unwrap_or(Outlet::Edge);
+    let flow = if absent(p.get("flow")) {
+        let area = within(c, p, "area", 0.0, 0.0, 1.0e7)?;
+        if area <= 0.0 {
+            return Err(bad(c, "`area` (m², the roof that drains) or `flow` (L/min) is required"));
+        }
+        if area > storm::DEFAULT_RAIN_MAX_AREA && absent(p.get("rainfall")) {
+            return Err(bad(
+                c,
+                format!(
+                    "`rainfall` (mm/h, from the standard's table for the place and return period) is required above {} m²: the default {DEFAULT_RAIN} mm/h is for smaller roofs",
+                    storm::DEFAULT_RAIN_MAX_AREA
+                ),
+            ));
+        }
+        storm::design_flow(within(c, p, "rainfall", DEFAULT_RAIN, f64::MIN_POSITIVE, 1000.0)?, area)
+    } else {
+        within(c, p, "flow", 0.0, f64::MIN_POSITIVE, 1.0e9)?
+    };
+    let round = |x: f64, k: f64| (x * k).round() / k + 0.0;
+    if kind == "downpipe" {
+        if absent(p.get("gutter")) {
+            return Err(bad(c, "`gutter` (the water depth in the gutter, 50 to 100 mm) is required"));
+        }
+        if absent(p.get("length")) {
+            return Err(bad(c, "`length` (the downpipe's, mm) is required"));
+        }
+        let (gutter, length) = (within(c, p, "gutter", 0.0, 0.0, 10_000.0)?, within(c, p, "length", 0.0, 0.0, MAX_COORD)? / 1000.0);
+        let d = storm::downpipe_diameter(outlet, flow, gutter, length).map_err(|off| {
+            bad(
+                c,
+                match off {
+                    Off::Depth => "the water depth in the gutter must be 50 to 100 mm: the abacuses stop there",
+                    Off::Length => "a downpipe shorter than 0.3 m is off the abacuses",
+                    Off::Diameter => "more than 150 mm inside is off the abacuses of NBR 10844's Figure 3",
+                },
+            )
+        })?;
+        return Ok(
+            json!({"flow_lpm": round(flow, 100.0), "inside_mm": round(d.diameter, 10.0), "by_depth_mm": round(d.by_depth, 10.0), "by_length_mm": round(d.by_length, 10.0)}),
+        );
+    }
+    if absent(p.get("slope")) {
+        return Err(bad(c, "`slope` (a fraction, 0.005 at least) is required"));
+    }
+    let slope = within(c, p, "slope", 0.0, 0.0, 1.0)?;
+    if slope + 1e-9 < MIN_SLOPE {
+        return Err(bad(c, "`slope` must be 0.5 % (0.005) at least, NBR 10844"));
+    }
+    let need = storm::horizontal_diameter(flow, slope, N_PVC);
+    let inside = within(c, p, "inside", 0.0, 0.0, 10_000.0)?;
+    let carries = (inside > 0.0).then(|| storm::manning_flow(inside, slope, N_PVC));
+    Ok(json!({
+        "flow_lpm": round(flow, 100.0),
+        "inside_mm": round(need, 10.0),
+        "carries_lpm": carries.map(|q| round(q, 10.0)),
+        "ok": carries.map(|q| q + 1e-9 >= flow),
+    }))
 }
 
 fn undo(s: &mut Session, p: &Value) -> R {
