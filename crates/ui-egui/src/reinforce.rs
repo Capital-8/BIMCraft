@@ -9,10 +9,11 @@ use bimcraft_i18n::msg;
 
 use bimcraft_core::model::{Element, Id};
 use bimcraft_core::units::Units;
-use egui::{Align, ComboBox, Context, Id as UiId, Layout, Modal, RichText, ScrollArea, TextEdit, Ui, WidgetInfo, WidgetType};
+use egui::{Align, ComboBox, Context, Id as UiId, Layout, RichText, TextEdit, Ui, WidgetInfo, WidgetType};
 use serde_json::{Value, json};
 
 use crate::lang::{category, t, tf};
+use crate::popup::{self, Modal};
 use crate::style::pal;
 use crate::{BimApp, Status};
 
@@ -386,13 +387,12 @@ impl BimApp {
         let mut chosen: Option<String> = None;
         let kind = d.form.kind();
         let names: Vec<String> = self.session.model.reinforcement.iter().filter(|(_, p)| p.kind == kind).map(|(n, _)| n.clone()).collect();
-        let r = Modal::new(UiId::new("reinforce")).show(ctx, |ui| {
-            ui.set_width(700.0);
-            let title = match d.hosts.as_slice() {
-                [one] => tf("Reinforce {} {}", &[&category(d.category, false), &one.to_string()]),
-                many => tf("Reinforce {} {}", &[&many.len().to_string(), &category(d.category, true)]),
-            };
-            ui.label(RichText::new(title).heading());
+        let title = match d.hosts.as_slice() {
+            [one] => tf("Reinforce {} {}", &[&category(d.category, false), &one.to_string()]),
+            many => tf("Reinforce {} {}", &[&many.len().to_string(), &category(d.category, true)]),
+        };
+        let r = Modal::new(UiId::new("reinforce"), title).width(700.0).show(ctx, |ui| {
+          popup::body(ui, |ui| {
             ui.add_space(4.0);
             ui.label(t("How many bars, how thick and how far apart is yours to say; a field left empty is not used. A spacing is the most between bars."));
             ui.separator();
@@ -414,7 +414,7 @@ impl BimApp {
                 }
             });
             ui.separator();
-            ScrollArea::vertical().max_height(480.0).show(ui, |ui| {
+            {
                 ui.horizontal_wrapped(|ui| {
                     for (key, label) in COVER {
                         // The first field is the cover, the others its faces; its label has a colon so no two nodes carry its name.
@@ -454,12 +454,13 @@ impl BimApp {
                         edit(ui, d.values.entry("clearance").or_default(), t("Steel: Clearance").to_string(), 56.0, hint);
                     });
                 });
-            });
+            }
             if !d.error.is_empty() {
                 ui.add_space(6.0);
                 ui.label(RichText::new(&d.error).color(pal().error));
             }
-            ui.add_space(8.0);
+          });
+          popup::footer(ui, |ui| {
             ui.horizontal(|ui| {
                 if !d.made.is_empty() {
                     remove = ui.button(t("Remove Bars")).on_hover_text(t("Take away the bars this command made for the element: bars drawn by hand stay")).clicked();
@@ -469,6 +470,7 @@ impl BimApp {
                     ok = ui.button(t("OK")).clicked();
                 });
             });
+          });
         });
         let mut keep = !(ok || cancel || remove || r.should_close());
         // A preset chosen fills the fields; saved, it is the fields as they are; deleted, it is gone. Each keeps the dialog open.
