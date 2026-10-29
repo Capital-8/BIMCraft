@@ -16,27 +16,30 @@ pub enum Language {
     Portuguese,
     #[serde(rename = "es")]
     Spanish,
+    #[serde(rename = "cs")]
+    Czech,
 }
 
 impl Language {
-    pub const ALL: [Language; 3] = [Language::English, Language::Portuguese, Language::Spanish];
+    pub const ALL: [Language; 4] = [Language::English, Language::Portuguese, Language::Spanish, Language::Czech];
 
-    /// Its code in commands and files: en, pt, es.
+    /// Its code in commands and files: en, pt, es, cs.
     pub fn code(self) -> &'static str {
-        self.of(["en", "pt", "es"])
+        self.of(["en", "pt", "es", "cs"])
     }
 
     /// Its name, in itself.
     pub fn label(self) -> &'static str {
-        self.of(["English", "Português (Brasil)", "Español"])
+        self.of(["English", "Português (Brasil)", "Español", "Čeština"])
     }
 
     /// Of one thing in each language, English first, this language's.
-    pub fn of<T>(self, [english, portuguese, spanish]: [T; 3]) -> T {
+    pub fn of<T>(self, [english, portuguese, spanish, czech]: [T; 4]) -> T {
         match self {
             Language::English => english,
             Language::Portuguese => portuguese,
             Language::Spanish => spanish,
+            Language::Czech => czech,
         }
     }
 
@@ -47,6 +50,7 @@ impl Language {
             "en" | "english" => Language::English,
             "pt" | "portuguese" | "português" => Language::Portuguese,
             "es" | "spanish" | "español" => Language::Spanish,
+            "cs" | "cz" | "czech" | "čeština" | "cestina" => Language::Czech,
             _ => return None,
         })
     }
