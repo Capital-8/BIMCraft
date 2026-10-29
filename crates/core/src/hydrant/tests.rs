@@ -64,7 +64,8 @@ fn hazen_williams_by_hand() {
     assert!(near(hazen_j(300.0, 150.0, 53.0), 0.08739, 1e-4));
     assert!(near(speed(600.0, 68.0), 2.7535, 1e-3));
     assert!(hazen_j(600.0, 120.0, 100.0) < hazen_j(600.0, 120.0, 68.0), "a larger pipe loses less");
-    assert_eq!(hazen_c("steel"), Some(120.0));
+    assert_eq!(hazen_c("steel"), Some(100.0), "black steel in a dry system: the lowest steel row");
+    assert_eq!(hazen_c("steel-wet"), Some(120.0));
     assert_eq!(hazen_c("copper"), Some(150.0));
     assert_eq!(hazen_c("lead"), None);
 }

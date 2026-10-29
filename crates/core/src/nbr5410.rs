@@ -199,10 +199,11 @@ pub fn grouping_factor(method_key: &str, bundle: bool, circuits: u32, spacing: f
         if n == 1 {
             return Some(1.0);
         }
-        if n > 6 || spacing.is_nan() || spacing < 0.0 {
+        if n > 6 || spacing.is_nan() || !(0.0..=1.0 + 1e-9).contains(&spacing) {
             return None;
         }
-        let at = SPACINGS.iter().position(|s| *s >= spacing - 1e-9)?;
+        // The factors grow with the spacing, so between two printed columns the narrower one is the safe side.
+        let at = SPACINGS.iter().rposition(|s| *s <= spacing + 1e-9)?;
         let table = if group == Group::BuriedMulti { G45_MULTI } else { G45_SINGLE };
         return table.get(at)?.get(n as usize - 2).copied();
     }
@@ -236,7 +237,8 @@ pub fn neutral_section(phase: f64, reduced: bool) -> f64 {
 }
 
 /// The protective conductor's section (Tabela 58): the phase's up to 16 mm², 16 above to 35, half of it above, rounded up to the
-/// next standard section (95 mm² gets 50, 120 gets 70, 150 and 185 get 95), as a cable is only made in those.
+/// next standard section (95 mm² gets 50, 120 gets 70, 150 and 185 get 95), as a cable is only made in those. Item 6.4.3.1.3 asks
+/// for the nearest standard section, which is sometimes the smaller (150 mm² gets 70 there); up is the safe side.
 pub fn protective_section(phase: f64) -> f64 {
     if phase <= 16.0 {
         phase
@@ -248,11 +250,18 @@ pub fn protective_section(phase: f64) -> f64 {
     }
 }
 
+/// How far a flexible conductor of 300 mm² and over is above a rigid one: NBR NM 280 Tabela 3 against Tabela 2 gives 0.0641 against
+/// 0.0601 ohm/km at 300 mm², 6.7 %. shortcut: that margin, rounded up, for every section above 240 mm² until those rows are
+/// added to `RESISTANCE_FLEX`; the other sections above 300 mm² were not compared.
+const FLEX_OVER_RIGID: f64 = 1.07;
+
 /// Resistance in ohm/km at the insulation's highest working temperature (what a cable carries at its rated current): a flexible
-/// conductor's (the default, the larger) or a rigid one's; above 240 mm² there is no flexible figure, so the rigid one.
+/// conductor's (the default, the larger) or a rigid one's; above 240 mm² the flexible rows are not here, so the rigid figure
+/// raised by [`FLEX_OVER_RIGID`], which is on the safe side.
 pub fn resistance(section: f64, insulation: Insulation, flexible: bool) -> Option<f64> {
     let find = |t: &[(f64, f64)]| t.iter().find(|r| (r.0 - section).abs() < 1e-9).map(|r| r.1);
-    let r20 = if flexible { find(RESISTANCE_FLEX).or_else(|| find(RESISTANCE_20)) } else { find(RESISTANCE_20) }?;
+    let r20 =
+        if flexible { find(RESISTANCE_FLEX).or_else(|| find(RESISTANCE_20).map(|r| r * FLEX_OVER_RIGID)) } else { find(RESISTANCE_20) }?;
     Some(r20 * (1.0 + COPPER_ALPHA * (insulation.max_celsius() - 20.0)))
 }
 

@@ -92,7 +92,9 @@ fn the_correction_factors_are_as_printed() {
     assert_eq!(g("11A", false, 12, 0.0), Some(0.61));
     assert_eq!(g("61", false, 1, 0.0), Some(1.0));
     assert_eq!(g("61", false, 3, 0.0), Some(0.75));
-    assert_eq!(g("61", false, 3, 0.3), Some(0.90), "0.3 m falls in the 0.5 m column, on the safe side");
+    assert_eq!(g("61", false, 3, 0.3), g("61", false, 3, 0.25), "0.3 m falls in the 0.25 m column, the narrower one: the safe side");
+    assert_eq!(g("61", false, 3, 0.1), g("61", false, 3, 0.0), "0.1 m takes the nil column");
+    assert!(g("61", false, 3, 0.3) < g("61", false, 3, 0.5), "a wider spacing never gets a smaller factor");
     assert_eq!(g("61A", false, 6, 1.0), Some(0.90));
     assert_eq!(g("61", false, 7, 0.0), None, "Tabela 45 stops at six circuits");
     assert_eq!(g("61", false, 3, 2.0), None, "and at 1 m of spacing");
@@ -126,7 +128,12 @@ fn the_conductor_resistance_is_the_makers_at_the_working_temperature() {
     assert!(near(rigid, 7.41 * (1.0 + 0.00393 * 50.0), 1e-9));
     assert!(near(flexible, 7.98 * (1.0 + 0.00393 * 50.0), 1e-9));
     assert!(near(resistance(2.5, Insulation::Epr, true).unwrap_or_default(), 7.98 * (1.0 + 0.00393 * 70.0), 1e-9));
-    assert_eq!(resistance(300.0, Insulation::Pvc, true), resistance(300.0, Insulation::Pvc, false), "no flexible figure above 240 mm2");
+    let (flex, rigid) =
+        (resistance(300.0, Insulation::Pvc, true).unwrap_or_default(), resistance(300.0, Insulation::Pvc, false).unwrap_or_default());
+    assert!(
+        near(flex, rigid * 1.07, 1e-9) && flex > rigid * 0.0641 / 0.0601,
+        "above 240 mm2 the rigid figure raised by 7 %, over the 6.7 % of NBR NM 280"
+    );
     assert!(flexible >= rigid);
 }
 

@@ -20,7 +20,6 @@ mod component_geometry;
 pub mod conduit;
 mod constraints;
 mod csg;
-mod csg;
 pub mod curves;
 pub mod dims;
 pub mod drainage;

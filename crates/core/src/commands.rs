@@ -1477,8 +1477,9 @@ pub static ALL: &[Command] = &[
          predial, Tabela 7 by `slope`, a fraction, 0.01 by default; DN 100 at least) or a `stack` (tubo de queda, Tabela 6 by the \
          building's `floors`, up to three or more). `min_dn` is the largest drain flowing into it. Replies with the `dn`, what it \
          carries (`capacity`) and the `minimum_dn` the fixtures ask. A blank in the standard's table means not allowed: DN 100 and 150 \
-         carry nothing in a building drain at 0.5 %, and a branch or a building drain never borrows the other's table. It has no \
-         shortcut: Revit has no tool for it. It changes nothing",
+         carry nothing in a building drain at 0.5 %, and a branch or a building drain never borrows the other's table. For a `main` \
+         every fixture given counts, where item 5.1.4.2 counts only the largest fixture of each bathroom in a residential building: pass `units` already \
+         reduced to follow it. It has no shortcut: Revit has no tool for it. It changes nothing",
         drain_size,
     ),
     other(
@@ -1493,16 +1494,16 @@ pub static ALL: &[Command] = &[
     other(
         "hydrant_size",
         "Size Hydrants",
-        "{column?: 1-5, area?, type?: 1|2|3|4-40|4-65|5, hydrants?, inside?, nominal?, material?: steel|copper|pvc|pex, length?, rise?} \
+        "{column?: 1-5, area?, type?: 1|2|3|4-40|4-65|5, hydrants?, inside?, nominal?, material?: steel|steel-wet|copper|pvc|pex, length?, rise?} \
          hydrants and hose reels as IT 22/2025 of the CBPMESP asks. With `column` (of Tabela 3, by the occupation) and `area` (m², \
          built) it replies the system type and the fire reserve (m³). With `type` (Tabela 2; 4 comes as 4-40 or 4-65 by its nozzle) \
          it replies the design flow, that of the two most unfavourable jets (`hydrants`, 2 by default), and the head at the nozzle; \
          with `inside` (mm) it also replies the speed (5 m/s at most), the Hazen-Williams head loss over `length` (m) of the \
-         `material` (Tabela 1), the head needed at the start of the pipe with its `rise` (mm, up) and, with `nominal` (mm), whether \
+         `material` (Tabela 1: `steel` is black steel in a dry system, C 100, the lowest steel row and the default, `steel-wet` is galvanised or wet, C 120), the head needed at the start of the pipe with its `rise` (mm, up) and, with `nominal` (mm), whether \
          the pipe is big enough (DN 65; DN 50 for types 1 and 2). `length` and `rise` are in millimetres. `need_mca` is the nozzle \
          head + the head loss of the straight pipe + the rise: it leaves out the hose, the fittings and the pressure at the source \
          (`need_covers` says so), and `ok` is only the nozzle head within 100 mca, the speed and the pipe's size (`ok_covers`), not \
-         a verdict on the design. A `type` that contradicts `column` and `area` is an error. `region` is SP, the only one: this is the \
+         a verdict on the design. A `type` that contradicts `column` and `area` is an error. Notes 1 and 2 of Tabela 3 (a system one type lower in some cases) are not applied. `region` is SP, the only one: this is the \
          São Paulo rule, and no other state's. It has no shortcut: Revit has no tool for it. It changes nothing",
         hydrant_size,
     ),
@@ -1517,8 +1518,8 @@ pub static ALL: &[Command] = &[
          is not in the table here). Without `dn` it replies the smallest DN chosen by speed alone (3 m/s at most; the pressure is \
          not used to choose it); with `dn`, whether that pipe keeps the speed. The head loss is Darcy-Weisbach (Colebrook, PVC at \
          20 °C) over `length` (mm) plus the equivalent length of the `fittings`; with `pressure` (kPa, dynamic, upstream) and `rise` \
-         (mm, up) it replies the pressure left at the end, 10 kPa at least at a point of use, and `ok` covers both. It has no \
-         shortcut: Revit has no tool for it. It changes nothing",
+         (mm, up) it replies the pressure left at the end, 10 kPa at least at a point of use, and `ok` covers both; without `pressure` \
+         `ok` is the speed alone (`ok_covers` says which). It has no shortcut: Revit has no tool for it. It changes nothing",
         water_size,
     ),
     other(
@@ -1529,7 +1530,7 @@ pub static ALL: &[Command] = &[
          150 by default, which the standard allows for up to 100 m² only: above that `rainfall` is required): Q = I·A/60. A `downpipe` (condutor vertical) takes the inner diameter of the \
          standard's Figure 3 abacuses by Q, the water depth in the gutter `gutter` (50 to 100 mm), its `length` (mm, 0.3 m or more) \
          and the gutter's `outlet` (edge: sharp-edged, the default; funnel); 70 mm inside at least. A `horizontal` drain takes \
-         Manning at two thirds full (n 0.011, the standard's Table 4) at its `slope` (a fraction, 0.005 at least): the inner \
+         Manning at two thirds full (n 0.011, PVC only, from the standard's Table 2) at its `slope` (a fraction, 0.005 at least): the inner \
          diameter it needs, and with `inside` (mm) whether that pipe carries the flow. Off the abacuses (more than 150 mm inside) \
          nothing is read. A key that does not apply to the `kind`, or `flow` together with `area`, is an error. It has no shortcut: \
          Revit has no tool for it. It changes nothing",
@@ -4193,6 +4194,7 @@ fn water_size(_: &mut Session, p: &Value) -> R {
         "loss_kpa": round(loss, 100.0),
         "end_kpa": end.map(|e| round(e, 100.0)),
         "ok": ok,
+        "ok_covers": if end.is_some() { "the speed and the pressure left at the end" } else { "the speed alone: no pressure was given" },
     }))
 }
 

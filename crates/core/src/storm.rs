@@ -8,7 +8,8 @@
 //!   outlet, (b) with a funnel outlet, by `Q`, the water depth in the gutter `H` (mm) and the downpipe's length `L` (m): the
 //!   higher of what the `H` curves and the `L` curves give at `Q`, interpolating between curves; at least 70 mm inside.
 //! - A horizontal drain ("condutor horizontal") takes Manning-Strickler with the water at two thirds of the inner diameter,
-//!   `Q = 60000 A R^(2/3) i^(1/2) / n` (L/min), `n` 0.011 for PVC, which is the standard's Table 4; at least 0.5 % slope.
+//!   `Q = 60000 A R^(2/3) i^(1/2) / n` (L/min), `n` 0.011 for PVC, which the standard's Table 2 gives (Table 4 is the flows computed
+//!   with it); PVC is the only material here; at least 0.5 % slope.
 //!
 //! Source: NBR 10844:1989 itself (a paid ABNT standard), read from a licensed copy: item 5.6.4 (the method: raise a vertical at Q to
 //! the H and L curves, interpolate between existing curves when there is none, take the highest intersection, carry it to the D

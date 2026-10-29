@@ -7,7 +7,8 @@
 //! - Tabela 3: the type of system and the fire reserve (RTI, m³) by the occupation's column (1 to 5) and the built area's band.
 //! - Tabela 1: Hazen-Williams' factor C by the pipe's material (new pipes); the head loss is item 4.8.10.2's
 //!   `J = 605 Q^1.85 C^-1.85 D^-4.87 10^4` (m/m, Q in L/min, D the inner diameter in mm).
-//! - Item 4.8.3: the design flow is that of the two most unfavourable jets; 4.8.11 and 4.8.12 limit the speed to 5 m/s; 4.8.8 the
+//! - Item 4.8.3: the design flow is that of the two most unfavourable jets; 4.8.12 limits the speed to 5 m/s (4.8.11 is the pump's
+//!   suction pipe, 2 m/s with negative suction and 3 m/s with positive, and is not checked here); 4.8.8 the
 //!   head at a nozzle to 100 mca; 4.11.6 the smallest pipe to DN 65 (DN 50 for types 1 and 2).
 //!
 //! This is the rule of São Paulo only (IT 22/2025 of the CBPMESP); no other state's. The band edges of Tabela 3 are taken as
@@ -40,10 +41,11 @@ const RTI: [[(u8, f64); 6]; 5] = [
     [(4, 32.0), (4, 48.0), (5, 64.0), (5, 96.0), (5, 120.0), (5, 180.0)],
 ];
 
-/// Tabela 1: Hazen-Williams' C by material, new pipes.
-pub const MATERIALS: &[(&str, f64)] = &[("steel", 120.0), ("copper", 150.0), ("pvc", 150.0), ("pex", 150.0)];
+/// Tabela 1: Hazen-Williams' C by material, new pipes. `steel` is black steel in a dry system, C 100, the lowest of the steel
+/// rows, so a head loss is never underrated; `steel-wet` is galvanised steel, or black steel in a wet system, C 120.
+pub const MATERIALS: &[(&str, f64)] = &[("steel", 100.0), ("steel-wet", 120.0), ("copper", 150.0), ("pvc", 150.0), ("pex", 150.0)];
 
-/// The fastest water may go, m/s (items 4.8.11 and 4.8.12).
+/// The fastest water may go, m/s (item 4.8.12).
 pub const MAX_SPEED: f64 = 5.0;
 /// The most head allowed at a nozzle, mca (item 4.8.8).
 pub const MAX_NOZZLE_HEAD: f64 = 100.0;

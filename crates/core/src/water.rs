@@ -3,7 +3,8 @@
 //!
 //! - The method that gives a pipe's design flow is the project's to choose and to justify in its report. Two are offered:
 //!   `weights`, the empirical method of NBR 5626:1998 Annex A, `Q = 0.3 √ΣP` (L/s), never more than the sum of the fixtures' own
-//!   design flows; and `sum`, every fixture at once. The fixtures' design flows and relative weights are not the standard's: they
+//!   design flows (the 2020 edition has no such annex and asks for a recognised method, justified in the design, items 6.14.1 and
+//!   6.14.2: this is offered as one); and `sum`, every fixture at once. The fixtures' design flows and relative weights are not the standard's: they
 //!   are Tigre's table "Vazões de projeto e pesos relativos nos pontos de utilização" (Manual Técnico Tigre, 2021_10, page 198 of
 //!   the PDF), the reference makers' table. Only the flush-tank WC, the lavatory, the sink, the shower and the tub (`laundry`,
 //!   "Tanque", 0.25 L/s, weight 0.7) are taken from it.
