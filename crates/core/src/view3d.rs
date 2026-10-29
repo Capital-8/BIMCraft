@@ -52,6 +52,8 @@ const MASS: Rgb = Rgb(158, 190, 224);
 const RAIL: Rgb = Rgb(120, 122, 128);
 /// A beam, a footing, a structural column made of nothing the library has.
 const STRUCTURE: Rgb = Rgb(182, 184, 190);
+/// Steel, darker than the concrete round it.
+const REBAR: Rgb = Rgb(92, 96, 104);
 /// A component's form made of nothing the library has.
 const COMPONENT: Rgb = Rgb(214, 204, 188);
 /// Room around a fitted model, px.
@@ -511,6 +513,14 @@ fn solids_in(m: &Model, elements: &[(Id, &Element)], index: Option<&walls::Index
                         let (ring, bottom, top) = g.prism();
                         out.push(Solid::Prism { owner: id, color, tex, ring, bottom, top, curve: None });
                     }
+                }
+            }
+            // A bar: a tube along each straight piece of its path, cut by a section as a round run is.
+            Element::Rebar(rb) => {
+                let base = m.elevation(rb.level);
+                let path: Vec<P3> = rb.path.iter().map(|q| [q[0], q[1], q[2] + base]).collect();
+                for (tris, caps) in crate::rebar::tubes(&path, rb.diameter) {
+                    out.push(Solid::Mesh { owner: id, color: REBAR, tex: 0, tris, caps, round: true, cut: true });
                 }
             }
             // Lofted, a skin of triangles from the footprint to the top outline.

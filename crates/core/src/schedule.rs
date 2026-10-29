@@ -306,6 +306,21 @@ const OWN: &[(&str, usize, &[Own])] = &[
         ],
     ),
     ("beam", 6, &[ID, TYPE, LEVEL, LENGTH, WIDTH, DEPTH, SYSTEM, COUNT, PHASE_CREATED, PHASE_DEMOLISHED, DESIGN_OPTION]),
+    (
+        "rebar",
+        7,
+        &[
+            ID,
+            LEVEL,
+            ("Grade", Kind::Text, From::Key("grade")),
+            ("Diameter", Kind::Length, From::Key("diameter")),
+            LENGTH,
+            COUNT,
+            (msg!("Weight"), Kind::Number, From::Key("weight_kg")),
+            ("Host", Kind::Number, From::Ref("host")),
+            ("Layer", Kind::Text, From::Key("layer")),
+        ],
+    ),
     ("stripfooting", 6, &[ID, TYPE, LEVEL, LENGTH, WIDTH, DEPTH, SYSTEM, COUNT, PHASE_CREATED, PHASE_DEMOLISHED, DESIGN_OPTION]),
     (
         "pipe",

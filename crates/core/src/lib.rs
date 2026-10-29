@@ -21,6 +21,8 @@ mod csg;
 pub mod curves;
 pub mod draw;
 pub mod dxf;
+#[cfg(test)]
+mod eberick_tests;
 pub mod engine;
 pub mod family;
 pub mod favorites;
@@ -47,6 +49,12 @@ pub mod pat;
 pub mod pdf;
 pub mod pen;
 pub mod phasing;
+pub mod rebar;
+#[cfg(test)]
+mod rebar_tests;
+pub mod reinforce;
+#[cfg(test)]
+mod reinforce_tests;
 pub mod render;
 pub mod runs;
 pub mod sample;

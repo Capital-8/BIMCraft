@@ -39,6 +39,7 @@ mod phasing;
 mod properties;
 mod purge;
 pub mod recent;
+mod reinforce;
 mod renames;
 pub mod revit;
 mod ribbon;
@@ -296,10 +297,11 @@ type Buttons<'a> = &'a [(Icon, &'a str, &'a str, Option<Tool>, bool)];
 
 /// The desktop's own two-letter shortcuts, which [`BimApp::shortcut`] takes before the commands'
 /// aliases, and what Keyboard Shortcuts (KS) calls them.
-const SHORTCUTS: [(&str, &str); 50] = [
+const SHORTCUTS: [(&str, &str); 51] = [
     ("3D", "3D View"),
     ("MD", "Modify"),
     ("SB", "Floor: Structural"),
+    ("RF", "Reinforce"),
     ("MM", msg!("Mirror Pick Axis")),
     ("DM", msg!("Mirror Draw Axis")),
     ("AL", msg!("Align")),
@@ -616,6 +618,9 @@ pub struct BimApp {
     /// Phasing and Design Options, while they're open, and the design option (`set: option`) new
     /// elements are made in: none is the main model.
     phasing_dialog: Option<phasing::PhasingDialog>,
+    /// Structure > Reinforce, while open, and what was typed in it for each kind of host.
+    reinforce_dialog: Option<reinforce::ReinforceDialog>,
+    reinforce_kept: BTreeMap<reinforce::Form, BTreeMap<&'static str, String>>,
     /// Manage > Line Weights, while open.
     line_weights_dialog: Option<lineweights::LineWeightsDialog>,
     /// Manage > Object Styles, while open.
@@ -1045,6 +1050,8 @@ impl BimApp {
             filters_dialog: None,
             templates_dialog: None,
             phasing_dialog: None,
+            reinforce_dialog: None,
+            reinforce_kept: BTreeMap::new(),
             line_weights_dialog: None,
             object_styles_dialog: None,
             line_styles_dialog: None,
@@ -1469,6 +1476,7 @@ impl BimApp {
             || self.filters_dialog.is_some()
             || self.templates_dialog.is_some()
             || self.phasing_dialog.is_some()
+            || self.reinforce_dialog.is_some()
             || self.line_weights_dialog.is_some()
             || self.object_styles_dialog.is_some()
             || self.line_styles_dialog.is_some()
@@ -1643,6 +1651,11 @@ impl BimApp {
             // Floor: Structural.
             "SB" => {
                 self.structural_floor();
+                return true;
+            }
+            // Reinforce the element selected.
+            "RF" => {
+                self.open_reinforce();
                 return true;
             }
             "VV" | "VG" => {
@@ -4290,6 +4303,7 @@ impl BimApp {
         self.filters_window(ctx);
         self.templates_window(ctx);
         self.phasing_window(ctx);
+        self.reinforce_window(ctx);
         self.line_weights_window(ctx);
         self.object_styles_window(ctx);
         self.line_styles_window(ctx);
