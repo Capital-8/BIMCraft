@@ -2856,6 +2856,24 @@ fn a_project_in_spanish_names_what_it_makes_in_spanish() {
     );
 }
 
+#[test]
+fn a_project_in_swedish_names_what_it_makes_in_swedish() {
+    let mut s = Session::new();
+    run(&mut s, "new", json!({"language": "sv"}));
+    let i = run(&mut s, "inspect", json!({}));
+    assert_eq!([&i["name"], &i["levels"][1]["name"], &i["language"]], [&json!("Projekt"), &json!("Nivå 2"), &json!("sv")]);
+    house(&mut s);
+    assert_eq!(run(&mut s, "section", json!({"start": [-1000, 3000], "end": [9000, 3000]}))["name"], "Sektion 1");
+    let ids = run(&mut s, "elevation", json!({}))["ids"].clone();
+    let names: Vec<Value> = ids.as_array().unwrap().iter().map(|id| element(&mut s, id.as_u64().unwrap())["name"].clone()).collect();
+    assert_eq!(names, ["Norr", "Söder", "Öster", "Väster"]);
+    let room = run(&mut s, "room", json!({"point": [4000, 3000]}))["id"].as_u64().unwrap();
+    assert_eq!(element(&mut s, room)["name"], "Rum");
+    run(&mut s, "sheet", json!({}));
+    let vp = run(&mut s, "place", json!({"sheet": "A101", "view": "rumsförteckning"}))["id"].as_u64().unwrap();
+    assert_eq!(element(&mut s, vp)["title"], "Rumsförteckning");
+}
+
 /// A cavity wall type, outside in: brick, insulation, block and plaster, 300 mm in all; its
 /// insulation a material of its own.
 fn cavity(s: &mut Session) {

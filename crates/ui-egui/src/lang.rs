@@ -88,7 +88,7 @@ impl Lang {
 impl From<Language> for Lang {
     fn from(language: Language) -> Lang {
         match language {
-            Language::English => Lang::English,
+            Language::English | Language::Swedish => Lang::English,
             Language::Portuguese => Lang::Portuguese,
             Language::Spanish => Lang::Spanish,
         }
@@ -303,6 +303,7 @@ mod tests {
             [Some(Lang::Portuguese), Some(Lang::Spanish), Some(Lang::English), None, None]
         );
         assert_eq!((Lang::Chinese.code(), Lang::Chinese.project()), ("zh", Language::English), "a project is never in Chinese");
+        assert_eq!(Lang::from(Language::Swedish), Lang::English, "Swedish is a project language until its interface catalog is added");
         assert_eq!(Lang::ALL.map(|l| Lang::from_code(l.code())), Lang::ALL.map(Some));
     }
 }
