@@ -22,8 +22,8 @@ use crate::library::Kind;
 use crate::model::{
     Ceiling, CeilingType, Column, ColumnType, Component, Element, Extrusion, FIRST_ID, Floor, FloorType, Function, Grid, Guid, Id, Justify,
     Landing, Layer, Level, MAX_COORD, MAX_LAYERS, MAX_POINTS, MAX_PROJECT_PARAMETERS, MAX_TEXT, Mass, Model, Opening, OpeningType,
-    PARAMETER_CATEGORIES, ParameterKind, ProjectParameter, Railing, RailingType, Ramp, Roof, RoofType, Room, RoomSeparator, Run, RunType,
-    Shaft, Side, Stair, TOL, Wall, WallType, culprit, heading,
+    PARAMETER_CATEGORIES, ParameterKind, ProjectParameter, Railing, RailingType, Ramp, Rebar, Roof, RoofType, Room, RoomSeparator, Run,
+    RunType, Shaft, Side, Stair, TOL, Wall, WallType, culprit, heading,
 };
 use crate::phasing;
 use crate::stairs;
@@ -788,6 +788,33 @@ impl<'a> Reader<'a> {
     }
 
     /// A product's Axis representation, in model coordinates.
+    /// The disk a product's body sweeps along a line: the line's points in the world and the disk's radius, mm. A body of
+    /// several disks of one radius, each starting where the last ended, is one line bent between them, as BIMCraft writes a
+    /// bar; any other is no one line.
+    fn sweep(&self, product: &Entity) -> Option<(Vec<P3>, f64)> {
+        let (_, items) = self.reps(product).into_iter().find(|(i, _)| i.eq_ignore_ascii_case("Body"))?;
+        let f = self.frame(product);
+        let (mut path, mut radius): (Vec<P3>, Option<f64>) = (Vec::new(), None);
+        for disk in items.iter().filter_map(|i| self.get(*i)).filter(|d| d.name == "IFCSWEPTDISKSOLID") {
+            let r = self.len(disk.args.get(1))?;
+            if radius.is_some_and(|q| (q - r).abs() > 1e-6) {
+                return None;
+            }
+            radius = Some(r);
+            let mut line = self.curve(reference(disk.args.first()), 0)?.into_iter().map(|p| f.at(p));
+            match (path.last(), line.next()) {
+                (None, Some(p)) => path.push(p),
+                (Some(last), Some(p)) if dot(sub(*last, p), sub(*last, p)) < 1e-6 => {}
+                _ => return None,
+            }
+            path.extend(line);
+            if path.len() > MAX_POINTS {
+                return None;
+            }
+        }
+        Some((path, radius?))
+    }
+
     fn axis(&self, product: &Entity) -> Option<Vec<P3>> {
         let (_, items) = self.reps(product).into_iter().find(|(i, _)| i.eq_ignore_ascii_case("Axis"))?;
         let f = self.frame(product);
@@ -2350,6 +2377,48 @@ pub fn ifc(bytes: &[u8], name: &str) -> Result<Imported, String> {
             origin.entry(id).or_insert(sid);
             elements_from.entry(id).or_default().push(sid);
         }
+    }
+
+    // Reinforcing bars: a disk swept along a line, each a part of the beam, column, footing or floor it reinforces, in its level.
+    for id in named(&["IFCREINFORCINGBAR"]) {
+        let Some(x) = e(id) else { continue };
+        seen.insert(id);
+        let (thin, thick) = crate::rebar::DIAMETERS;
+        let milli = |v: f64| (v * 1e3).round() / 1e3 + 0.0;
+        let Some((world, radius)) = r.sweep(x) else {
+            leave(&mut skipped, &mut seen, id, "its body is no disk swept along a line");
+            continue;
+        };
+        let diameter = milli(radius * 2.0);
+        let sound = (2..=MAX_POINTS).contains(&world.len())
+            && (thin..=thick).contains(&diameter)
+            && world.iter().flatten().all(|c| c.is_finite() && c.abs() <= MAX_COORD)
+            && crate::rebar::length(&world) > TOL;
+        if !sound {
+            leave(&mut skipped, &mut seen, id, &format!("its bar is not 2 to {MAX_POINTS} points of {thin} to {thick} mm"));
+            continue;
+        }
+        let level = level_for(id, world[0][2]);
+        let base = elevation(level);
+        let path: Vec<P3> = world.iter().map(|p| [milli(p[0]), milli(p[1]), milli(p[2] - base)]).collect();
+        let host = l.whole.get(&id).and_then(|h| origin.get(h)).filter(|h| {
+            matches!(
+                m.elements.get(**h),
+                Some(
+                    Element::Beam(_)
+                        | Element::StripFooting(_)
+                        | Element::Column(_)
+                        | Element::StructuralColumn(_)
+                        | Element::Footing(_)
+                        | Element::Floor(_)
+                )
+            )
+        });
+        let grade = text(x.args.get(8)).map(str::trim).filter(|g| !g.is_empty()).map_or_else(|| crate::rebar::GRADE.to_string(), clip);
+        let rid = m.insert(Element::Rebar(Rebar { level, host: host.map(|h| Guid::of_id(*h)), path, diameter, grade }));
+        from.insert(rid, who(id));
+        origin.entry(id).or_insert(rid);
+        elements_from.entry(id).or_default().push(rid);
     }
 
     // Doors' and windows' marks: their tags, unless a tag is only the element's id (Revit names a

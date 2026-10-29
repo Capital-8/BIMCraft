@@ -47,6 +47,9 @@ pub mod pat;
 pub mod pdf;
 pub mod pen;
 pub mod phasing;
+pub mod rebar;
+#[cfg(test)]
+mod rebar_tests;
 pub mod render;
 pub mod runs;
 pub mod sample;

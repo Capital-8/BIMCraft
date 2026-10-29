@@ -591,6 +591,8 @@ pub fn export(m: &Model) -> String {
     let mut hosts: BTreeMap<Id, (u64, u64, f64)> = BTreeMap::new();
     // Stairs and ramps as (entity, placement, its height, its parts), for the railings along them.
     let mut wholes: BTreeMap<Id, (u64, u64, f64, Vec<u64>)> = BTreeMap::new();
+    // Reinforcing bars as (level, host, entity): aggregated to their host, else in their level.
+    let mut bars: Vec<(Guid, Option<Id>, u64)> = Vec::new();
     // The runs in each system, by its name, for the IfcSystem they are assigned to.
     let mut systems: BTreeMap<&str, Vec<u64>> = BTreeMap::new();
     // The doors and windows in each wall as (width, height, sill), for what its sides measure less them.
@@ -957,6 +959,38 @@ pub fn export(m: &Model) -> String {
                 contained.entry(rs.level).or_default().push(ent);
                 products.insert(id, ent);
             }
+            // A reinforcing bar: a disk swept along each straight piece of its path (a sweep round a sharp corner is no solid
+            // IfcOpenShell builds), in the steel it is of.
+            Element::Rebar(rb) => {
+                let Some(&(_, storey)) = storeys.get(&rb.level) else { continue };
+                let at = w.place(Some(storey), (0.0, 0.0, 0.0), None);
+                let pts: Vec<u64> =
+                    rb.path.iter().map(|q| w.add(format!("IFCCARTESIANPOINT(({},{},{}))", real(q[0]), real(q[1]), real(q[2])))).collect();
+                let radius = real(rb.diameter / 2.0);
+                let mut disks = Vec::new();
+                for (piece, ends) in pts.windows(2).zip(rb.path.windows(2)) {
+                    if let ([a, b], [p, q]) = (piece, ends)
+                        && crate::rebar::length(&[*p, *q]) > crate::model::TOL
+                    {
+                        let line = w.add(format!("IFCPOLYLINE((#{a},#{b}))"));
+                        disks.push(w.add(format!("IFCSWEPTDISKSOLID(#{line},{radius},$,$,$)")));
+                    }
+                }
+                let rep = w.add(format!("IFCSHAPEREPRESENTATION(#{},'Body','AdvancedSweptSolid',({}))", w.body, refs(&disks)));
+                let shape = w.add(format!("IFCPRODUCTDEFINITIONSHAPE($,$,(#{rep}))"));
+                let area = std::f64::consts::PI * rb.diameter * rb.diameter / 4.0;
+                let ent = w.add(format!(
+                    "IFCREINFORCINGBAR({},$,{},$,$,#{at},#{shape},'{id}',{},{},{},{},.NOTDEFINED.,.PLAIN.)",
+                    w.guid(ELEMENT, id),
+                    s(&format!("Bar {}", rb.diameter)),
+                    s(&rb.grade),
+                    real(rb.diameter),
+                    real(area),
+                    real(crate::rebar::length(&rb.path))
+                ));
+                bars.push((rb.level, rb.host.and_then(|h| m.elements.id(h)), ent));
+                products.insert(id, ent);
+            }
             Element::Railing(rl) if rl.host.is_none() => {
                 let Some(&(_, storey)) = storeys.get(&rl.level) else { continue };
                 let ent = w.railing(m, id, rl, storey, m.elevation(rl.level), axis);
@@ -1001,6 +1035,19 @@ pub fn export(m: &Model) -> String {
     }
     for (id, (ent, _, _, parts)) in &wholes {
         w.add(format!("IFCRELAGGREGATES({},$,$,$,#{ent},({}))", w.guid(PARTS, *id), refs(parts)));
+    }
+    // A bar is a part of the element it reinforces; one with none, or whose host isn't written, is in its level.
+    let mut reinforced: BTreeMap<Id, Vec<u64>> = BTreeMap::new();
+    for (level, host, ent) in bars {
+        match host.filter(|h| products.contains_key(h)) {
+            Some(h) => reinforced.entry(h).or_default().push(ent),
+            None => contained.entry(level).or_default().push(ent),
+        }
+    }
+    for (host, parts) in &reinforced {
+        if let Some(ent) = products.get(host) {
+            w.add(format!("IFCRELAGGREGATES({},$,$,$,#{ent},({}))", w.guid(PARTS, *host), refs(parts)));
+        }
     }
     // A shaft voids each floor, ceiling and roof it passes through: an opening in each, its
     // outline swept up the shaft's whole height.

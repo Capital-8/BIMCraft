@@ -23,7 +23,7 @@ mod fill_tests;
 
 /// The categories a plan, a section or a 3D view draws, and so may hide and override: those of the
 /// model, then those of the annotation.
-pub const MODEL: [&str; 26] = [
+pub const MODEL: [&str; 27] = [
     "wall",
     "floor",
     "ceiling",
@@ -45,6 +45,7 @@ pub const MODEL: [&str; 26] = [
     "downconductor",
     "groundconductor",
     "cable",
+    "rebar",
     "component",
     "stair",
     "ramp",

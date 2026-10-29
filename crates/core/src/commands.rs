@@ -25,11 +25,13 @@ use crate::model::{
     CEILING_HEIGHT, CadImport, Ceiling, CeilingType, Column, ColumnType, Component, DEFAULT_HEIGHT, DimKind, Dimension, Element, Extrusion,
     Face, Facing, Floor, FloorType, Grid, Guid, Id, Key, Landing, Layer, Level, Line, Location, MAX_COORD, MAX_POINTS, MAX_SLOPE, MAX_TEXT,
     Mass, Model, Note, Opening, OpeningType, PARAMETER_CATEGORIES, ParameterKind, Pattern, PlanView, PointCloud, ProjectParameter,
-    RAMP_SLOPE, RAMP_WIDTH, RISER, Railing, RailingType, Ramp, Reference, Roof, RoofType, Room, RoomArea, RoomSeparator, STAIR_WIDTH,
-    Schedule, Section, SectionBox, Shaft, Sheet, Side, Spot, Stair, TOL, TREAD, Tag, View3D, Viewport, Wall, WallType, heading, paper,
+    RAMP_SLOPE, RAMP_WIDTH, RISER, Railing, RailingType, Ramp, Rebar, Reference, Roof, RoofType, Room, RoomArea, RoomSeparator,
+    STAIR_WIDTH, Schedule, Section, SectionBox, Shaft, Sheet, Side, Spot, Stair, TOL, TREAD, Tag, View3D, Viewport, Wall, WallType,
+    heading, paper,
 };
 use crate::paint;
 use crate::phasing;
+use crate::rebar;
 use crate::render::Drawing;
 use crate::sketch::{self, SketchLine};
 use crate::texture::{self, Kind, Picture, Texture};
@@ -348,6 +350,18 @@ pub static ALL: &[Command] = &[
          to the first): they bound rooms as walls do, to split an open space (a living room and its corridor) into rooms, \
          and are nothing else, with no solid, no cut and no area. Returns their ids",
         room_separator,
+    ),
+    edit(
+        "rebar",
+        "Rebar",
+        &[],
+        "{points: [[x,y,z],…], diameter, host?, grade?, closed?, count?, step?, level?} a reinforcing bar bent along `points` \
+         (mm; z over the level), `diameter` mm thick (3 to 100), of steel `grade` (CA-50 unless told). `host` is the beam, \
+         column, footing or floor it reinforces (the level is then its level) and it goes with; `closed` joins the last point \
+         to the first, a hoop. With `count` bars (up to 1000), each is `step` [dx,dy,dz] from the last: a layer of bars, or \
+         hoops along a beam. Returns their ids. Its schedule lists \
+         Grade, Diameter, Length and Weight (kg, of steel at 7850 kg/m³), and a grouped one is a bar schedule",
+        rebar_bars,
     ),
     edit(
         "column",
@@ -1413,6 +1427,21 @@ fn points(c: &str, p: &Value, key: &str) -> Result<Vec<P2>, String> {
     a.iter().map(|v| point(v).ok_or_else(|| bad(c, format!("`{key}`: {v} is not a point [x, y] in mm")))).collect()
 }
 
+/// `[x, y, z]` in mm, finite and within the model's limits.
+fn point3(v: &Value) -> Option<[f64; 3]> {
+    let [x, y, z] = v.as_array()?.as_slice() else { return None };
+    let p = [x.as_f64()?, y.as_f64()?, z.as_f64()?];
+    p.iter().all(|c| c.is_finite() && c.abs() <= MAX_COORD).then_some(p)
+}
+
+fn points3(c: &str, p: &Value, key: &str) -> Result<Vec<[f64; 3]>, String> {
+    let a = p.get(key).and_then(Value::as_array).ok_or_else(|| bad(c, format!("`{key}` [[x, y, z], …] is required")))?;
+    if a.len() > MAX_POINTS {
+        return Err(bad(c, format!("`{key}` has more than {MAX_POINTS} points")));
+    }
+    a.iter().map(|v| point3(v).ok_or_else(|| bad(c, format!("`{key}`: {v} is not a point [x, y, z] in mm")))).collect()
+}
+
 fn num(c: &str, p: &Value, key: &str) -> Result<Option<f64>, String> {
     match p.get(key) {
         v if absent(v) => Ok(None),
@@ -1751,6 +1780,11 @@ pub fn element_json(m: &Model, id: Id) -> Value {
         }
         Element::RoomSeparator(rs) => {
             extra.insert("length".into(), json!(hundredth(rs.start.dist(rs.end))));
+        }
+        Element::Rebar(rb) => {
+            let length = rebar::length(&rb.path);
+            extra.insert("length".into(), json!(hundredth(length)));
+            extra.insert("weight_kg".into(), json!((rebar::weight_kg(rb.diameter, length) * 1000.0).round() / 1000.0));
         }
         Element::PointCloud(pc) => {
             if let Some(cloud) = m.clouds.get(&pc.cloud) {
@@ -4012,6 +4046,61 @@ fn room_separator(s: &mut Session, p: &Value) -> R {
         .filter_map(|seg| match seg {
             [a, b] => Some(m.insert(Element::RoomSeparator(RoomSeparator { level, start: *a, end: *b }))),
             _ => None,
+        })
+        .collect();
+    Ok(json!({"ids": ids}))
+}
+
+fn rebar_bars(s: &mut Session, p: &Value) -> R {
+    let c = "rebar";
+    let mut path = points3(c, p, "points")?;
+    if path.len() < 2 {
+        return Err(bad(c, "`points` needs at least 2 points"));
+    }
+    if flag(c, p, "closed")?
+        && let Some(&first) = path.first()
+    {
+        path.push(first);
+    }
+    if rebar::length(&path) <= TOL {
+        return Err(bad(c, "the bar is too short: its points are all in one place"));
+    }
+    let diameter = num(c, p, "diameter")?.ok_or_else(|| bad(c, "`diameter` in mm is required"))?;
+    let (thin, thick) = rebar::DIAMETERS;
+    if !(thin..=thick).contains(&diameter) {
+        return Err(bad(c, format!("`diameter` {diameter} mm isn't between {thin} and {thick} mm")));
+    }
+    let grade = string(c, p, "grade")?.unwrap_or_else(|| rebar::GRADE.into());
+    if grade.trim().is_empty() {
+        return Err(bad(c, "`grade` can't be blank"));
+    }
+    let count = count_opt(c, p, "count", 1)?;
+    if !(1..=rebar::MAX_BARS).contains(&count) || count.saturating_mul(path.len()) > MAX_POINTS {
+        return Err(bad(c, format!("`count` is 1 to {} bars, and the bars' points together up to {MAX_POINTS}", rebar::MAX_BARS)));
+    }
+    let step = match p.get("step") {
+        Some(v) if !v.is_null() => point3(v).ok_or_else(|| bad(c, format!("`step` must be [dx, dy, dz] in mm, got {v}")))?,
+        _ if count > 1 => return Err(bad(c, "`step` [dx, dy, dz] is required for more than one bar")),
+        _ => [0.0; 3],
+    };
+    let m = &s.model;
+    let host = match id_opt(c, p, "host")? {
+        Some(h) => Some(m.elements.id(h).ok_or_else(|| bad(c, format!("no element {h}")))?),
+        None => None,
+    };
+    // Its host's level, unless told another.
+    let hosted_at = host.and_then(|h| m.elements.get(h)).and_then(|e| m.level_of(e));
+    let level = match hosted_at {
+        Some(l) if absent(p.get("level")) => l,
+        _ => level_param(c, m, p, "level")?,
+    };
+    let host = host.map(|h| m.guid(h));
+    let m = s.model_mut();
+    let ids: Vec<Id> = (0..count)
+        .map(|k| {
+            let k = k as f64;
+            let path = path.iter().map(|q| [q[0] + k * step[0], q[1] + k * step[1], q[2] + k * step[2]]).collect();
+            m.insert(Element::Rebar(Rebar { level, host, path, diameter, grade: grade.clone() }))
         })
         .collect();
     Ok(json!({"ids": ids}))
@@ -6919,6 +7008,12 @@ pub(crate) fn transform(c: &str, m: &Model, mut e: Element, id: Id, mo: &Motion,
         Element::Wall(w) => (w.start, w.end) = if mo.mirror { (f(w.end), f(w.start)) } else { (f(w.start), f(w.end)) },
         Element::Grid(g) => (g.start, g.end) = (f(g.start), f(g.end)),
         Element::RoomSeparator(rs) => (rs.start, rs.end) = (f(rs.start), f(rs.end)),
+        Element::Rebar(rb) => {
+            for q in &mut rb.path {
+                let moved = f(P2(q[0], q[1]));
+                (q[0], q[1]) = (moved.0, moved.1);
+            }
+        }
         Element::Floor(fl) => {
             fl.boundary.iter_mut().chain(fl.openings.iter_mut().flatten()).for_each(|q| *q = f(*q));
             // A mirror turns the outline clockwise; floors keep theirs counter-clockwise.
@@ -7878,6 +7973,7 @@ fn delete(s: &mut Session, p: &Value) -> R {
                     && match e {
                         Element::Door(o) | Element::Window(o) => gone.contains(&o.host),
                         Element::Railing(r) => r.host.is_some_and(|h| gone.contains(&h)),
+                        Element::Rebar(rb) => rb.host.is_some_and(|h| gone.contains(&h)),
                         // A plan view goes with its level and its parent; what is annotated in a view goes with it.
                         Element::PlanView(v) => gone.contains(&v.level) || v.parent.is_some_and(|p| gone.contains(&p)),
                         Element::Tag(t) => gone.contains(&t.host) || t.view.is_some_and(|v| gone.contains(&v)),

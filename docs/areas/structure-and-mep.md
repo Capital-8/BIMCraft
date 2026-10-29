@@ -56,3 +56,18 @@ places them at the level and they stand where they hang). The desktop's `mep.rs`
 kinds its `FixtureTool` names, listed in its Type Selector and placed as the Component tool places them (`placing` takes the tool's
 kinds), and the tabs' ribbon panels; a fixture's two-letter shortcut is in `mep::FIXTURES`, not `SHORTCUTS`, since no command makes
 one. Edit Type of a run type also sets whether it is round (a diameter, no depth) and its material.
+
+Reinforcement (`rebar.rs`, `model::Rebar`, `Element::Rebar`, category `rebar`, the `rebar` command; tests in `rebar_tests.rs`). A bar is one
+element: a round bar of `diameter` mm (3 to 100) bent along `path` (points in mm, `z` over its level), of steel `grade` (CA-50 unless
+told), with the `host` it reinforces (a beam, a column, a footing or a floor, held as a `Guid`, and it goes when its host does). A hoop
+is a bar whose last point is its first; a layer of bars, or hoops along a beam, is one command with `count` and `step`, which makes one
+element for each (IFC has one `IfcReinforcingBar` for each, and a bar schedule counts them). It has no type: the diameter and the grade
+are its own, and the bends are sharp, with no hooks, so its length is the sum of its pieces (`rebar::length`) and its weight that
+length of steel at 7850 kg/m³ (`rebar::weight_kg`). Nothing checks that it lies inside its host yet: the generator that arms a beam
+from a cover and spacings will place bars inside by construction. The schedule of category `rebar` lists Id, Level, Grade, Diameter,
+Length, Count, Weight and Host, and grouped by Grade, Diameter and Length with Count and Weight totalled it is a bar schedule. IFC
+writes each as an `IfcReinforcingBar` (`SteelGrade`, `NominalDiameter`, `CrossSectionArea`, `BarLength`) with a body of an
+`IfcSweptDiskSolid` along an `IfcPolyline`, aggregated (`IfcRelAggregates`) to its host, or contained in its storey when it has none;
+import reads the same back, with the host found by the aggregation. The 3D view draws a tube along each straight piece
+(`rebar::tubes`, built with a round run's tube), which the concrete round a bar hides: look at bars with their host hidden. A section draws each bar it cuts as a
+dot over the host's poché (`render::section_in` keeps them out of the host's pieces, which would swallow them); plans do not draw bars yet.

@@ -8,6 +8,9 @@ strip_footing {"points": [[0,8000],[6000,8000]]}
 structural_column {"at": [0,0]}
 structural_column {"at": [6000,0]}
 floor {"boundary": [[0,0],[6000,0],[6000,4000],[0,4000]], "structural": true}
+# Reinforcement: a layer of bars along a beam and a hoop, in a level (the host is another element's id).
+rebar {"points": [[50,2900,-450],[5950,2900,-450]], "diameter": 12.5, "count": 3, "step": [0,40,0]}
+rebar {"points": [[100,2830,-30],[100,2970,-30],[100,2970,-470],[100,2830,-470]], "closed": true, "diameter": 8, "grade": "CA-60"}
 # Discipline runs: sloped, upright, each justification, in a system.
 pipe {"points": [[0,6000],[6000,6000]], "offset": 500, "end_offset": 300, "system": "Cold water"}
 pipe {"points": [[1000,6500],[1000,6500]], "offset": 0, "end_offset": 3000}

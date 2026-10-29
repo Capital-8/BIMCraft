@@ -174,6 +174,24 @@ pub struct RoomSeparator {
     pub end: P2,
 }
 
+/// A reinforcing bar: a round bar of `diameter` mm bent along `path` (mm: x east, y north, z over `level`), of steel `grade`. It
+/// reinforces `host`, a beam, a column, a footing or a floor, and goes with it; a hoop is a bar whose last point is its first.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Rebar {
+    pub level: Guid,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub host: Option<Guid>,
+    pub path: Vec<[f64; 3]>,
+    pub diameter: f64,
+    #[serde(default = "default_grade")]
+    pub grade: String,
+}
+
+fn default_grade() -> String {
+    crate::rebar::GRADE.into()
+}
+
 /// A wall: its location line from `start` to `end`, straight or, turning `arc` degrees, an arc;
 /// which line of the wall that is (its `location`); its exterior side to the left of start to end,
 /// as Revit's, so walls drawn clockwise face out.
@@ -1351,6 +1369,10 @@ macro_rules! visit_refs {
                 if let Some(g) = & $($m)? ci.view { f(g) }
             }
             Element::RoomSeparator(rs) => f(& $($m)? rs.level),
+            Element::Rebar(rb) => {
+                f(& $($m)? rb.level);
+                if let Some(g) = & $($m)? rb.host { f(g) }
+            }
         }
     }};
 }
@@ -1391,6 +1413,8 @@ pub enum Element {
     DownConductor(Run),
     GroundConductor(Run),
     Cable(Run),
+    /// A reinforcing bar in a concrete element, bent along its points.
+    Rebar(Rebar),
     Component(Component),
     Stair(Stair),
     Ramp(Ramp),
@@ -1601,6 +1625,7 @@ impl Element {
             Element::Window(_) => "window",
             Element::Room(_) => "room",
             Element::RoomSeparator(_) => "roomseparator",
+            Element::Rebar(_) => "rebar",
             Element::Dimension(_) => "dimension",
             Element::Tag(_) => "tag",
             Element::Section(_) => "section",
@@ -3144,6 +3169,7 @@ impl Model {
             Element::Mass(ms) => Some(ms.level),
             Element::Room(r) => Some(r.level),
             Element::RoomSeparator(rs) => Some(rs.level),
+            Element::Rebar(rb) => Some(rb.level),
             Element::Dimension(d) => Some(d.level),
             Element::Column(c) | Element::StructuralColumn(c) | Element::Footing(c) => Some(c.level),
             run_arm!(r) => Some(r.level),
@@ -4349,6 +4375,46 @@ impl Model {
                 Element::RoomSeparator(rs) => {
                     level_ok(rs.level)?;
                     line(&who, rs.start, rs.end)?;
+                }
+                Element::Rebar(rb) => {
+                    level_ok(rb.level)?;
+                    text(&who, "grade", &rb.grade)?;
+                    if rb.grade.trim().is_empty() {
+                        return Err(format!("{who}: a bar needs a steel grade"));
+                    }
+                    let (thin, thick) = crate::rebar::DIAMETERS;
+                    if !(thin..=thick).contains(&rb.diameter) {
+                        return Err(format!("{who}: diameter {} mm isn't between {thin} and {thick} mm", rb.diameter));
+                    }
+                    if !(2..=MAX_POINTS).contains(&rb.path.len()) {
+                        return Err(format!("{who}: a path needs 2 to {MAX_POINTS} points"));
+                    }
+                    if rb.path.iter().flatten().any(|c| !(c.is_finite() && c.abs() <= MAX_COORD)) {
+                        return Err(format!("{who}: a point of its path is not finite or reaches past {MAX_COORD} mm"));
+                    }
+                    if crate::rebar::length(&rb.path) <= TOL {
+                        return Err(format!("{who}: its path has no length"));
+                    }
+                    if let Some(h) = rb.host {
+                        match self.elements.get(h) {
+                            Some(
+                                Element::Beam(_)
+                                | Element::StripFooting(_)
+                                | Element::Column(_)
+                                | Element::StructuralColumn(_)
+                                | Element::Footing(_)
+                                | Element::Floor(_),
+                            ) => {}
+                            Some(other) => {
+                                return Err(format!(
+                                    "{who}: {} {} is no host for bars; a beam, a column, a footing or a floor is",
+                                    other.category(),
+                                    self.shown(h)
+                                ));
+                            }
+                            None => return Err(format!("{who}: host {h} doesn't exist")),
+                        }
+                    }
                 }
                 Element::Wall(w) => {
                     known(&who, &w.type_name, &self.types.wall)?;
