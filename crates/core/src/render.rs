@@ -1651,6 +1651,37 @@ fn draw_plan(m: &Model, plan: impl Key, view: View, up: bool, k: f32, n: f64, ti
             d.stroke(pts, BY_CATEGORY, FAINT, Some(vec![14.0, 5.0]), false);
         }
     }
+    // Looking up from its cut, a reflected ceiling plan sees the beams and columns over it, up to the ceilings: their outlines,
+    // in projection. One over a ceiling it lies above is hidden by that ceiling.
+    if up {
+        let ceilings: Vec<(f64, &Ceiling)> = m
+            .elements
+            .iter()
+            .filter(|(id, _)| shown(**id))
+            .filter_map(|(_, e)| match e {
+                Element::Ceiling(c) => Some((m.elevation(c.level) + c.offset, c)),
+                _ => None,
+            })
+            .filter(|(z, _)| range.cut < *z && *z <= range.top)
+            .collect();
+        for (&id, e) in m.elements.iter().filter(|(id, _)| shown(**id)) {
+            if !matches!(e, Element::Beam(_)) && e.column().is_none() {
+                continue;
+            }
+            let Some((outline, bottom, _)) = stands(m, e) else { continue };
+            if !(range.cut < bottom && bottom <= range.top) || outline.is_empty() {
+                continue;
+            }
+            let mid = outline.iter().fold(P2(0.0, 0.0), |s, p| s + *p) * (1.0 / outline.len() as f64);
+            let hidden = ceilings
+                .iter()
+                .any(|(z, c)| *z <= bottom + TOL && geom::contains(&c.boundary, mid) && !c.openings.iter().any(|o| geom::contains(o, mid)));
+            if !hidden {
+                d.owner = Some(id);
+                d.line(&outline, BY_CATEGORY, INK, true);
+            }
+        }
+    }
     d.part(Part::Cut);
     let outlines = cut_outlines(m, range.cut, &look, &index);
     // Poché first, then the outlines over it, but for where walls meet at their joins: only the edge
@@ -3621,6 +3652,36 @@ mod tests {
         s.script("section {\"start\": [-1000, 3000], \"end\": [9000, 3000]}").unwrap();
         let view = section_fit(&s.model, 100011, 800, 600);
         assert_eq!(section(&s.model, 100011, view).pick(view.px(P2(5000.0, 2610.0)), 2.0), Some(100010));
+    }
+
+    #[test]
+    fn ceiling_plans_see_the_beams_over_their_cut_up_to_the_ceiling() {
+        let mut s = house();
+        // A ceiling at 2600 mm. Beams: one hanging below it, its bottom at 2450; one over it, its bottom at 2700; one
+        // outside the room, over no ceiling, its bottom at 2700 too.
+        s.script(
+            r#"ceiling {"point": [4000, 1500]}
+               beam {"points": [[1000, 1500], [7000, 1500]], "offset": 2450, "justify": "bottom"}
+               beam {"points": [[1000, 4500], [7000, 4500]], "offset": 2700, "justify": "bottom"}
+               beam {"points": [[9000, 0], [9000, 6000]], "offset": 2700, "justify": "bottom"}"#,
+        )
+        .unwrap();
+        let beams: Vec<u64> = s.model.elements.iter().filter(|(_, e)| matches!(e, Element::Beam(_))).map(|(id, _)| *id).collect();
+        let [under, over, outside] = beams[..] else { panic!("{beams:?}") };
+        let d = ceiling_plan(&s.model, 100000, 800, 600);
+        assert!(d.owners.contains(&Some(under)), "seen below the ceiling, in projection");
+        assert!(!d.owners.contains(&Some(over)), "hidden by the ceiling under it");
+        assert!(d.owners.contains(&Some(outside)), "over no ceiling, seen");
+        // Its outline, not its centre line: an edge picks it, its middle doesn't.
+        let half = s.model.elements.values().find_map(|e| match e {
+            Element::Beam(_) => stands(&s.model, e).map(|(o, ..)| {
+                let ys = o.iter().map(|p| p.1);
+                (ys.clone().fold(f64::NEG_INFINITY, f64::max) - ys.fold(f64::INFINITY, f64::min)) / 2.0
+            }),
+            _ => None,
+        });
+        let half = half.unwrap();
+        assert_eq!(d.pick(d.view.px(P2(4000.0, 1500.0 + half)), 2.0), Some(under));
     }
 
     #[test]

@@ -1814,7 +1814,7 @@ msgstr "剖切面"
 msgid "Cylinder"
 msgstr "圆柱体"
 
-#: crates/core/src/render.rs:2429
+#: crates/core/src/render.rs:2460
 msgid "DN"
 msgstr "下"
 
@@ -3935,7 +3935,7 @@ msgstr "多个类别"
 msgid "Multiple Categories ({})"
 msgstr "多个类别（{}）"
 
-#: crates/core/src/render.rs:1740
+#: crates/core/src/render.rs:1771
 msgid "NOT ENCLOSED"
 msgstr "未封闭"
 
@@ -6839,7 +6839,7 @@ msgstr "类型："
 msgid "Types"
 msgstr "类型"
 
-#: crates/core/src/render.rs:2429
+#: crates/core/src/render.rs:2460
 msgid "UP"
 msgstr "上"
 

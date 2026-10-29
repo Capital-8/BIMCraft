@@ -43,7 +43,7 @@ msgstr "Ventana abatible"
 msgid "Ceiling Luminaire"
 msgstr "Luminaria de techo"
 
-#: crates/core/src/render.rs:1886
+#: crates/core/src/render.rs:1917
 msgid "Ceiling Plan"
 msgstr "Plano de cielo raso"
 
@@ -87,7 +87,7 @@ msgstr "Recuento"
 msgid "Crosshatch"
 msgstr "Sombreado cruzado"
 
-#: crates/core/src/render.rs:2429
+#: crates/core/src/render.rs:2460
 msgid "DN"
 msgstr "BAJA"
 
@@ -326,7 +326,7 @@ msgstr "Metal"
 msgid "Mounting Height"
 msgstr "Altura de montaje"
 
-#: crates/core/src/render.rs:1740
+#: crates/core/src/render.rs:1771
 msgid "NOT ENCLOSED"
 msgstr "NO DELIMITADA"
 
@@ -555,7 +555,7 @@ msgstr "Huella"
 msgid "Type"
 msgstr "Tipo"
 
-#: crates/core/src/render.rs:2429
+#: crates/core/src/render.rs:2460
 msgid "UP"
 msgstr "SUBE"
 
