@@ -367,22 +367,33 @@ pub static ALL: &[Command] = &[
         "reinforce",
         "Reinforce",
         &[],
-        "{host, cover?, grade?, grade_stirrup?, clearance?, …} bars by rules for a beam, a column, a footing or a floor: the engineer \
+        "{host | hosts: [id, …], preset?, cover?, grade?, grade_stirrup?, clearance?, …} bars by rules for a beam, a column, a footing or a floor: the engineer \
          says how many, how thick and how far apart (no standard's table is in it) and it lays them inside the cover and checks \
          that they fit, saying what to change. All: `cover` (mm: one number, or {top, bottom, sides}, top and bottom the faces of a \
          beam, a footing or a floor and the ends of a column; else the host's Cobrimento or ConcreteCover parameter), `grade` \
          (CA-50), `grade_stirrup` (the stirrups' and ties'), `clearance` (least mm between bars; their thickness, at least 20, \
          unless told). A spacing is the most between bars: they are spread evenly, so the last is where the first is from the \
-         other end. Beam: `bottom` and `top` {count, diameter}; `stirrup` {diameter, spacing, ends?: {length, spacing}, hook?} \
+         other end. Beam: `bottom` and `top` {count, diameter, hook?} (`hook`, the straight leg in mm turned up from the bottom bars and down from the top ones at both ends, or {start, end}); `stirrup` {diameter, spacing, ends?: {length, spacing}, hook?} \
          (`ends` closer in the first and last `length` mm; `hook` a tail in mm at the ends); `skin` {diameter, spacing} up each \
          side between the rows; `anchor` {start?, end?} mm the bars run past the ends (0 flush, none a cover short). Column \
-         (rectangular): `bars` {diameter, x?, y?} (bars along each face across its width and across its depth, corners counted, \
+         (rectangular): `bars` {diameter, x?, y?, hook?} (`hook`, a leg turned into the section at the foot and the top, or {below, above}; bars along each face across its width and across its depth, corners counted, \
          2 each), `stirrup`, `ties` {diameter} across the section between bars that are not at a corner, `anchor` {below?, above?}. \
          Footing (rectangular): `mesh` {x?, y?: {diameter, spacing}, hook?} (hook turns the ends up). Floor (level): `bottom` and \
          `top` {x?, y?: {diameter, spacing}}, bars along east and north, stopping a cover short of its outline and its openings. \
          The bars are `rebar` elements of the host, each on a `layer`; reinforcing again replaces the ones it made and leaves \
-         any drawn by hand. Returns ids, count, removed and weight_kg",
+         any drawn by hand. `preset` names a `reinforcement_preset` of the host's kind, whose parameters stand for the ones not given here. `hosts` arms each of a list alike (up to 1000, and 20000 bars in all); if one refuses, none is armed, \
+         and the refusal names it. Returns ids, count, hosts, removed and weight_kg",
         reinforce_host,
+    ),
+    edit(
+        "reinforcement_preset",
+        "Reinforcement Presets",
+        &[],
+        "{name?, kind?: beam|column|footing|floor, params?, rename?, delete?: true} a named set of the parameters `reinforce` takes for \
+         one kind of host (`params`: its `cover`, `grade`, `grade_stirrup`, `clearance` and what its kind takes, and not `host`), kept in \
+         the project; `reinforce` with `preset` takes it and lets what is given with it replace its own. Without `name`, lists them. \
+         It is not checked against any host until it arms one",
+        reinforcement_preset,
     ),
     edit(
         "column",
@@ -4131,38 +4142,126 @@ fn rebar_bars(s: &mut Session, p: &Value) -> R {
 fn reinforce_host(s: &mut Session, p: &Value) -> R {
     let c = "reinforce";
     let m = &s.model;
-    let host = id_opt(c, p, "host")?.ok_or_else(|| bad(c, "`host` is required: the id of the element to reinforce"))?;
-    let id = m.elements.id(host).ok_or_else(|| bad(c, format!("no element {host}")))?;
-    let element = m.elements.get(id).ok_or_else(|| bad(c, format!("no element {host}")))?;
-    let level = m.level_of(element).ok_or_else(|| bad(c, "that element has no level"))?;
-    let made = crate::reinforce::bars(m, element, p)?;
-    let guid = m.guid(id);
-    // The bars it made before, which this replaces; a bar with no layer was drawn by hand.
+    // A preset's parameters, which what is given with it replaces.
+    let preset = string(c, p, "preset")?;
+    let merged;
+    let (p, kind) = match &preset {
+        None => (p, None),
+        Some(name) => {
+            let pre = m.reinforcement.get(name).ok_or_else(|| bad(c, format!("there's no reinforcement preset `{name}`")))?;
+            let mut all = pre.params.clone();
+            all.extend(p.as_object().into_iter().flatten().filter(|(k, _)| k.as_str() != "preset").map(|(k, v)| (k.clone(), v.clone())));
+            merged = Value::Object(all);
+            (&merged, Some((name, pre.kind.as_str())))
+        }
+    };
+    // One `host`, or a list of `hosts`, each armed alike; each once.
+    let hosts: Vec<Id> = match (p.get("host"), p.get("hosts")) {
+        (Some(h), Some(l)) if !absent(Some(h)) && !absent(Some(l)) => return Err(bad(c, "give `host` or `hosts`, not both")),
+        (v, Some(Value::Array(a))) if absent(v) && (1..=rebar::MAX_HOSTS).contains(&a.len()) => {
+            let mut seen = BTreeSet::new();
+            a.iter().map(|v| element_id(c, m, v)).collect::<Result<Vec<Id>, String>>()?.into_iter().filter(|id| seen.insert(*id)).collect()
+        }
+        (v, Some(l)) if absent(v) && !absent(Some(l)) => {
+            return Err(bad(c, format!("`hosts` is a list of 1 to {} elements", rebar::MAX_HOSTS)));
+        }
+        _ => {
+            let host = id_opt(c, p, "host")?.ok_or_else(|| bad(c, "`host` (an element) or `hosts` (a list of them) is required"))?;
+            vec![m.elements.id(host).ok_or_else(|| bad(c, format!("no element {host}")))?]
+        }
+    };
+    let several = hosts.len() > 1;
+    let mut made = Vec::new();
+    let mut total = 0;
+    for id in &hosts {
+        let element = m.elements.get(*id).ok_or_else(|| bad(c, format!("no element {id}")))?;
+        let level = m.level_of(element).ok_or_else(|| bad(c, "that element has no level"))?;
+        if let Some((name, kind)) = kind.filter(|(_, k)| crate::reinforce::kind_of(element) != Some(*k)) {
+            return Err(bad(c, format!("preset `{name}` is for a {kind}, and {id} is a {}", element.category())));
+        }
+        let bars = crate::reinforce::bars(m, element, p)
+            .map_err(|e| if several { format!("{e} (for the {} {id})", element.category()) } else { e })?;
+        total += bars.len();
+        if total > rebar::MAX_BARS_ALL {
+            return Err(bad(
+                c,
+                format!(
+                    "that is more than the {} bars a command makes: arm fewer elements at once, or widen a spacing",
+                    rebar::MAX_BARS_ALL
+                ),
+            ));
+        }
+        made.push((*id, m.guid(*id), level, bars));
+    }
+    let hosted: BTreeSet<Guid> = made.iter().map(|(_, g, _, _)| *g).collect();
+    // The bars each made before, which this replaces; a bar with no layer was drawn by hand.
     let old: Vec<Id> = m
         .elements
         .iter()
-        .filter(|(_, e)| matches!(e, Element::Rebar(r) if r.host == Some(guid) && !r.layer.is_empty()))
+        .filter(|(_, e)| matches!(e, Element::Rebar(r) if r.host.is_some_and(|h| hosted.contains(&h)) && !r.layer.is_empty()))
         .map(|(i, _)| *i)
         .collect();
-    let weight: f64 = made.iter().map(|b| rebar::weight_kg(b.diameter, rebar::length(&b.path))).sum();
+    let weight: f64 = made.iter().flat_map(|(_, _, _, bars)| bars).map(|b| rebar::weight_kg(b.diameter, rebar::length(&b.path))).sum();
     let m = s.model_mut();
     for i in &old {
         m.elements.remove(*i);
     }
-    let ids: Vec<Id> = made
-        .into_iter()
-        .map(|b| {
-            m.insert(Element::Rebar(Rebar {
+    let mut ids: Vec<Id> = Vec::new();
+    for (_, guid, level, bars) in made {
+        for b in bars {
+            ids.push(m.insert(Element::Rebar(Rebar {
                 level,
                 host: Some(guid),
                 path: b.path,
                 diameter: b.diameter,
                 grade: b.grade,
                 layer: b.layer.into(),
-            }))
-        })
-        .collect();
-    Ok(json!({"ids": ids, "count": ids.len(), "removed": old.len(), "weight_kg": (weight * 1000.0).round() / 1000.0}))
+            })));
+        }
+    }
+    Ok(json!({"ids": ids, "count": ids.len(), "hosts": hosts.len(), "removed": old.len(), "weight_kg": (weight * 1000.0).round() / 1000.0}))
+}
+
+fn reinforcement_preset(s: &mut Session, p: &Value) -> R {
+    let c = "reinforcement_preset";
+    only(c, p, &["name", "kind", "params", "rename", "delete"])?;
+    let Some(name) = name_param(c, p, "name")? else {
+        return Ok(json!({"presets": s.model.reinforcement}));
+    };
+    let m = s.model_mut();
+    if flag(c, p, "delete")? {
+        if m.reinforcement.remove(&name).is_none() {
+            return Err(bad(c, format!("there's no reinforcement preset `{name}`")));
+        }
+        return Ok(json!({"deleted": name}));
+    }
+    let was = m.reinforcement.get(&name).cloned();
+    let kind = string(c, p, "kind")?
+        .or_else(|| was.as_ref().map(|w| w.kind.clone()))
+        .ok_or_else(|| bad(c, format!("`kind` ({}) is required for a new preset", crate::reinforce::KINDS.join(", "))))?;
+    let params = match p.get("params") {
+        Some(Value::Object(o)) => o.clone(),
+        None | Some(Value::Null) => was.map(|w| w.params).ok_or_else(|| bad(c, "`params` {…} is required for a new preset"))?,
+        Some(v) => return Err(bad(c, format!("`params` must be an object of reinforce's parameters, got {v}"))),
+    };
+    let name = match name_param(c, p, "rename")? {
+        Some(to) if to != name => {
+            if m.reinforcement.contains_key(&to) {
+                return Err(bad(c, format!("there's already a reinforcement preset `{to}`")));
+            }
+            m.reinforcement.remove(&name);
+            rename_entry(m, &LibKind::ReinforcementPreset, &name, &to);
+            to
+        }
+        _ => name,
+    };
+    let preset = crate::reinforce::Preset { kind, params };
+    preset.check(&name).map_err(|e| bad(c, e))?;
+    if !m.reinforcement.contains_key(&name) && m.reinforcement.len() >= crate::reinforce::MAX_PRESETS {
+        return Err(bad(c, format!("the project holds up to {} presets", crate::reinforce::MAX_PRESETS)));
+    }
+    m.reinforcement.insert(name.clone(), preset.clone());
+    Ok(json!({"name": name, "preset": preset}))
 }
 
 fn wall(s: &mut Session, p: &Value) -> R {

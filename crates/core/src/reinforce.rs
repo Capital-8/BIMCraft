@@ -2,12 +2,12 @@
 //! rules here are geometry only: that what is asked fits the section, with room between the bars. How many bars, how thick and
 //! how far apart is the engineer's, not this module's; no standard's table is in it.
 
-use serde::Deserialize;
 use serde::de::DeserializeOwned;
+use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
 use crate::geom::P2;
-use crate::model::{Element, MAX_COORD, Model, TOL, heading};
+use crate::model::{Element, MAX_COORD, MAX_TEXT, Model, TOL, heading};
 use crate::rebar::{DIAMETERS, GRADE, MAX_BARS};
 use crate::view3d::{P3, add, mul, sub, unit};
 
@@ -57,12 +57,13 @@ struct Faces {
     sides: Option<f64>,
 }
 
-/// `count` bars of `diameter` mm in a row.
+/// `count` bars of `diameter` mm in a row, with a hook at each end if told.
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Row {
     count: usize,
     diameter: f64,
+    hook: Option<Value>,
 }
 
 /// Bars `diameter` mm thick no further apart than `spacing` mm.
@@ -107,6 +108,7 @@ struct ColumnBars {
     diameter: f64,
     x: Option<usize>,
     y: Option<usize>,
+    hook: Option<Value>,
 }
 
 /// How far a column's bars run past its base and its top, mm: flush when 0, a cover short when not told.
@@ -158,6 +160,7 @@ impl Args {
     fn new(p: &Value) -> Result<Args, String> {
         let mut map = p.as_object().cloned().ok_or("reinforce: the parameters must be an object")?;
         map.remove("host");
+        map.remove("hosts");
         Ok(Args { map })
     }
 
@@ -209,6 +212,32 @@ fn reach(key: &str, x: Option<f64>) -> Result<Option<f64>, String> {
         Some(v) if !(0.0..=MAX_COORD).contains(&v) => Err(format!("reinforce: `{key}` {v} mm must be 0 or more, up to {MAX_COORD}")),
         other => Ok(other),
     }
+}
+
+/// The legs of a bar's two hooks, mm, from `hook`: a length for both, or an object with a length for each end (`ends` names
+/// them); none where there is none.
+fn legs(key: &str, hook: Option<&Value>, ends: [&str; 2]) -> Result<(f64, f64), String> {
+    let bad = || format!("reinforce: `{key}` must be a length in mm, or {{{}, {}}}", ends[0], ends[1]);
+    let leg = |v: Option<&Value>| match v {
+        None | Some(Value::Null) => Ok(0.0),
+        Some(v) => v.as_f64().ok_or_else(bad).and_then(|x| reach(key, Some(x)).map(|x| x.unwrap_or(0.0))),
+    };
+    match hook {
+        None | Some(Value::Null) => Ok((0.0, 0.0)),
+        Some(Value::Object(o)) => match o.keys().find(|k| !ends.contains(&k.as_str())) {
+            Some(_) => Err(bad()),
+            None => Ok((leg(o.get(ends[0]))?, leg(o.get(ends[1]))?)),
+        },
+        Some(v) => {
+            let x = leg(Some(v))?;
+            Ok((x, x))
+        }
+    }
+}
+
+/// A bar's points from `a` to `b`, with a leg at either end, `first` and `last` (where it has one).
+fn with_legs(first: Option<P3>, a: P3, b: P3, last: Option<P3>) -> Vec<P3> {
+    first.into_iter().chain([a, b]).chain(last).collect()
 }
 
 fn cover(arg: Option<CoverArg>, own: Option<f64>) -> Result<Cover, String> {
@@ -422,8 +451,21 @@ fn beam(f: &Frame, len: f64, (w, h): (f64, f64), x: &Common, mut a: Args) -> Res
         } else {
             c_top = c;
         }
+        // Hooks turn up from the bottom bars and down from the top ones, and stay inside the stirrup.
+        let (h0, h1) = legs(&format!("{layer} hook"), r.hook.as_ref(), ["start", "end"])?;
+        let turn = if layer == "bottom" { 1.0 } else { -1.0 };
+        for leg in [h0, h1] {
+            let tip = c + turn * leg;
+            if leg > TOL && !(c_lo - TOL..=c_hi + TOL).contains(&tip) {
+                return Err(format!(
+                    "reinforce: a {layer} hook of {leg} mm doesn't fit inside the stirrup, which is {:.1} mm deep from the bars",
+                    c_hi - c_lo
+                ));
+            }
+        }
         for b in row(half_w - d / 2.0, n, d, gap(d, 0.0), layer)? {
-            out.push(layer, d, &x.grade, vec![f.at(s0, b, c), f.at(s1, b, c)])?;
+            let leg = |at: f64, leg: f64| (leg > TOL).then(|| f.at(at, b, c + turn * leg));
+            out.push(layer, d, &x.grade, with_legs(leg(s0, h0), f.at(s0, b, c), f.at(s1, b, c), leg(s1, h1)))?;
         }
     }
     if let [(low, dl), (high, dh)] = *levels.as_slice() {
@@ -509,14 +551,24 @@ fn column(f: &Frame, len: f64, (w, d): (f64, f64), x: &Common, mut a: Args) -> R
         let gap = x.clearance.unwrap_or_else(|| dia.max(20.0));
         let (bb, cc) = (half_b - dia / 2.0, half_c - dia / 2.0);
         let (xs, ys) = (row(bb, nx, dia, gap, "x face")?, row(cc, ny, dia, gap, "y face")?);
+        // Hooks at the foot and the top turn into the section, along the way across the face the bar is on, and stop short of
+        // the middle.
+        let (h0, h1) = legs("bars hook", r.hook.as_ref(), ["below", "above"])?;
+        for (leg, room) in [(h0, 2.0 * cc.min(bb)), (h1, 2.0 * cc.min(bb))] {
+            if leg > room + TOL {
+                return Err(format!("reinforce: a bars hook of {leg} mm doesn't fit in a section {room:.1} mm across between the bars"));
+            }
+        }
         for c in [-cc, cc] {
             for &b in &xs {
-                out.push("bars", dia, &x.grade, vec![f.at(a0, b, c), f.at(a1, b, c)])?;
+                let leg = |at: f64, leg: f64| (leg > TOL).then(|| f.at(at, b, c - c.signum() * leg));
+                out.push("bars", dia, &x.grade, with_legs(leg(a0, h0), f.at(a0, b, c), f.at(a1, b, c), leg(a1, h1)))?;
             }
         }
         for b in [-bb, bb] {
             for &c in ys.iter().skip(1).take(ny.saturating_sub(2)) {
-                out.push("bars", dia, &x.grade, vec![f.at(a0, b, c), f.at(a1, b, c)])?;
+                let leg = |at: f64, leg: f64| (leg > TOL).then(|| f.at(at, b - b.signum() * leg, c));
+                out.push("bars", dia, &x.grade, with_legs(leg(a0, h0), f.at(a0, b, c), f.at(a1, b, c), leg(a1, h1)))?;
             }
         }
         across = (
@@ -712,4 +764,69 @@ fn slab(fl: &crate::model::Floor, top: f64, thick: f64, x: &Common, mut a: Args)
 /// The least and the most of `xs`.
 fn span(xs: impl Iterator<Item = f64>) -> Option<(f64, f64)> {
     xs.fold(None, |s: Option<(f64, f64)>, x| Some(s.map_or((x, x), |(lo, hi)| (lo.min(x), hi.max(x)))))
+}
+
+/// The kinds of host a preset is for.
+pub const KINDS: [&str; 4] = ["beam", "column", "footing", "floor"];
+/// The most presets a project holds, and the most bytes one's parameters take as JSON.
+pub const MAX_PRESETS: usize = 256;
+const MAX_PRESET_BYTES: usize = 16 * 1024;
+
+/// A name for a set of the parameters `reinforce` takes for one kind of host (everything but the host itself), kept in the
+/// project to arm others alike.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Preset {
+    pub kind: String,
+    pub params: Map<String, Value>,
+}
+
+/// The kind of host `e` is, if it is one `reinforce` arms.
+pub fn kind_of(e: &Element) -> Option<&'static str> {
+    match e {
+        Element::Beam(_) => Some("beam"),
+        Element::Column(_) | Element::StructuralColumn(_) => Some("column"),
+        Element::Footing(_) => Some("footing"),
+        Element::Floor(_) => Some("floor"),
+        _ => None,
+    }
+}
+
+/// The parameters a host of `kind` takes besides the ones every host takes.
+fn own(kind: &str) -> &'static [&'static str] {
+    match kind {
+        "beam" => &["bottom", "top", "stirrup", "skin", "anchor"],
+        "column" => &["bars", "stirrup", "ties", "anchor"],
+        "footing" => &["mesh"],
+        _ => &["bottom", "top"],
+    }
+}
+
+impl Preset {
+    /// Whether the preset is one the project may hold, by `name`: a kind of host, parameters of that kind and no other, in a
+    /// size the file may carry. It is checked against a host only when it arms one.
+    pub fn check(&self, name: &str) -> Result<(), String> {
+        if name.trim().is_empty() || name.chars().count() > MAX_TEXT {
+            return Err(format!(
+                "reinforcement preset `{}`: its name is 1 to {MAX_TEXT} characters",
+                name.chars().take(40).collect::<String>()
+            ));
+        }
+        if !KINDS.contains(&self.kind.as_str()) {
+            return Err(format!("reinforcement preset `{name}`: `kind` is one of {}, not `{}`", KINDS.join(", "), self.kind));
+        }
+        let common = ["cover", "grade", "grade_stirrup", "clearance"];
+        if let Some(k) = self.params.keys().find(|k| !common.contains(&k.as_str()) && !own(&self.kind).contains(&k.as_str())) {
+            return Err(format!(
+                "reinforcement preset `{name}`: `{k}` isn't a parameter of a {}: {}, {}",
+                self.kind,
+                common.join(", "),
+                own(&self.kind).join(", ")
+            ));
+        }
+        if serde_json::to_string(&self.params).map_or(usize::MAX, |s| s.len()) > MAX_PRESET_BYTES {
+            return Err(format!("reinforcement preset `{name}`: its params take more than {MAX_PRESET_BYTES} bytes"));
+        }
+        Ok(())
+    }
 }

@@ -170,3 +170,83 @@ fn a_footing_and_a_floor_have_their_own_forms() {
     // Twenty-one bars across the 3 m.
     assert_eq!(bars(&h).len(), 18 + 21);
 }
+
+#[test]
+fn several_beams_selected_are_armed_alike_and_a_mixed_selection_is_refused() {
+    let mut h = app(&format!(
+        "{BOX}\n{BEAM}\nbeam {{\"points\": [[1000, 2000], [4000, 2000]], \"offset\": 2800}}\nstructural_column {{\"at\": [6000, 2000], \"height\": 3000}}"
+    ));
+    let beams = ids(&h, "beam");
+    let column = ids(&h, "structuralcolumn")[0];
+    // A beam and a column: no one form fits both.
+    h.state_mut().selection = vec![beams[0], column];
+    h.run();
+    shortcut(&mut h, "RF");
+    assert!(h.state().reinforce_dialog.is_none());
+    assert!(h.state().status.error && h.state().status.text.contains("one kind"), "{}", h.state().status.text);
+    // Two beams: one dialog, one command, one step.
+    h.state_mut().selection = beams.clone();
+    h.run();
+    shortcut(&mut h, "RF");
+    assert!(h.state().reinforce_dialog.is_some());
+    fill(&mut h, &[("Cover", "25"), ("Bottom bars: Count", "2"), ("Bottom bars: Diameter", "16"), ("Bottom bars: Hook", "200")]);
+    let steps = h.state().session.history().len();
+    press(&mut h, "OK");
+    assert_eq!(h.state().session.history().len(), steps + 1);
+    assert_eq!(bars(&h).len(), 4, "two bars on each beam");
+    // A hook typed is a leg at each end: four points.
+    assert!(bars(&h).iter().all(|id| field(&h, *id, "path").as_array().map(Vec::len) == Some(4)));
+    assert!(h.state().status.text.contains("4"), "{}", h.state().status.text);
+}
+
+#[test]
+fn a_preset_is_saved_from_the_fields_chosen_for_another_beam_and_deleted() {
+    let mut h = app(&format!("{BOX}\n{BEAM}\nbeam {{\"points\": [[1000, 2000], [4000, 2000]], \"offset\": 2800}}"));
+    let beams = ids(&h, "beam");
+    select(&mut h, beams[0]);
+    shortcut(&mut h, "RF");
+    fill(
+        &mut h,
+        &[
+            ("Cover", "25"),
+            ("Bottom bars: Count", "3"),
+            ("Bottom bars: Diameter", "16"),
+            ("Stirrups: Diameter", "5"),
+            ("Stirrups: Spacing", "150"),
+        ],
+    );
+    // A preset needs a name.
+    press(&mut h, "Save Preset");
+    assert!(h.state().reinforce_dialog.as_ref().is_some_and(|d| d.error.contains("name")));
+    fill(&mut h, &[("Preset: Name", "V 20 x 50")]);
+    press(&mut h, "Save Preset");
+    assert!(
+        h.state().reinforce_dialog.as_ref().is_some_and(|d| d.error.is_empty()),
+        "{:?}",
+        h.state().reinforce_dialog.as_ref().map(|d| &d.error)
+    );
+    let saved = &h.state().session.model.reinforcement["V 20 x 50"];
+    assert_eq!(saved.kind, "beam");
+    assert_eq!(saved.params["bottom"], json!({"count": 3, "diameter": 16.0}));
+    assert_eq!(saved.params["cover"], json!(25.0));
+    press(&mut h, "Cancel");
+    assert!(bars(&h).is_empty(), "saving a preset arms nothing");
+    // Another beam: choose it, and the fields are as they were saved.
+    select(&mut h, beams[1]);
+    shortcut(&mut h, "RF");
+    type_into(&mut h, "Cover", "");
+    type_into(&mut h, "Bottom bars: Count", "");
+    choose(&mut h, "Preset:", "V 20 x 50");
+    assert_eq!(field_text(&h, "Cover"), "25");
+    assert_eq!(field_text(&h, "Bottom bars: Count"), "3");
+    assert_eq!(field_text(&h, "Stirrups: Spacing"), "150");
+    press(&mut h, "OK");
+    // 3 bars and the stirrups of a 3 m beam.
+    assert_eq!(bars(&h).len(), 3 + 21);
+    // Deleting takes it away.
+    shortcut(&mut h, "RF");
+    choose(&mut h, "Preset:", "V 20 x 50");
+    press(&mut h, "Delete Preset");
+    assert!(h.state().session.model.reinforcement.is_empty());
+    press(&mut h, "Cancel");
+}

@@ -9,7 +9,7 @@ use bimcraft_i18n::msg;
 
 use bimcraft_core::model::{Element, Id};
 use bimcraft_core::units::Units;
-use egui::{Align, Context, Id as UiId, Layout, Modal, RichText, ScrollArea, TextEdit, Ui, WidgetInfo, WidgetType};
+use egui::{Align, ComboBox, Context, Id as UiId, Layout, Modal, RichText, ScrollArea, TextEdit, Ui, WidgetInfo, WidgetType};
 use serde_json::{Value, json};
 
 use crate::lang::{category, t, tf};
@@ -43,11 +43,19 @@ const fn field(path: &'static str, label: &'static str, kind: Kind) -> Field {
 
 const BOTTOM: Group = Group {
     name: msg!("Bottom bars"),
-    fields: &[field("bottom.count", msg!("Count"), Kind::Count), field("bottom.diameter", msg!("Diameter"), Kind::Diameter)],
+    fields: &[
+        field("bottom.count", msg!("Count"), Kind::Count),
+        field("bottom.diameter", msg!("Diameter"), Kind::Diameter),
+        field("bottom.hook", msg!("Hook"), Kind::Length),
+    ],
 };
 const TOP: Group = Group {
     name: msg!("Top bars"),
-    fields: &[field("top.count", msg!("Count"), Kind::Count), field("top.diameter", msg!("Diameter"), Kind::Diameter)],
+    fields: &[
+        field("top.count", msg!("Count"), Kind::Count),
+        field("top.diameter", msg!("Diameter"), Kind::Diameter),
+        field("top.hook", msg!("Hook"), Kind::Length),
+    ],
 };
 const STIRRUPS: Group = Group {
     name: msg!("Stirrups"),
@@ -81,6 +89,7 @@ const COLUMN: &[Group] = &[
             field("bars.diameter", msg!("Diameter"), Kind::Diameter),
             field("bars.x", msg!("Along width"), Kind::Count),
             field("bars.y", msg!("Along depth"), Kind::Count),
+            field("bars.hook", msg!("Hook"), Kind::Length),
         ],
     },
     STIRRUPS,
@@ -144,6 +153,16 @@ impl Form {
         }
     }
 
+    /// The kind of host a preset for this form is for.
+    fn kind(self) -> &'static str {
+        match self {
+            Form::Beam => "beam",
+            Form::Column => "column",
+            Form::Footing => "footing",
+            Form::Floor => "floor",
+        }
+    }
+
     fn groups(self) -> &'static [Group] {
         match self {
             Form::Beam => BEAM,
@@ -157,12 +176,15 @@ impl Form {
 /// The Reinforce dialog: the host, what is typed (by the parameter each field sets), what the command last refused, and the bars
 /// the command made for the host before, which Remove Bars takes away.
 pub(crate) struct ReinforceDialog {
-    host: Id,
+    hosts: Vec<Id>,
     category: &'static str,
     form: Form,
     values: BTreeMap<&'static str, String>,
     pub(crate) error: String,
     made: Vec<Id>,
+    /// The preset the fields were last filled from, and the name typed to save them under.
+    preset: String,
+    save_as: String,
 }
 
 /// `value` at the dotted `path` of `p`, the objects on the way made.
@@ -204,9 +226,50 @@ impl ReinforceDialog {
         }
     }
 
+    /// The fields, filled as the parameters of a preset say.
+    fn load(&mut self, units: Units, params: &serde_json::Map<String, Value>) {
+        self.values.clear();
+        let p = Value::Object(params.clone());
+        for g in self.form.groups() {
+            for f in g.fields {
+                if let Some(v) = f.path.split('.').try_fold(&p, |v, k| v.get(k)).and_then(Value::as_f64) {
+                    let text = match f.kind {
+                        Kind::Count => format!("{}", v.round()),
+                        Kind::Diameter => format!("{v}"),
+                        Kind::Length => units.length(v),
+                    };
+                    self.values.insert(f.path, text);
+                }
+            }
+        }
+        match p.get("cover") {
+            Some(Value::Object(o)) => {
+                for (face, key) in [("top", "cover_top"), ("bottom", "cover_bottom"), ("sides", "cover_sides")] {
+                    if let Some(v) = o.get(face).and_then(Value::as_f64) {
+                        self.values.insert(key, units.length(v));
+                    }
+                }
+            }
+            Some(v) => {
+                if let Some(x) = v.as_f64() {
+                    self.values.insert("cover", units.length(x));
+                }
+            }
+            None => {}
+        }
+        for key in ["grade", "grade_stirrup"] {
+            if let Some(g) = p.get(key).and_then(Value::as_str) {
+                self.values.insert(key, g.to_string());
+            }
+        }
+        if let Some(v) = p.get("clearance").and_then(Value::as_f64) {
+            self.values.insert("clearance", units.length(v));
+        }
+    }
+
     /// The command's parameters from the fields filled.
     fn params(&self, units: Units) -> Result<Value, String> {
-        let mut p = json!({"host": self.host});
+        let mut p = json!({"hosts": self.hosts});
         for g in self.form.groups() {
             for f in g.fields {
                 let name = format!("{}: {}", t(g.name), t(f.label));
@@ -252,26 +315,39 @@ fn edit(ui: &mut Ui, text: &mut String, name: String, width: f32, hint: &str) {
 }
 
 impl BimApp {
-    /// Reinforce (RF): the dialog for the element selected, if it is one that can be armed.
+    /// Reinforce (RF): the dialog for the elements selected, if they are ones that can be armed, all of one kind.
     pub(crate) fn open_reinforce(&mut self) {
         let m = &self.session.model;
-        let host = match self.selection.as_slice() {
-            [id] => m.elements.get(*id).and_then(|e| Form::of(e).map(|f| (*id, e.category(), f))),
-            _ => None,
-        };
-        let Some((id, category, form)) = host else {
+        let picked: Vec<(Id, &'static str, Form)> =
+            self.selection.iter().filter_map(|id| m.elements.get(*id).and_then(|e| Form::of(e).map(|f| (*id, e.category(), f)))).collect();
+        let Some(&(_, category, form)) = picked.first().filter(|_| picked.len() == self.selection.len()) else {
             self.status = Status { text: t("Select a beam, a column, a footing or a floor to reinforce first.").into(), error: true };
             return;
         };
-        let guid = m.guid(id);
+        if picked.iter().any(|(_, _, f)| *f != form) {
+            self.status =
+                Status { text: t("Select elements of one kind: all beams, all columns, all footings or all floors.").into(), error: true };
+            return;
+        }
+        let guids: std::collections::BTreeSet<_> = picked.iter().map(|(id, _, _)| m.guid(*id)).collect();
         let made = m
             .elements
             .iter()
-            .filter(|(_, e)| matches!(e, Element::Rebar(r) if r.host == Some(guid) && !r.layer.is_empty()))
+            .filter(|(_, e)| matches!(e, Element::Rebar(r) if r.host.is_some_and(|h| guids.contains(&h)) && !r.layer.is_empty()))
             .map(|(i, _)| *i)
             .collect();
         let values = self.reinforce_kept.get(&form).cloned().unwrap_or_default();
-        self.reinforce_dialog = Some(ReinforceDialog { host: id, category, form, values, error: String::new(), made });
+        let hosts = picked.iter().map(|(id, _, _)| *id).collect();
+        self.reinforce_dialog = Some(ReinforceDialog {
+            hosts,
+            category,
+            form,
+            values,
+            error: String::new(),
+            made,
+            preset: String::new(),
+            save_as: String::new(),
+        });
     }
 
     /// The Reinforce dialog, while it is open.
@@ -279,12 +355,37 @@ impl BimApp {
         let Some(mut d) = self.reinforce_dialog.take() else { return };
         let units = self.session.model.units;
         let hint = units.name();
-        let (mut ok, mut cancel, mut remove) = (false, false, false);
+        let (mut ok, mut cancel, mut remove, mut save, mut forget) = (false, false, false, false, false);
+        let mut chosen: Option<String> = None;
+        let kind = d.form.kind();
+        let names: Vec<String> = self.session.model.reinforcement.iter().filter(|(_, p)| p.kind == kind).map(|(n, _)| n.clone()).collect();
         let r = Modal::new(UiId::new("reinforce")).show(ctx, |ui| {
             ui.set_width(700.0);
-            ui.label(RichText::new(tf("Reinforce {} {}", &[&category(d.category, false), &d.host.to_string()])).heading());
+            let title = match d.hosts.as_slice() {
+                [one] => tf("Reinforce {} {}", &[&category(d.category, false), &one.to_string()]),
+                many => tf("Reinforce {} {}", &[&many.len().to_string(), &category(d.category, true)]),
+            };
+            ui.label(RichText::new(title).heading());
             ui.add_space(4.0);
             ui.label(t("How many bars, how thick and how far apart is yours to say; a field left empty is not used. A spacing is the most between bars."));
+            ui.separator();
+            ui.horizontal_wrapped(|ui| {
+                let l = ui.label(t("Preset:"));
+                let c = ComboBox::from_id_salt("reinforce-preset").selected_text(d.preset.as_str()).width(180.0).show_ui(ui, |ui| {
+                    for n in &names {
+                        if ui.selectable_label(*n == d.preset, n).clicked() {
+                            chosen = Some(n.clone());
+                        }
+                    }
+                });
+                c.response.labelled_by(l.id);
+                ui.label(t("Save as:"));
+                edit(ui, &mut d.save_as, t("Preset: Name").to_string(), 120.0, "");
+                save = ui.button(t("Save Preset")).clicked();
+                if !d.preset.is_empty() {
+                    forget = ui.button(t("Delete Preset")).clicked();
+                }
+            });
             ui.separator();
             ScrollArea::vertical().max_height(480.0).show(ui, |ui| {
                 ui.horizontal_wrapped(|ui| {
@@ -343,6 +444,38 @@ impl BimApp {
             });
         });
         let mut keep = !(ok || cancel || remove || r.should_close());
+        // A preset chosen fills the fields; saved, it is the fields as they are; deleted, it is gone. Each keeps the dialog open.
+        if let Some(n) = chosen
+            && let Some(p) = self.session.model.reinforcement.get(&n).map(|p| p.params.clone())
+        {
+            d.load(units, &p);
+            (d.preset, d.error) = (n, String::new());
+        }
+        if save {
+            let name = d.save_as.trim().to_string();
+            d.error.clear();
+            if name.is_empty() {
+                d.error = t("Type a name for the preset first.").into();
+            } else {
+                match d.params(units) {
+                    Err(e) => d.error = e,
+                    Ok(mut p) => {
+                        if let Some(o) = p.as_object_mut() {
+                            o.remove("hosts");
+                        }
+                        if self.run("reinforcement_preset", json!({"name": name, "kind": kind, "params": p})).is_some() {
+                            (d.preset, d.save_as) = (name, String::new());
+                        } else {
+                            d.error = std::mem::take(&mut self.status.text);
+                            self.status = Status::default();
+                        }
+                    }
+                }
+            }
+        }
+        if forget && self.run("reinforcement_preset", json!({"name": d.preset, "delete": true})).is_some() {
+            d.preset.clear();
+        }
         if ok {
             match d.params(units) {
                 Err(e) => {

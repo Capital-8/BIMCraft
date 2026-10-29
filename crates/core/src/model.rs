@@ -2041,6 +2041,9 @@ pub struct Model {
     /// Its detail group types, by name: the members each one placed draws.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub detail_groups: BTreeMap<String, crate::groups::GroupType>,
+    /// Its reinforcement presets, by name: the parameters `reinforce` takes for a kind of host, kept to arm others alike.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub reinforcement: BTreeMap<String, crate::reinforce::Preset>,
     pub elements: Elements,
     /// The ids and GUIDs of the library: its types, materials, pictures, families, parameters, view filters and
     /// templates, phases, phase filters and design options.
@@ -2097,6 +2100,7 @@ impl Model {
             region_types: fills::region_types(language),
             text_types: crate::text::types(language),
             detail_groups: BTreeMap::new(),
+            reinforcement: BTreeMap::new(),
             elements: Elements::new(),
             library: crate::library::Library::default(),
             loaded: BTreeMap::new(),
@@ -4120,6 +4124,16 @@ impl Model {
         }
         for (n, t) in &self.text_types {
             t.check(n)?;
+        }
+        if self.reinforcement.len() > crate::reinforce::MAX_PRESETS {
+            return Err(format!(
+                "the project has {} reinforcement presets; it holds up to {}",
+                self.reinforcement.len(),
+                crate::reinforce::MAX_PRESETS
+            ));
+        }
+        for (n, p) in &self.reinforcement {
+            p.check(n)?;
         }
         for (n, x) in &self.materials {
             for p in [&x.cut_pattern, &x.surface_pattern].into_iter().flatten() {

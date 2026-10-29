@@ -481,6 +481,10 @@ fn hostile_parameters_for_every_kind_of_host_are_refused_or_made_never_a_crash()
         hostile.push(json!({"cover": 25, "bottom": {"x": pitch(n.clone(), n.clone()), "y": pitch(json!(8), json!(100))}, "top": {"y": pitch(json!(8), n.clone())}}));
         hostile.push(json!({"cover": {"top": n.clone(), "bottom": n.clone(), "sides": n.clone()}, "stirrup": pitch(json!(5), json!(150)), "bars": {"diameter": 16}}));
         hostile.push(json!({"cover": 25, "stirrup": {"diameter": 5, "spacing": 150, "ends": {"length": n.clone(), "spacing": n.clone()}, "hook": n.clone()}, "ties": {"diameter": n.clone()}}));
+        hostile.push(json!({"cover": 25, "bottom": row(json!(2), json!(16)), "top": {"count": 2, "diameter": 16, "hook": {"start": n.clone()}}, "bars": {"diameter": 16, "hook": {"below": n.clone(), "above": n.clone()}}}));
+        hostile.push(
+            json!({"cover": 25, "bottom": {"count": 2, "diameter": 16, "hook": n.clone()}, "bars": {"diameter": 16, "hook": n.clone()}}),
+        );
         hostile.push(json!({"cover": 25, "bars": {"diameter": 16}, "anchor": {"start": n.clone(), "end": n.clone(), "below": n.clone(), "above": n.clone()}, "skin": pitch(json!(8), n.clone()), "clearance": n}));
     }
     for host in hosts {
@@ -499,4 +503,298 @@ fn hostile_parameters_for_every_kind_of_host_are_refused_or_made_never_a_crash()
             }
         }
     }
+}
+
+#[test]
+fn several_hosts_are_armed_by_one_command_or_none_is() {
+    let mut s = Session::new();
+    let a = beam(&mut s);
+    let b = ids(&run(&mut s, "beam", json!({"points": [[0, 1000], [4000, 1000]]})))[0];
+    let spec = json!({"hosts": [a, b], "cover": 25, "bottom": {"count": 2, "diameter": 16}, "stirrup": {"diameter": 5, "spacing": 150}});
+    let r = run(&mut s, "reinforce", spec.clone());
+    // 6 m: 2 bars and 41 stirrups; 4 m: 2 and 28.
+    assert_eq!((ids(&r).len(), r["hosts"].as_u64(), r["removed"].as_u64()), (73, Some(2), Some(0)));
+    assert_eq!((on(&s, a, "stirrup").len(), on(&s, b, "stirrup").len(), on(&s, b, "bottom").len()), (41, 28, 2));
+    // Again: each host's bars are replaced, and a host given twice is armed once.
+    let mut again = spec.clone();
+    again["hosts"] = json!([a, b, a]);
+    let r = run(&mut s, "reinforce", again);
+    assert_eq!((ids(&r).len(), r["removed"].as_u64()), (73, Some(73)));
+    // A beam that cannot take it refuses the lot, and says which: four 16 mm bars do not go in 150 mm.
+    let narrow = ids(&run(&mut s, "beam", json!({"points": [[0, 3000], [4000, 3000]], "type": "Beam 150 x 400"})))[0];
+    let mut four = spec;
+    four["hosts"] = json!([a, narrow]);
+    four["bottom"] = json!({"count": 4, "diameter": 16});
+    let e = fails(&mut s, "reinforce", four);
+    assert!(e.contains(&narrow.to_string()) && e.contains("beam") && e.contains("clearance"), "{e}");
+    assert_eq!(on(&s, a, "bottom").len(), 2, "the first host keeps its bars");
+}
+
+#[test]
+fn hosts_and_host_are_one_or_the_other_and_a_list_has_a_size() {
+    let mut s = Session::new();
+    let a = beam(&mut s);
+    let one = json!({"cover": 25, "bottom": {"count": 2, "diameter": 16}});
+    let with = |k: &str, v: Value| -> Value {
+        let mut p = one.clone();
+        p[k] = v;
+        p
+    };
+    for (p, says) in [
+        (with("hosts", json!([])), "hosts"),
+        (with("hosts", json!("x")), "hosts"),
+        (with("hosts", json!([999999])), "no element"),
+        (with("hosts", json!(vec![a; 1001])), "hosts"),
+    ] {
+        let e = fails(&mut s, "reinforce", p.clone());
+        assert!(e.contains(says), "{p}: {e}");
+    }
+    let mut both = with("hosts", json!([a]));
+    both["host"] = json!(a);
+    assert!(fails(&mut s, "reinforce", both).contains("not both"));
+    // A list of one is armed as `host` arms it.
+    assert_eq!(ids(&run(&mut s, "reinforce", with("hosts", json!([a])))).len(), 2);
+}
+
+#[test]
+fn more_bars_than_a_command_may_make_across_its_hosts_are_refused() {
+    let mut s = Session::new();
+    // Each floor takes 965 bars, a little under what one host may have; twenty-one are past what a command makes.
+    let floors: Vec<u64> = (0..21)
+        .map(|_| run(&mut s, "floor", json!({"boundary": [[0, 0], [27000, 0], [27000, 1000], [0, 1000]]}))["id"].as_u64().unwrap())
+        .collect();
+    let e = fails(&mut s, "reinforce", json!({"hosts": floors, "cover": 20, "bottom": {"y": {"diameter": 8, "spacing": 28}}}));
+    assert!(e.contains("20000"), "{e}");
+}
+
+#[test]
+fn a_beams_bars_end_in_hooks_up_at_the_bottom_and_down_at_the_top() {
+    let mut s = Session::new();
+    let host = beam(&mut s);
+    run(
+        &mut s,
+        "reinforce",
+        json!({
+            "host": host, "cover": 25, "stirrup": {"diameter": 5, "spacing": 150},
+            "bottom": {"count": 2, "diameter": 16, "hook": 200}, "top": {"count": 2, "diameter": 12.5, "hook": {"start": 100}}
+        }),
+    );
+    // Bottom bars: a leg of 200 turned up at each end, from 462 below the top of the beam to 262: 5950 + 400.
+    for b in on(&s, host, "bottom") {
+        assert_eq!(b["path"].as_array().map(Vec::len), Some(4), "{b}");
+        assert!(near(&b["length"], 6350.0), "{b}");
+        assert!((xy(&b, 0).2 + 262.0).abs() < 1e-6 && (xy(&b, 1).2 + 462.0).abs() < 1e-6 && (xy(&b, 3).2 + 262.0).abs() < 1e-6, "{b}");
+        assert!((xy(&b, 0).0 - 25.0).abs() < 1e-6 && (xy(&b, 3).0 - 5975.0).abs() < 1e-6, "{b}");
+    }
+    // Top bars: a leg of 100 turned down at the start only.
+    for b in on(&s, host, "top") {
+        assert_eq!(b["path"].as_array().map(Vec::len), Some(3), "{b}");
+        assert!(near(&b["length"], 6050.0), "{b}");
+        assert!((xy(&b, 0).2 + 136.25).abs() < 1e-6 && (xy(&b, 1).2 + 36.25).abs() < 1e-6, "{b}");
+    }
+    // A hook that does not go inside the stirrup, or is not a length, is refused.
+    for (hook, says) in
+        [(json!(500), "hook"), (json!(-5), "hook"), (json!({"start": 1e300}), "hook"), (json!("x"), "hook"), (json!({"middle": 5}), "hook")]
+    {
+        let e = fails(
+            &mut s,
+            "reinforce",
+            json!({"host": host, "cover": 25, "stirrup": {"diameter": 5, "spacing": 150}, "bottom": {"count": 2, "diameter": 16, "hook": hook}}),
+        );
+        assert!(e.contains(says), "{e}");
+    }
+}
+
+#[test]
+fn a_columns_bars_end_in_hooks_turned_into_the_section() {
+    let mut s = Session::new();
+    let host = column(&mut s, 0.0);
+    run(
+        &mut s,
+        "reinforce",
+        json!({"host": host, "cover": 25, "stirrup": {"diameter": 5, "spacing": 150}, "bars": {"diameter": 16, "x": 3, "y": 3, "hook": {"below": 150}}}),
+    );
+    let bars = on(&s, host, "bars");
+    assert_eq!(bars.len(), 8);
+    // Every bar has its leg at the foot, toward the middle of the section, and none at the top.
+    assert!(bars.iter().all(|b| b["path"].as_array().map(Vec::len) == Some(3) && near(&b["length"], 2950.0 + 150.0)), "{bars:?}");
+    // The corner at 888, 2112: its leg runs south from y 2112 to 1962 at the foot.
+    let corner = bars.iter().find(|b| (xy(b, 1).0 - 888.0).abs() < 1e-6 && (xy(b, 1).1 - 2112.0).abs() < 1e-6).expect("corner");
+    assert!(
+        (xy(corner, 0).1 - 1962.0).abs() < 1e-6 && (xy(corner, 0).0 - 888.0).abs() < 1e-6 && (xy(corner, 0).2 - 25.0).abs() < 1e-6,
+        "{corner}"
+    );
+    // The bar in the middle of a side runs across: 112 in from the west face it goes east.
+    let side = bars.iter().find(|b| (xy(b, 1).0 - 888.0).abs() < 1e-6 && (xy(b, 1).1 - 2000.0).abs() < 1e-6).expect("side");
+    assert!((xy(side, 0).0 - 1038.0).abs() < 1e-6, "{side}");
+    // Past the middle of the section is no hook.
+    let e = fails(
+        &mut s,
+        "reinforce",
+        json!({"host": host, "cover": 25, "stirrup": {"diameter": 5, "spacing": 150}, "bars": {"diameter": 16, "hook": 300}}),
+    );
+    assert!(e.contains("hook"), "{e}");
+    run(&mut s, "reinforce", json!({"host": host, "cover": 25, "bars": {"diameter": 16, "hook": {"above": 100}}}));
+    assert!(on(&s, host, "bars").iter().all(|b| b["path"].as_array().map(Vec::len) == Some(3) && (xy(b, 2).2 - 2975.0).abs() < 1e-6));
+}
+
+use crate::render::{self, Drawing, Prim, View};
+
+fn plan_view() -> View {
+    View { scale: 0.1, cx: 3000.0, cy: 2000.0, width: 1400, height: 800 }
+}
+
+/// What a drawing draws of element `id`.
+fn drawn(d: &Drawing, id: u64) -> Vec<&Prim> {
+    d.prims.iter().zip(&d.owners).filter(|(_, o)| **o == Some(id)).map(|(p, _)| p).collect()
+}
+
+#[test]
+fn a_plan_draws_the_bars_under_its_cut_plane_solid_the_ones_over_it_dashed_and_a_standing_bar_as_a_dot() {
+    let mut s = Session::new();
+    let slab = slab(&mut s, json!({}));
+    run(&mut s, "reinforce", json!({"host": slab, "cover": 20, "bottom": {"x": {"diameter": 8, "spacing": 150}}}));
+    // A beam over the cut plane, 1200 up, and a column the plane cuts.
+    let over = ids(&run(&mut s, "beam", json!({"points": [[0, 5000], [6000, 5000]], "offset": 2800})))[0];
+    run(
+        &mut s,
+        "reinforce",
+        json!({"host": over, "cover": 25, "bottom": {"count": 2, "diameter": 16}, "stirrup": {"diameter": 5, "spacing": 150}}),
+    );
+    let col =
+        run(&mut s, "structural_column", json!({"at": [8000, 1000], "type": "Concrete 300 x 300", "height": 3000}))["id"].as_u64().unwrap();
+    run(
+        &mut s,
+        "reinforce",
+        json!({"host": col, "cover": 25, "bars": {"diameter": 16, "x": 3, "y": 3}, "stirrup": {"diameter": 5, "spacing": 150}}),
+    );
+    let d = render::draw(&s.model, 100000, plan_view());
+    let of_host = |host: u64, layer: &str| -> Vec<u64> { on(&s, host, layer).iter().map(|b| b["id"].as_u64().unwrap()).collect() };
+
+    // Under the cut plane: a thin solid line along each bar.
+    let low = of_host(slab, "bottom x");
+    assert_eq!(low.len(), 21);
+    for id in &low {
+        let prims = drawn(&d, *id);
+        assert!(
+            matches!(prims.as_slice(), [Prim::Line { dash: None, closed: false, pts, .. }] if pts.len() == 2),
+            "{id}: {} prims",
+            prims.len()
+        );
+    }
+    // Over it, and under the view range's top: dashed.
+    for id in of_host(over, "bottom") {
+        assert!(matches!(drawn(&d, id).as_slice(), [Prim::Line { dash: Some(_), .. }]), "{id}");
+    }
+    // Stirrups over it too, but those at one place are drawn once: along the beam they are 41 places, each a tick across it.
+    let ticks: usize = of_host(over, "stirrup").iter().map(|id| drawn(&d, *id).len()).sum();
+    assert_eq!(ticks, 41, "a stirrup is seen from above as a line across the beam");
+    // A column's bars stand: a dot each, and its stirrups, all at one place, are one square.
+    let dots: Vec<u64> = of_host(col, "bars");
+    assert_eq!(dots.len(), 8);
+    assert!(dots.iter().all(|id| matches!(drawn(&d, *id).as_slice(), [Prim::Fill { .. }])), "dots");
+    let squares: usize = of_host(col, "stirrup").iter().map(|id| drawn(&d, *id).len()).sum();
+    assert_eq!(squares, 1);
+    // The plan above sees none of the bars under it, nor the ones of its own level's neighbours.
+    let up = render::draw(&s.model, 100001, plan_view());
+    assert!(low.iter().all(|id| drawn(&up, *id).is_empty()));
+    // Hidden by category, they are gone.
+    s.execute("graphics", &json!({"view": "Level 1", "hide": ["rebar"]})).unwrap();
+    let d = render::draw(&s.model, 100000, plan_view());
+    assert!(low.iter().all(|id| drawn(&d, *id).is_empty()));
+}
+
+fn presets(s: &Session) -> Value {
+    s.model
+        .reinforcement
+        .iter()
+        .map(|(n, p)| (n.clone(), json!({"kind": p.kind, "params": p.params})))
+        .collect::<serde_json::Map<_, _>>()
+        .into()
+}
+
+#[test]
+fn a_preset_keeps_a_kind_of_hosts_parameters_and_arms_by_its_name() {
+    let mut s = Session::new();
+    let (a, b) = (beam(&mut s), ids(&run(&mut s, "beam", json!({"points": [[0, 1000], [4000, 1000]]})))[0]);
+    let r = run(
+        &mut s,
+        "reinforcement_preset",
+        json!({"name": "V 20 x 50", "kind": "beam", "params": {"cover": 25, "bottom": {"count": 3, "diameter": 16}, "stirrup": {"diameter": 5, "spacing": 150}}}),
+    );
+    assert_eq!(r["name"], json!("V 20 x 50"));
+    assert_eq!(presets(&s)["V 20 x 50"]["kind"], json!("beam"));
+    // Without a name, they are listed.
+    assert_eq!(run(&mut s, "reinforcement_preset", json!({}))["presets"]["V 20 x 50"]["params"]["cover"], json!(25));
+    // By its name: both beams armed alike.
+    let r = run(&mut s, "reinforce", json!({"hosts": [a, b], "preset": "V 20 x 50"}));
+    assert_eq!((ids(&r).len(), on(&s, a, "bottom").len(), on(&s, b, "stirrup").len()), (44 + 31, 3, 28));
+    // What is given with it wins: stirrups every 100.
+    run(&mut s, "reinforce", json!({"host": a, "preset": "V 20 x 50", "stirrup": {"diameter": 5, "spacing": 100}}));
+    assert_eq!(on(&s, a, "stirrup").len(), 61);
+    // It belongs to a kind of host, and a name it does not have is no preset.
+    let column = column(&mut s, 0.0);
+    let e = fails(&mut s, "reinforce", json!({"host": column, "preset": "V 20 x 50"}));
+    assert!(e.contains("beam") && e.contains("column"), "{e}");
+    let e = fails(&mut s, "reinforce", json!({"host": a, "preset": "nope"}));
+    assert!(e.contains("nope"), "{e}");
+    // The project keeps it, as an entry of its library with an id and a GUID of its own, and gives it again on opening.
+    let path = std::env::temp_dir().join(format!("bimcraft-preset-{}.bimcraft", std::process::id()));
+    run(&mut s, "save", json!({"path": path.to_str().unwrap()}));
+    let mut t = Session::new();
+    run(&mut t, "open", json!({"path": path.to_str().unwrap()}));
+    assert_eq!(presets(&t), presets(&s));
+    let _ = std::fs::remove_file(&path);
+    assert!(s.model.library.entries().any(|(_, e)| e.name == "V 20 x 50" && e.kind == crate::library::Kind::ReinforcementPreset));
+    // Renamed, and deleted.
+    run(&mut s, "reinforcement_preset", json!({"name": "V 20 x 50", "rename": "Viga padrão"}));
+    assert!(presets(&s).get("Viga padrão").is_some() && presets(&s).get("V 20 x 50").is_none());
+    run(&mut s, "reinforce", json!({"host": a, "preset": "Viga padrão"}));
+    run(&mut s, "reinforcement_preset", json!({"name": "Viga padrão", "delete": true}));
+    assert!(presets(&s).as_object().is_some_and(serde_json::Map::is_empty));
+}
+
+#[test]
+fn a_preset_that_is_not_one_of_a_kind_of_host_is_refused() {
+    let mut s = Session::new();
+    let ok = json!({"cover": 25, "bottom": {"count": 3, "diameter": 16}});
+    for (p, says) in [
+        (json!({"name": "A", "params": ok}), "kind"),
+        (json!({"name": "A", "kind": "wall", "params": ok}), "kind"),
+        (json!({"name": "A", "kind": "beam"}), "params"),
+        (json!({"name": "A", "kind": "beam", "params": "x"}), "params"),
+        (json!({"name": "A", "kind": "beam", "params": {"mesh": {}}}), "mesh"),
+        (json!({"name": "A", "kind": "beam", "params": {"host": 100002}}), "host"),
+        (json!({"name": "A", "kind": "beam", "params": {"preset": "B"}}), "preset"),
+        (json!({"name": "  ", "kind": "beam", "params": ok}), ""),
+        (json!({"name": "A", "kind": "beam", "params": ok, "colour": 1}), "colour"),
+        (json!({"name": "x".repeat(100_000), "kind": "beam", "params": ok}), "name"),
+        (json!({"name": "A", "kind": "beam", "params": {"cover": "y".repeat(100_000)}}), "params"),
+        (json!({"name": "A", "delete": true}), "no reinforcement preset"),
+        (json!({"name": "A", "rename": "B"}), "kind"),
+    ] {
+        let before = s.model.clone();
+        match s.execute("reinforcement_preset", &p) {
+            Err(e) => assert!(e.contains(says), "{p}: {e}"),
+            Ok(_) if p["name"].as_str().is_some_and(|n| n.trim().is_empty()) => {}
+            Ok(r) => panic!("{p} made {r}"),
+        }
+        assert!(s.model.check().is_ok());
+        let _ = before;
+    }
+    // A preset is not checked against any host until it is used: this one fits no beam, and says so then.
+    run(
+        &mut s,
+        "reinforcement_preset",
+        json!({"name": "wide", "kind": "beam", "params": {"cover": 25, "bottom": {"count": 9, "diameter": 25}}}),
+    );
+    let host = beam(&mut s);
+    let e = fails(&mut s, "reinforce", json!({"host": host, "preset": "wide"}));
+    assert!(e.contains("clearance"), "{e}");
+    // The most presets a project holds.
+    for i in 0..crate::reinforce::MAX_PRESETS - 1 {
+        run(&mut s, "reinforcement_preset", json!({"name": format!("p{i}"), "kind": "beam", "params": {"cover": 25}}));
+    }
+    let e = fails(&mut s, "reinforcement_preset", json!({"name": "one too many", "kind": "beam", "params": {"cover": 25}}));
+    assert!(e.contains(&crate::reinforce::MAX_PRESETS.to_string()), "{e}");
 }
