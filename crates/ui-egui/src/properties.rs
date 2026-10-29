@@ -189,9 +189,18 @@ fn rows(category: &str) -> &'static [Row] {
         ],
         "level" => &[("Constraints", "elevation", "Elevation", Length), ("Identity Data", "name", "Name", Text)],
         "grid" => &[("Identity Data", "name", "Name", Text), ("Other", "start", "Start", Point), ("Other", "end", "End", Point)],
-        "dimension" => {
-            &[("Dimensions", "values", "Value", Values), ("Other", "kind", "Kind", Shown), ("Other", "at", msg!("Line Through"), Point)]
-        }
+        "dimension" => &[
+            ("Dimensions", "values", "Value", Values),
+            ("Text", "prefix", msg!("Prefix"), Text),
+            ("Text", "suffix", msg!("Suffix"), Text),
+            ("Text", "above", msg!("Above"), Text),
+            ("Text", "below", msg!("Below"), Text),
+            ("Text", "replace", msg!("Replace With Text"), Text),
+            ("Other", "equality", msg!("Equality Display"), Flag),
+            ("Other", "kind", "Kind", Shown),
+            ("Other", "orient", msg!("Orientation"), Shown),
+            ("Other", "at", msg!("Line Through"), Point),
+        ],
         "text" => &[
             ("Text", "text", "Text", Text),
             ("Text", "override_format", msg!("Override Formatting"), Flag),
@@ -757,7 +766,7 @@ impl BimApp {
             ([], Tool::Room, _) => Subject::New("room"),
             ([], Tool::Level, _) => Subject::New("level"),
             ([], Tool::Grid(_), _) => Subject::New("grid"),
-            ([], Tool::Dimension(_) | Tool::Angular(_) | Tool::Radial(_), _) => Subject::New("dimension"),
+            ([], Tool::Dimension(..) | Tool::Angular(_) | Tool::Round(..), _) => Subject::New("dimension"),
             ([], Tool::Text, _) => Subject::New("text"),
             ([], Tool::DetailLine(_), _) => Subject::New("line"),
             ([], Tool::Spot, _) => Subject::New("spot"),
@@ -889,6 +898,10 @@ impl BimApp {
             }
             if category == "text" {
                 self.text_type_dialog = Some(crate::notes::TextTypeDialog::new(&self.session.model, name, elements));
+                return;
+            }
+            if category == "dimension" {
+                self.dimension_type_dialog = Some(crate::dimtypes::DimensionTypeDialog::new(&self.session.model, name, elements));
                 return;
             }
             let pair = if category == "component" {

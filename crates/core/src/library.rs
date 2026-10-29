@@ -54,6 +54,7 @@ pub enum Kind {
     TextType,
     /// A named set of parameters for `reinforce`, for one kind of host.
     ReinforcementPreset,
+    DimensionType,
 }
 
 impl Kind {
@@ -82,6 +83,7 @@ impl Kind {
             Kind::DetailGroup => "detail group".into(),
             Kind::TextType => "text type".into(),
             Kind::ReinforcementPreset => "reinforcement preset".into(),
+            Kind::DimensionType => "dimension type".into(),
         }
     }
 
@@ -108,6 +110,7 @@ impl Kind {
             "detail-group" => Kind::DetailGroup,
             "text-type" => Kind::TextType,
             "reinforcement-preset" => Kind::ReinforcementPreset,
+            "dimension-type" => Kind::DimensionType,
             _ => Kind::Type(s.strip_prefix("type:")?.to_string()),
         })
     }
@@ -138,6 +141,7 @@ impl fmt::Display for Kind {
             Kind::DetailGroup => f.write_str("detail-group"),
             Kind::TextType => f.write_str("text-type"),
             Kind::ReinforcementPreset => f.write_str("reinforcement-preset"),
+            Kind::DimensionType => f.write_str("dimension-type"),
         }
     }
 }
@@ -581,6 +585,7 @@ impl Model {
         add(Kind::DetailGroup, &mut self.detail_groups.keys());
         add(Kind::TextType, &mut self.text_types.keys());
         add(Kind::ReinforcementPreset, &mut self.reinforcement.keys());
+        add(Kind::DimensionType, &mut self.dimension_types.keys());
         out
     }
 
@@ -973,6 +978,7 @@ impl crate::model::Element {
             }
             Element::CadImport(ci) => f(&Kind::Cad, &mut ci.cad),
             Element::Text(n) => f(&Kind::TextType, &mut n.type_name),
+            Element::Dimension(d) => f(&Kind::DimensionType, &mut d.type_name),
             Element::Schedule(sc) => {
                 let mut fields: Vec<&mut String> =
                     sc.fields.iter_mut().map(|x| &mut x.name).chain(sc.sort.iter_mut().map(|x| &mut x.field)).collect();

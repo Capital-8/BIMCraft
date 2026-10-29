@@ -2,10 +2,11 @@
 //! the browser by their labels, keys. Each test then reads the model the session ended up with,
 //! or what the window shows.
 
+use crate::DimMode;
 use bimcraft_core::element_json;
 use bimcraft_core::engine::Session;
 use bimcraft_core::geom::P2;
-use bimcraft_core::model::{Element, Guid, Id};
+use bimcraft_core::model::{DimKind, Element, Guid, Id};
 use bimcraft_core::pen::Pen;
 use bimcraft_core::sample::SAMPLE;
 use egui::accesskit::Role;
@@ -704,7 +705,7 @@ fn typed_shortcuts_pick_tools_like_revit() {
     assert!(matches!(h.state().tool, Tool::Door));
     h.event(Event::Text("DI".into()));
     h.run();
-    assert!(matches!(h.state().tool, Tool::Dimension(_)));
+    assert!(matches!(h.state().tool, Tool::Dimension(..)));
     h.event(Event::Text("tg".into()));
     h.run();
     assert!(matches!(h.state().tool, Tool::Tag));
@@ -1691,7 +1692,7 @@ fn aligned_dimensions_pick_parallel_references_then_place_the_line() {
     click(&mut h, P2(4000.0, -1000.0));
     let dims = ids(&h, "dimension");
     assert_eq!((dims.len(), field(&h, dims[0], "values")), (1, json!([7800.0])));
-    assert_eq!(h.state().tool, Tool::Dimension(Vec::new()), "the tool stays on for the next one");
+    assert_eq!(h.state().tool, Tool::Dimension(DimMode::Aligned, Vec::new()), "the tool stays on for the next one");
     // A wall across the first isn't picked; centre lines are, where the cursor is on them.
     click(&mut h, P2(0.0, 3000.0));
     click(&mut h, P2(4000.0, 0.0));
@@ -1702,7 +1703,7 @@ fn aligned_dimensions_pick_parallel_references_then_place_the_line() {
     // Esc drops the references picked, then leaves the tool.
     click(&mut h, P2(0.0, 3000.0));
     key(&mut h, Key::Escape);
-    assert_eq!(h.state().tool, Tool::Dimension(Vec::new()));
+    assert_eq!(h.state().tool, Tool::Dimension(DimMode::Aligned, Vec::new()));
     key(&mut h, Key::Escape);
     assert_eq!(h.state().tool, Tool::Modify);
 }
@@ -5179,6 +5180,7 @@ mod chinese;
 mod clouds;
 mod control;
 mod dialog;
+mod dimensions;
 mod dock;
 mod draw;
 mod fills;

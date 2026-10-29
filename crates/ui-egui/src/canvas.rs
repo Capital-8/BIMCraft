@@ -9,8 +9,8 @@ use std::sync::{Arc, Weak};
 
 use bimcraft_core::geom::{self, P2};
 use bimcraft_core::model::{
-    Clearance, Column, Component, DEFAULT_HEIGHT, DimKind, Dimension, Element, Extrusion, Face, Id, Landing, Line, MAX_COORD, Mass, Model,
-    RISER, Ramp, Reference, Roof, Section, Spot, Stair, TOL, TREAD, Tag, Wall,
+    Clearance, Column, Component, DEFAULT_HEIGHT, DimKind, Dimension, Element, Extrusion, Id, Landing, Line, MAX_COORD, Mass, Model, RISER,
+    Ramp, Reference, Roof, Section, Spot, Stair, TOL, TREAD, Tag, Wall,
 };
 use bimcraft_core::render::{self, Drawing, Prim, Rgb, View};
 use bimcraft_core::snap::{self, Found, Kind, Reach};
@@ -793,6 +793,16 @@ pub(crate) fn box_shapes(rect: Rect, from: (f32, f32), q: (f32, f32)) -> Vec<Sha
     }
 }
 
+/// What the Dimension tool takes of element `id` at `p`, after `refs`: an end of one of its lines within `near` mm (a wall's
+/// end or corner, a line's or a grid's end, a jamb's), as Archicad and Revit snap to them, else one of its lines parallel
+/// to the first line picked.
+fn dimension_pick(m: &Model, refs: &[Reference], id: Id, p: P2, near: f64) -> Option<Reference> {
+    if let Some((r, _)) = m.endpoint_at(id, p).filter(|(_, d)| *d <= near) {
+        return Some(r);
+    }
+    reference_for(m, DimKind::Aligned, refs.iter().find(|r| r.point.is_none()), id, p, near)
+}
+
 /// Of element `id`'s lines that a dimension of `kind` can take after `first` (for an aligned one,
 /// parallel to it; for an angular one, across it), the nearest `p`, if it's within `near` mm: a
 /// wall's far end isn't picked by a click on its middle.
@@ -1045,18 +1055,20 @@ impl BimApp {
             Tool::Mirror { draw: false, .. } => d.pick(q, PICK).filter(|id| !model.reference_lines(*id).is_empty()),
             // Something to measure to: with a line parallel to the first one picked, or for an angle,
             // one across it.
-            Tool::Dimension(refs) => d
-                .pick_all(q, PICK)
-                .into_iter()
-                .find(|id| reference_for(&model, DimKind::Aligned, refs.first(), *id, view.mm(q), near).is_some()),
+            Tool::Dimension(_, refs) => {
+                d.pick_all(q, PICK).into_iter().find(|id| dimension_pick(&model, refs, *id, view.mm(q), near).is_some())
+            }
             Tool::Angular(refs) if refs.len() < 2 => d
                 .pick_all(q, PICK)
                 .into_iter()
                 .find(|id| reference_for(&model, DimKind::Angular, refs.first(), *id, view.mm(q), near).is_some()),
-            Tool::Radial(None) => d
-                .pick_all(q, PICK)
-                .into_iter()
-                .find(|id| model.reference_arc(&Reference { id: model.guid(*id), face: Face::Centre }).is_ok()),
+            Tool::Round(kind, picked) if picked.is_empty() => {
+                d.pick_all(q, PICK).into_iter().find(|id| bimcraft_core::dims::round_at(&model, *id, view.mm(q), *kind).is_some())
+            }
+            // An arc length's points, on its arc.
+            Tool::Round(DimKind::ArcLength, picked) => picked.first().and_then(|arc| {
+                d.pick_all(q, PICK).into_iter().find(|id| bimcraft_core::dims::arc_point(&model, arc, *id, view.mm(q), near).is_some())
+            }),
             // What a spot elevation would read.
             Tool::Spot => model.spot_host(level, view.mm(q)),
             Tool::Tag => d.pick(q, PICK).filter(|id| model.anchor(*id).is_some()),
@@ -1130,6 +1142,16 @@ impl BimApp {
             && let Some(id) = hovered.filter(|id| crate::notes::is_note(&model, *id))
         {
             self.edit_note(id);
+            return;
+        }
+        // On a dimension, its text: the number under the cursor's, as Revit's Dimension Text.
+        if response.double_clicked()
+            && !writing
+            && let (Some(q), Some(Element::Dimension(dim))) = (local, hovered.and_then(|id| model.elements.get(id)))
+            && let Some(id) = hovered
+        {
+            let segment = model.dimension_segment_at(dim, view.mm(q));
+            self.dimension_text_dialog = Some(crate::dimtypes::DimensionTextDialog::new(&model, id, segment));
             return;
         }
         if let Some(at) = self.clicked_at(&response).filter(|_| !dragged && !writing) {
@@ -1615,21 +1637,29 @@ impl BimApp {
             }
             // Paint works in the 3D view, which it opens; a plan's tool goes back to Modify.
             Tool::Paint | Tool::Unpaint => {}
-            // A reference under the cursor joins the dimension; a click away from them places it.
-            Tool::Dimension(refs) => {
-                let mut refs = refs.clone();
-                match hovered.and_then(|id| reference_for(m, DimKind::Aligned, refs.first(), id, v.mm(at), 2.0 * f64::from(PICK) / v.scale))
-                {
+            // An endpoint or a reference under the cursor joins the dimension; a click away from them places it, laid as
+            // its mode says.
+            Tool::Dimension(mode, refs) => {
+                let (mode, mut refs) = (*mode, refs.clone());
+                match hovered.and_then(|id| dimension_pick(m, &refs, id, v.mm(at), 2.0 * f64::from(PICK) / v.scale)) {
                     Some(r) => {
                         if !refs.contains(&r) {
                             refs.push(r);
                         }
-                        self.tool = Tool::Dimension(refs);
+                        self.tool = Tool::Dimension(mode, refs);
                     }
                     None if refs.len() >= 2 => {
-                        let p = json!({"refs": refs, "at": point(round(v.mm(at))), "level": key});
+                        let at = round(v.mm(at));
+                        let (kind, orient) = mode.kind(m, &refs, at);
+                        let mut p = json!({"kind": kind, "refs": refs, "at": point(at), "level": key});
+                        if let Some(o) = orient {
+                            p["orient"] = json!(o);
+                        }
+                        if let Some(t) = self.dimension_type_for(kind) {
+                            p["type"] = json!(t);
+                        }
                         if self.run("dimension", p).is_some() {
-                            self.tool = Tool::Dimension(Vec::new());
+                            self.tool = Tool::Dimension(mode, Vec::new());
                         }
                     }
                     None => {}
@@ -1653,15 +1683,36 @@ impl BimApp {
                     _ => {}
                 }
             }
-            &Tool::Radial(picked) => match (picked, hovered) {
-                (None, Some(id)) => self.tool = Tool::Radial(Some(Reference { id: m.guid(id), face: Face::Centre })),
-                (Some(r), _) => {
-                    if self.run("dimension", json!({"kind": "radial", "refs": [r], "at": point(round(v.mm(at))), "level": key})).is_some() {
-                        self.tool = Tool::Radial(None);
+            // What is round, then (an arc length's) two points on its arc if it measures part of it, then where it goes.
+            Tool::Round(kind, picked) => {
+                let (kind, mut picked) = (*kind, picked.clone());
+                let near = 2.0 * f64::from(PICK) / v.scale;
+                let on_arc = match (kind, picked.first()) {
+                    (DimKind::ArcLength, Some(arc)) => hovered.and_then(|id| bimcraft_core::dims::arc_point(m, arc, id, v.mm(at), near)),
+                    _ => None,
+                };
+                match (picked.len(), on_arc) {
+                    (0, _) => {
+                        if let Some(r) = hovered.and_then(|id| bimcraft_core::dims::round_at(m, id, v.mm(at), kind)) {
+                            self.tool = Tool::Round(kind, vec![r]);
+                        }
+                    }
+                    (1 | 2, Some(r)) if !picked.contains(&r) => {
+                        picked.push(r);
+                        self.tool = Tool::Round(kind, picked);
+                    }
+                    (2, _) => {}
+                    _ => {
+                        let mut p = json!({"kind": kind, "refs": picked, "at": point(round(v.mm(at))), "level": key});
+                        if let Some(t) = self.dimension_type_for(kind) {
+                            p["type"] = json!(t);
+                        }
+                        if self.run("dimension", p).is_some() {
+                            self.tool = Tool::Round(kind, Vec::new());
+                        }
                     }
                 }
-                (None, None) => {}
-            },
+            }
             Tool::Text => self.write_note(key, round(v.mm(at))),
             Tool::DetailGroup => self.place_group(key, self.snap(m, level, v, at, &[], false).at),
             &Tool::RepeatingDetail(start) => {
@@ -2549,6 +2600,81 @@ impl BimApp {
         done
     }
 
+    /// A selected aligned or linear dimension's constraints, as Revit shows them: a padlock under each segment, which a
+    /// click locks at its length or unlocks, and past its end, over a string of two segments or more, EQ, which a click
+    /// makes equal or not (crossed out while it isn't).
+    fn dimension_constraints(&mut self, ui: &mut Ui, m: &Model, v: &View, rect: Rect, id: Id, d: &Dimension) {
+        if !matches!(d.kind, DimKind::Aligned | DimKind::Linear) {
+            return;
+        }
+        let (n, cross) = m.crossings(d);
+        let (Some(&(first, _)), Some(&(last, _))) = (cross.first(), cross.last()) else { return };
+        if cross.len() < 2 {
+            return;
+        }
+        let screen = |q: P2| pos(rect.min, v.px(q));
+        let on = |s: f64| screen(d.at + n * s);
+        // On screen: along the line, and off it to the side its numbers aren't.
+        let along = (on(1.0) - on(0.0)).normalized();
+        let side = (screen(d.at - n.perp()) - screen(d.at)).normalized();
+        let p = ui.painter_at(rect);
+        for (i, pair) in cross.windows(2).enumerate() {
+            let [(s0, _), (s1, _)] = pair else { continue };
+            let at = on((s0 + s1) / 2.0) + side * 14.0;
+            let locked = d.locked.iter().any(|l| l.segment == i);
+            let r = ui.interact(Rect::from_center_size(at, vec2(16.0, 18.0)), ui.id().with(("dimension lock", id, i)), Sense::click());
+            let name = tf("Lock segment {}", &[&(i + 1).to_string()]);
+            r.widget_info(|| WidgetInfo::selected(WidgetType::Checkbox, true, locked, name.clone()));
+            let ink = if r.hovered() {
+                pal().hover
+            } else if locked {
+                pal().accent
+            } else {
+                pal().muted
+            };
+            // A padlock: its body, and its shackle, shut when locked, swung up and open when not.
+            let body = Rect::from_center_size(at + vec2(0.0, 3.0), vec2(10.0, 8.0));
+            p.rect_filled(body, 1.5, pal().surface);
+            p.rect_stroke(body, 1.5, Stroke::new(1.5, ink), StrokeKind::Middle);
+            let lift = if locked { 0.0 } else { -3.0 };
+            let top = body.top() + lift;
+            let shackle: Vec<Pos2> = (0..=8)
+                .map(|k| {
+                    let t = std::f32::consts::PI * k as f32 / 8.0;
+                    pos2(body.center().x - 3.0 * t.cos(), top - 4.0 * t.sin())
+                })
+                .collect();
+            p.add(Shape::line(shackle, Stroke::new(1.5, ink)));
+            if r.clicked() {
+                let mut segments: Vec<usize> = d.locked.iter().map(|l| l.segment).filter(|&s| s != i).collect();
+                if !locked {
+                    segments.push(i);
+                }
+                self.run("dimension_constraint", json!({"id": id, "locked": segments}));
+            }
+        }
+        if cross.len() > 2 {
+            let at = on(last.max(first)) + along * 22.0;
+            let r = ui.interact(Rect::from_center_size(at, vec2(26.0, 18.0)), ui.id().with(("dimension equal", id)), Sense::click());
+            r.widget_info(|| WidgetInfo::selected(WidgetType::Checkbox, true, d.equal, t("Equal")));
+            let ink = if r.hovered() {
+                pal().hover
+            } else if d.equal {
+                pal().accent
+            } else {
+                pal().muted
+            };
+            p.rect_filled(r.rect, 3.0, pal().surface);
+            p.text(at, Align2::CENTER_CENTER, "EQ", FontId::proportional(12.0), ink);
+            if !d.equal {
+                p.line_segment([r.rect.left_bottom() + vec2(4.0, -3.0), r.rect.right_top() + vec2(-4.0, 3.0)], Stroke::new(1.2, ink));
+            }
+            if r.clicked() {
+                self.run("dimension_constraint", json!({"id": id, "equal": !d.equal}));
+            }
+        }
+    }
+
     /// The selected wall's length as a temporary dimension beside it, as Revit shows one; a door's or a window's two,
     /// to the ends of its wall. A click on a number types a new length: a wall's end moves (the walls joined there
     /// follow), an opening slides along its wall.
@@ -2565,6 +2691,7 @@ impl BimApp {
             Some(e @ (Element::Column(_) | Element::StructuralColumn(_) | Element::Footing(_) | Element::Component(_))) => {
                 return self.standing_dimension(ui, m, v, rect, id, e);
             }
+            Some(Element::Dimension(d)) => return self.dimension_constraints(ui, m, v, rect, id, d),
             _ => {}
         }
         let Some(w) = m.wall(id) else { return };
@@ -2891,22 +3018,32 @@ impl BimApp {
                 }
                 return;
             }
-            // The references picked, the one under the cursor, else the dimension a click places.
-            Tool::Dimension(refs) => {
-                let candidate =
-                    hovered.and_then(|id| reference_for(m, DimKind::Aligned, refs.first(), id, v.mm(q), 2.0 * f64::from(PICK) / v.scale));
+            // The references and endpoints picked, the one under the cursor, else the dimension a click places.
+            Tool::Dimension(mode, refs) => {
+                let candidate = hovered.and_then(|id| dimension_pick(m, refs, id, v.mm(q), 2.0 * f64::from(PICK) / v.scale));
                 for r in refs.iter().chain(&candidate) {
-                    if let Ok((a, b)) = m.reference_line(r) {
-                        dashed(sc.screen(a), sc.screen(b));
+                    match (r.point, m.reference_geometry(r)) {
+                        (Some(_), Ok((a, _))) => {
+                            let c = sc.screen(a);
+                            p.rect_stroke(Rect::from_center_size(c, vec2(9.0, 9.0)), 0.0, stroke, StrokeKind::Middle);
+                        }
+                        (None, Ok((a, b))) => dashed(sc.screen(a), sc.screen(b)),
+                        _ => {}
                     }
                 }
                 if candidate.is_none() && refs.len() >= 2 {
+                    let at = round(v.mm(q));
+                    let (kind, orient) = mode.kind(m, refs, at);
+                    let type_name = self.dimension_type_for(kind).unwrap_or_default();
                     sketched(&Element::Dimension(Dimension {
                         level: m.guid(level),
                         view: in_view(),
-                        kind: DimKind::Aligned,
+                        kind,
+                        orient,
                         refs: refs.clone(),
-                        at: round(v.mm(q)),
+                        at,
+                        type_name,
+                        ..Dimension::default()
                     }));
                 }
                 return;
@@ -2938,19 +3075,24 @@ impl BimApp {
                         level: m.guid(level),
                         view: in_view(),
                         kind: DimKind::Angular,
+                        orient: None,
                         refs: refs.clone(),
                         at: round(v.mm(q)),
+                        type_name: bimcraft_core::dims::default_type(&m.dimension_types, DimKind::Angular).cloned().unwrap_or_default(),
+                        ..Dimension::default()
                     }));
                 }
                 return;
             }
-            &Tool::Radial(Some(r)) => {
+            Tool::Round(kind, picked) if picked.len() == 1 || picked.len() == 3 => {
                 sketched(&Element::Dimension(Dimension {
                     level: m.guid(level),
                     view: in_view(),
-                    kind: DimKind::Radial,
-                    refs: vec![r],
+                    kind: *kind,
+                    refs: picked.clone(),
                     at: round(v.mm(q)),
+                    type_name: self.dimension_type_for(*kind).unwrap_or_default(),
+                    ..Dimension::default()
                 }));
                 return;
             }

@@ -394,3 +394,40 @@ them without knowing: `Look::with` makes a linked id halftone, and picking never
 `in_box`, `shows` and `Mesh::pick` leave them out). The commands that make an image (`render`, `save` to svg, png or pdf) draw `seen`; the desktop's
 `view_model` does, cached by the project's `Arc`. The schedules, `Model::check`, IFC and every command that edits work on the project itself.
 To do: shared coordinates, a link's graphics overrides and visibility per view, hosting on a linked wall, unloading.
+
+## Dimensions
+
+A dimension (`Dimension`, the `dimension` command) measures the model as it is, so it follows what it measures. Its `refs` are lines
+(`Reference {id, face}`: a wall's centre line, faces and ends, a door's or window's centre and jambs, a grid, a straight detail line) or, with
+`point: start|end`, the point at that end of one (`Model::reference_point`: a wall's centre line ends where its location line does, a face where
+the outline turns off it, so at the mitred corner; a detail line of any shape at its ends; `reference_points` lists them, `endpoint_at` finds the
+nearest, `{endpoint: [x, y]}` in a command). `reference_geometry` gives either as a line, a point as a line of no length, and `crossings` lays
+them along the way the dimension measures (`measured_along`): a linear one's `orient` (horizontal or vertical), else square to its first line,
+else from its first point to the next elsewhere. `Model::check` refuses a line not parallel to the first, or not square to a linear one's line,
+and points all in one place. Mirror keeps the end of a line along the element and flips the one across it (`Reference::mirrored`); Flip swaps
+both. A linear one given no `orient` runs vertical where `at` is east or west of everything it measures, else horizontal; the desktop's Auto
+(`dims::Placing::kind`) also lays an aligned one where the cursor is among the points (`Orient::follow`), as Archicad does. Radial and diameter
+dimensions measure round columns, curved walls (centre line or a face) and circles and arcs (`reference_arc`); arc length, a curved wall's or an
+arc's length along it (`reference_sweep`), all of it or, with two point references after the arc, between them (`Model::arc_span`), its line an arc through `at` round the same centre. `dims::round_at` picks the face nearest a click.
+
+Each dimension has a dimension type (`dims.rs`, `Model::dimension_types`, a library entry `Kind::DimensionType`, the `dimension_type` command),
+Revit's type parameters with lengths in mm on paper: Dimension String Type (continuous, baseline, ordinate), tick mark (diagonal, arrow, open
+arrow, dot, none) and its size, line and tick pens, colour, dimension line extension, Witness Line Control (gap to element, or fixed to the
+dimension line with its length), witness line gap and extension, baseline spacing, centre marks, and its text: font (as text types take one,
+`DimensionType::lettering`), size, bold, italic, underline, width factor, offset, opaque or transparent background, Read Convention, units and
+rounding (`DimensionType::length`), and the radius and diameter symbols and the equality text. A project starts with `Diagonal - 2.5mm Arial`,
+which aligned, linear, angular and arc length dimensions start in, and `Arrow - 2.5mm Arial`, which radial and diameter ones do
+(`dims::default_type`); a file of format 9 gives its dimensions their kind's (`Model::typed_dimensions`). A dimension's own text, Revit's
+instance values, is a prefix, a suffix, text above and below, Replace With Text and Equality Display, and a segment may have its own over it
+(`texts`, `SegmentText`, the `dimension_text` command; `Dimension::text` reads one through the other, `dimension_segment_at` finds a segment by a
+point); `Model::dimension_labels` is what its
+numbers read (and `elements` shows as `labels`): a baseline string's each from its first reference, an ordinate's each witness line's, the first 0.
+An aligned or linear dimension may be kept equal (`equal`, Revit's EQ, which also turns its Equality Display on) and have segments
+locked at a length (`locked`, `Lock`; the `dimension_constraint` command). `constraints::keep` runs in `Session::execute` after every undoable
+command, before the check: each constrained dimension is solved on its own line (its `stations`, each with its reference), a locked segment tying
+two stations rigidly and equality tying all its segments to one length (a locked one's, else its ends', which stay where they are, so an inner
+reference dragged goes back); a run of tied stations stays where what the command moved puts it, else where its first is. What has to move is
+moved by `commands::move_by`, as `move` moves it, and the dimensions are solved again (`PASSES`) until all hold; where they can't (locked
+lengths that differ made equal, one element pulled two ways), the command is refused, saying which dimension, and nothing changes.
+`render/dimensions.rs` draws them all as the type says (`Ink`: its lines, ticks and witness lines, and its numbers laid out by `crate::text`
+over the paper where the background is opaque).

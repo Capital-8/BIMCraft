@@ -1584,6 +1584,19 @@ fn hostile_params_never_panic_or_break_the_model() {
         json!({"kind": "angular", "refs": [{"id": 100002}, {"id": 100003}, {"id": 100005}], "at": [0, 0]}),
         json!({"kind": "radial", "refs": [{"id": 100002}], "at": [0, 0]}),
         json!({"kind": 7, "refs": [{"id": 100002}, {"id": 100003, "face": "end"}], "at": [0, 0]}),
+        json!({"kind": "linear", "orient": "up", "refs": [{"id": 100002, "point": "start"}, {"id": 100003, "point": "end"}], "at": [0, 0]}),
+        json!({"kind": "linear", "refs": [{"id": 100002, "point": "middle"}, {"endpoint": [1e300, 0]}], "at": [f64::MAX, 0]}),
+        json!({"refs": [{"endpoint": "x"}, {"endpoint": [0, 0], "id": 1}], "at": [0, 0], "type": "", "prefix": 5}),
+        json!({"kind": "diameter", "refs": [[0, 0]], "at": [0, 0], "above": "a\nb", "equality": "x"}),
+        json!({"kind": "arc_length", "refs": [{"id": 100002, "face": "start"}], "at": [1e300, 1e300]}),
+        json!({"name": "D", "tick": "star", "tick_size": 1e300, "text_size": -1, "decimals": 300, "units": "furlong"}),
+        json!({"name": "D", "like": "nope", "witness": 5, "line_pen": 99, "color": "x", "font": "", "string": []}),
+        json!({"name": "Diagonal - 2.5mm Arial", "rename": "Arrow - 2.5mm Arial", "delete": "x", "unknown": 1}),
+        json!({"name": "Arrow - 2.5mm Arial", "delete": true}),
+        json!({"id": 100007, "segment": 1e300, "prefix": "x", "below": 5}),
+        json!({"id": 100007, "segment": -1, "replace": "a\nb", "nope": 1}),
+        json!({"id": 100007, "equal": "x", "locked": [1e300, -1, "a"]}),
+        json!({"id": 100007, "equal": true, "locked": [0, 0, 1]}),
         json!({"sheet": "A101", "view": "Room Schedule", "scale": -1}),
         json!({"sheet": "A101", "view": "{3D}", "azimuth": 1e300, "elevation": 90}),
         json!({"id": 100000, "name": "{3D}"}),
@@ -2887,7 +2900,7 @@ fn walls_stand_on_their_location_line_with_their_exterior_to_the_left() {
     let w = run(&mut s, "wall", json!({"points": [[0, 0], [5000, 0]], "type": "Cavity 300", "location": "exterior-finish"}))["ids"][0]
         .as_u64()
         .unwrap();
-    let y = |s: &Session, face: Face| s.model.reference_line(&Reference { id: s.model.guid(w), face }).unwrap().0.1;
+    let y = |s: &Session, face: Face| s.model.reference_line(&Reference::line(s.model.guid(w), face)).unwrap().0.1;
     assert_eq!([y(&s, Face::Left), y(&s, Face::Centre), y(&s, Face::Right)], [0.0, -150.0, -300.0]);
     // Put on its core's interior face, it stays where it is.
     run(&mut s, "modify", json!({"id": w, "location": "interior-core"}));
@@ -5099,10 +5112,10 @@ fn a_file_from_before_guids_opens_with_guids_and_six_digit_ids() {
 }
 
 #[test]
-fn a_project_is_saved_as_format_9_and_one_of_format_4_to_8_opens_as_it_is_and_one_of_format_10_is_refused() {
+fn a_project_is_saved_as_format_10_and_one_of_format_4_to_9_opens_as_it_is_and_one_of_format_11_is_refused() {
     use crate::model::Model;
     // 5 added the scans a project holds and the point clouds that place them; 6 added detailing (lines, regions, groups,
-    // repeating details, line and fill styles); 7 its CAD drawings and the imports that place them; 8 text types. Nothing in a file of 4
+    // repeating details, line and fill styles); 7 its CAD drawings and the imports that place them; 8 text types; 9 graphic line patterns; 10 dimensions to points and linear ones. Nothing in a file of 4
     // to 7 that holds no notes changes.
     let mut s = Session::new();
     let empty = serde_json::to_value(&*s.model).unwrap();
@@ -5110,32 +5123,32 @@ fn a_project_is_saved_as_format_9_and_one_of_format_4_to_8_opens_as_it_is_and_on
     run(&mut s, "detail_line", json!({"start": [0, 0], "end": [1000, 0]}));
     let full = serde_json::to_value(&*s.model).unwrap();
     for v in [&empty, &full] {
-        assert_eq!(v["format"], 9, "a project is saved as format 9");
-        for old in [4, 5, 6, 7, 8] {
+        assert_eq!(v["format"], 10, "a project is saved as format 10");
+        for old in [4, 5, 6, 7, 8, 9] {
             let mut was = v.clone();
             was["format"] = json!(old);
             let (m, left_out) = Model::read(&was.to_string()).unwrap();
-            assert_eq!((m.format, left_out.len(), m.elements.len()), (9, 0, v["elements"].as_object().unwrap().len()));
+            assert_eq!((m.format, left_out.len(), m.elements.len()), (10, 0, v["elements"].as_object().unwrap().len()));
         }
     }
     assert!(full["elements"].as_object().unwrap().len() > 5);
     // A newer file says what it is and what to do, even when nothing else in it is wrong.
-    let mut nine = empty.clone();
-    nine["format"] = json!(10);
-    let e = Model::read(&nine.to_string()).unwrap_err();
+    let mut newer = empty.clone();
+    newer["format"] = json!(11);
+    let e = Model::read(&newer.to_string()).unwrap_err();
     assert!(
-        e.contains("newer BIMCraft") && e.contains("file format 10") && e.contains("reads up to 9") && e.contains("update BIMCraft"),
+        e.contains("newer BIMCraft") && e.contains("file format 11") && e.contains("reads up to 10") && e.contains("update BIMCraft"),
         "{e}"
     );
     // A file of this format with a field it doesn't know is read without it, and says which.
     let mut odd = full.clone();
     odd["something_new"] = json!(true);
     let (m, left_out) = Model::read(&odd.to_string()).unwrap();
-    assert_eq!((m.format, left_out), (9, vec!["/something_new".to_string()]));
+    assert_eq!((m.format, left_out), (10, vec!["/something_new".to_string()]));
 }
 
 #[test]
-fn a_format_5_file_that_holds_elements_and_scans_migrates_to_9_and_keeps_both() {
+fn a_format_5_file_that_holds_elements_and_scans_migrates_to_10_and_keeps_both() {
     use crate::model::Model;
     let mut s = Session::new();
     house(&mut s);
@@ -5147,13 +5160,13 @@ fn a_format_5_file_that_holds_elements_and_scans_migrates_to_9_and_keeps_both() 
     let mut file: serde_json::Value = serde_json::from_str(&s.model.to_json().unwrap()).unwrap();
     file["format"] = json!(5);
     let (m, left_out) = Model::read(&file.to_string()).unwrap();
-    assert_eq!((m.format, m.clouds.len(), left_out.len(), m.elements.len()), (9, 1, 0, s.model.elements.len()));
-    // Written again, it says 9.
-    assert_eq!(serde_json::from_str::<serde_json::Value>(&m.to_json().unwrap()).unwrap()["format"], 9);
-    // A file of 6 (detailing, no CAD drawings) opens as 9 likewise.
+    assert_eq!((m.format, m.clouds.len(), left_out.len(), m.elements.len()), (10, 1, 0, s.model.elements.len()));
+    // Written again, it says 10.
+    assert_eq!(serde_json::from_str::<serde_json::Value>(&m.to_json().unwrap()).unwrap()["format"], 10);
+    // A file of 6 (detailing, no CAD drawings) opens as 10 likewise.
     file["format"] = json!(6);
     let (m, left_out) = Model::read(&file.to_string()).unwrap();
-    assert_eq!((m.format, left_out.len(), m.elements.len()), (9, 0, s.model.elements.len()));
+    assert_eq!((m.format, left_out.len(), m.elements.len()), (10, 0, s.model.elements.len()));
 }
 
 #[test]

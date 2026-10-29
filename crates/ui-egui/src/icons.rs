@@ -96,6 +96,9 @@ icon_names! {
     Spot,
     Angular,
     Radial,
+    Linear,
+    Diameter,
+    ArcLength,
     Crop,
     Units,
     Line,
@@ -862,6 +865,33 @@ pub fn outlines(icon: Icon, compact: bool) -> Vec<Outline> {
             g.line(&[(12.0, 12.0), tip]);
             g.line(&[(tip.0 - 4.0, tip.1), tip, (tip.0, tip.1 + 4.0)]);
             g.circle((12.0, 12.0), 9.0);
+        }
+        Icon::Linear => {
+            // Two points at different heights, measured across: witness lines up from them to a level dimension line.
+            g.circle((5.0, 19.0), 1.5);
+            g.circle((19.0, 12.0), 1.5);
+            g.line(&[(5.0, 17.0), (5.0, 4.0)]);
+            g.line(&[(19.0, 10.0), (19.0, 4.0)]);
+            g.line(&[(3.0, 7.0), (21.0, 7.0)]);
+            g.line(&[(3.0, 9.0), (7.0, 5.0)]);
+            g.line(&[(17.0, 9.0), (21.0, 5.0)]);
+        }
+        Icon::Diameter => {
+            // A line across a circle through its centre, an arrowhead at either edge.
+            let d = 9.0 * std::f32::consts::FRAC_1_SQRT_2;
+            let (a, b) = ((12.0 - d, 12.0 + d), (12.0 + d, 12.0 - d));
+            g.circle((12.0, 12.0), 9.0);
+            g.line(&[a, b]);
+            g.line(&[(b.0 - 4.0, b.1), b, (b.0, b.1 + 4.0)]);
+            g.line(&[(a.0 + 4.0, a.1), a, (a.0, a.1 - 4.0)]);
+        }
+        Icon::ArcLength => {
+            // An arc, and a dimension's arc round the same centre past it, with radial witness lines and ticks at its ends.
+            g.arc((12.0, 20.0), 6.0, -150.0, -30.0);
+            g.arc((12.0, 20.0), 10.0, -150.0, -30.0);
+            let at = |r: f32, deg: f32| (12.0 + r * deg.to_radians().cos(), 20.0 + r * deg.to_radians().sin());
+            g.line(&[at(7.5, -150.0), at(11.5, -150.0)]);
+            g.line(&[at(7.5, -30.0), at(11.5, -30.0)]);
         }
         Icon::Crop => {
             g.line(&[(7.0, 3.0), (7.0, 17.0), (21.0, 17.0)]);

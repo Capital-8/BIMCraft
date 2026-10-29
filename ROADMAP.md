@@ -83,7 +83,7 @@ The goal is the editing tools a working architect reaches for every hour.
 | Arrays, linear and radial, optionally kept as a group | M |
 | Groups (model groups) with group types, edit group, and exclude a member | L |
 | Pin and unpin; a selection filter; match type properties | S |
-| Locked and equal dimension constraints (a small constraint solver over references) | L |
+| Locked and equal dimension constraints: done (`constraints.rs`: padlocks and EQ on aligned and linear dimensions, kept after every command); left: dimensions bound to parameters (labels) | M |
 | Copy to the clipboard, and paste aligned to the same place, to selected levels or to the current view | M |
 | Join and cut geometry (wall to floor, column to wall cleanups in plan and section) | M |
 | Wall openings (rectangular cuts) and wall profile editing (an elevation sketch) | M |
@@ -112,7 +112,7 @@ The goal is a printable, coordinated drawing set.
 | Detail annotation: done (insulation along any curve; Linework in plans; Detail Groups, placed, turned, mirrored and ungrouped; repeating details along a line); left: Edit Group in place, model groups, group types renamed, deleted or edited on the desktop (the `group_type` command does), groups placed outside plans | M |
 | Better than Revit: line patterns and fill patterns made from lines drawn on a plan (select them, then Create Line Pattern or Create Fill Pattern), as Archicad and pyRevit's pattern maker do | M |
 | Drafting views, detail components (2D families), legends | L |
-| Annotation types: dimension and tag styles (text types are done); room tags with fields and tag families that look like Revit's (`tag` names any element with a field of its schedule, drawn as plain text, a door's in a box and a window's in a hexagon) | M |
+| Annotation types: tag styles (text types and dimension types are done); room tags with fields and tag families that look like Revit's (`tag` names any element with a field of its schedule, drawn as plain text, a door's in a box and a window's in a hexagon) | M |
 | Area plans, area schemes (gross, rentable) and colour-fill legends by parameter | L |
 | Plan regions (a local view range) and depth cueing in elevations | M |
 | Revisions and a revision schedule on title blocks (revision clouds: done, as a detail line drawn as scallops, with its revision as a label that `elements` lists; nothing else reads it) | M |

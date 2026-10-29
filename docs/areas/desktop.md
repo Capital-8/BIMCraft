@@ -289,3 +289,13 @@ The Line Styles Patterns tab opens a separate Line Pattern Creator for New Patte
 pattern geometry (including font outlines) and can follow a curve. The creator saves into the parent draft, with its own
 Cancel, so OK/Apply remains one undoable Line Styles transaction. See [views and graphics](views-and-graphics.md) for the
 seven segment kinds, paper units, text fitting and centerline semantics.
+
+Annotate > Dimension has Aligned (DI) and Linear, and Angular, Radial, Diameter, Arc Length and Spot Elevation small beside them
+(`BimApp::dimension_panel`). Aligned and Linear are one tool, `Tool::Dimension(mode, refs)`: a click near an endpoint picks it before the line
+it ends (`canvas::dimension_pick`), marked with a square; after two, a click away places the dimension the Options Bar's Place says (Auto,
+Aligned, Horizontal, Vertical; Space steps them), drawn as it would be while the cursor moves. `Tool::Round(kind, picked)` is Radial, Diameter
+and Arc Length; after its arc, Arc Length takes two ends on it to measure between (`dims::arc_point`), or a click places the whole arc's. A new dimension takes the type the Type Selector names, else its kind's (`dimtypes::dimension_type_for`); Edit Type on one opens
+Dimension Type Properties (`dimtypes.rs`), and Properties edits its prefix, suffix, text above and below, Replace With Text and Equality Display.
+A double click on one of its numbers opens Dimension Text for that segment (`DimensionTextDialog`). Selected, an aligned or linear one shows
+a padlock under each segment and, over a string of two or more, EQ past its end (`dimension_constraints`): a click locks or unlocks, or makes
+it equal or not.

@@ -17,8 +17,10 @@ pub mod cloud;
 mod cloud_tests;
 mod commands;
 mod component_geometry;
+mod constraints;
 mod csg;
 pub mod curves;
+pub mod dims;
 pub mod draw;
 pub mod dxf;
 #[cfg(test)]
@@ -80,6 +82,8 @@ pub use commands::{command_of, element_json, floor_outline, opening_of, roof_foo
 
 #[cfg(test)]
 mod detail_tests;
+#[cfg(test)]
+mod dimension_tests;
 #[cfg(test)]
 mod line_tests;
 #[cfg(test)]

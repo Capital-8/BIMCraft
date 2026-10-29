@@ -22,12 +22,12 @@ use crate::library::Kind as LibKind;
 use crate::lines::{DetailLine, LineStyle};
 use crate::massing;
 use crate::model::{
-    CEILING_HEIGHT, CadImport, Ceiling, CeilingType, Column, ColumnType, Component, DEFAULT_HEIGHT, DimKind, Dimension, Element, Extrusion,
-    Face, Facing, Floor, FloorType, Grid, Guid, Id, Key, Landing, Layer, Level, Line, Location, MAX_COORD, MAX_POINTS, MAX_SLOPE, MAX_TEXT,
-    Mass, Model, Note, Opening, OpeningType, PARAMETER_CATEGORIES, ParameterKind, Pattern, PlanView, PointCloud, ProjectParameter,
-    RAMP_SLOPE, RAMP_WIDTH, RISER, Railing, RailingType, Ramp, Rebar, Reference, Roof, RoofType, Room, RoomArea, RoomSeparator,
-    STAIR_WIDTH, Schedule, Section, SectionBox, Shaft, Sheet, Side, Spot, Stair, TOL, TREAD, Tag, View3D, Viewport, Wall, WallType,
-    heading, paper,
+    CEILING_HEIGHT, CadImport, Ceiling, CeilingType, Column, ColumnType, Component, DEFAULT_HEIGHT, DimKind, Dimension, Element, End,
+    Extrusion, Face, Facing, Floor, FloorType, Grid, Guid, Id, Key, Landing, Layer, Level, Line, Location, MAX_COORD, MAX_POINTS,
+    MAX_SLOPE, MAX_TEXT, Mass, Model, Note, Opening, OpeningType, Orient, PARAMETER_CATEGORIES, ParameterKind, Pattern, PlanView,
+    PointCloud, ProjectParameter, RAMP_SLOPE, RAMP_WIDTH, RISER, Railing, RailingType, Ramp, Rebar, Reference, Roof, RoofType, Room,
+    RoomArea, RoomSeparator, STAIR_WIDTH, Schedule, Section, SectionBox, Shaft, Sheet, Side, Spot, Stair, TOL, TREAD, Tag, View3D,
+    Viewport, Wall, WallType, heading, paper,
 };
 use crate::paint;
 use crate::phasing;
@@ -565,12 +565,20 @@ pub static ALL: &[Command] = &[
         "dimension",
         ui_msg!("Aligned Dimension"),
         &["DI"],
-        "{refs: [ref, …], at: [x, y], level?, kind?: aligned|angular|radial} aligned (the default): the distances between \
-         parallel references, along a line through `at`; angular: the angle between two references that meet, on the side \
-         of `at`; radial: a round column's radius, toward `at`. A ref is {id, face?}: a wall's centre (the default), left or \
-         right face (of its start-to-end direction), start or end; a door's or window's centre, or its jamb toward its wall's \
-         start or end; a grid's line; a straight detail line, or its start or end (radial: a circle or an arc of one). Or a \
-         point [x, y] on one of those (for radial, on a round column's edge). It follows what it measures",
+        "{refs: [ref, …], at: [x, y], level?, kind?: aligned|linear|angular|radial|diameter|arc_length, orient?: \
+         horizontal|vertical} aligned (the default): the distances between parallel references, along a line through `at` \
+         (between points, along the first two; points and lines, square to the lines); linear: the same with its line \
+         horizontal or vertical as `orient` says, or without one as `at` lies: east or west of the points, vertical, else \
+         horizontal (its lines must run square to it); angular: the angle between two references that meet, on the side \
+         of `at`; radial: a round column's, curved wall's, circle's or arc's radius, toward `at`; diameter: the same \
+         across, through its centre; arc_length: how long a curved wall's centre line or face, or an arc, is along it \
+         (all of it, or with two point refs after it, between them), its line an arc through `at`. A ref is {id, face?}: a wall's centre (the default), left or right face (of its \
+         start-to-end direction), start or end; a door's or window's centre, or its jamb toward its wall's start or end; \
+         a grid's line; a straight detail line, or its start or end (radial: a circle or an arc of one). With `point: \
+         start|end`, {id, face?, point} is the point at that end of the line: a wall's centre line's end, a face's \
+         corner, a grid's, a detail line's (of any shape) or a jamb's end. Or a point [x, y] on one of those lines (for \
+         radial and diameter, on a round edge; for arc_length, on the arc), or {endpoint: [x, y]}, the end of one nearest \
+         it, within 100 mm. It follows what it measures",
         dimension,
     ),
     edit(
@@ -603,6 +611,46 @@ pub static ALL: &[Command] = &[
          renames it, its notes following; `delete` takes it away while no note is of it. Without `name`, it lists every type, \
          the fonts this system has, and the font that letters each type here (`drawn_with`)",
         text_type,
+    ),
+    edit(
+        "dimension_constraint",
+        "Dimension Constraints",
+        &[],
+        "{id, equal?: bool, locked?: [segment, …]} an aligned or linear dimension's constraints, as Revit's EQ and padlocks: \
+         `equal` keeps its segments equal (what it measures to between its first and last moves to keep them so, its ends \
+         staying); `locked` lists the segments (counted from 0, west to east or south to north) kept at the lengths they \
+         have now. After any command, what a constrained dimension measures to moves with what the command moved, or the \
+         command is refused, saying which dimension can't be kept",
+        dimension_constraint,
+    ),
+    edit(
+        "dimension_text",
+        "Dimension Text",
+        &[],
+        "{id, segment?, prefix?, suffix?, above?, below?, replace?} a dimension's text, as Revit's Dimension Text: what goes \
+         before and after its numbers, over and under them, or in place of them. With `segment` (its numbers counted from 0, \
+         west to east or south to north, as `labels` lists them), that one's own, over the dimension's where it says \
+         something; an empty text clears it, and a segment with none left goes back to the dimension's",
+        dimension_text,
+    ),
+    edit(
+        "dimension_type",
+        "Dimension Types",
+        &[],
+        "{name?, like?, rename?, delete?: true, …values} a dimension type of the project's, as Revit's type parameters, \
+         lengths mm on paper. Graphics: `string` continuous|baseline|ordinate (Dimension String Type; baseline lines \
+         `baseline_spacing` apart, 7), `tick` diagonal|arrow|open_arrow|dot|none, `tick_size` (2), `line_pen` and `tick_pen` \
+         (0 to 16; 4 and 7), `color` (\"#rrggbb\" or [r, g, b]), `line_extension` past the outer witness lines (0.8), `witness` \
+         gap_to_element|fixed (Witness Line Control), `witness_length` when fixed (5), `witness_gap` off what it measures \
+         (0.6), `witness_extension` past the dimension line (0.8), `centre_mark` on radial and diameter ones. Text: `font` (as \
+         text types take; Arial), `text_size` (2.5), `bold`, `italic`, `underline`, `width_factor` (1), `text_offset` off \
+         the line (1), `background` opaque|transparent, `read` up_then_left|up_then_right (Read Convention), `units` (mm, cm, \
+         m, in, ft, ft-in; null for the project's) and `decimals` (0 to 6; null as the units show), `radius_symbol` (R), \
+         `diameter_symbol` (Ø), `equality_text` (EQ). A new one starts as `like` says, else as the default. A project starts \
+         with `Diagonal - 2.5mm Arial` (aligned, linear, angular and arc length dimensions start in it) and `Arrow - 2.5mm \
+         Arial` (radial and diameter ones). `rename` renames it, its dimensions following; `delete` takes it away while no \
+         dimension is of it. Without `name`, it lists every type",
+        dimension_type,
     ),
     edit(
         "spot",
@@ -1860,6 +1908,7 @@ pub fn element_json(m: &Model, id: Id) -> Value {
         }
         Element::Dimension(d) => {
             extra.insert("values".into(), json!(m.dimension_values(d).into_iter().map(hundredth).collect::<Vec<_>>()));
+            extra.insert("labels".into(), json!(m.dimension_labels(d)));
         }
         // Every parameter's value, worked out, and how high it reaches over its base.
         Element::Component(cp) => {
@@ -4358,10 +4407,13 @@ fn flip(s: &mut Session, p: &Value) -> R {
     for e in m.elements.values_mut() {
         if let Element::Dimension(d) = e {
             for r in &mut d.refs {
+                // A flipped wall runs the other way, and across it in to out is out to in: an end swaps too.
                 if lengths.contains_key(&r.id) {
                     r.face = r.face.flipped();
+                    r.point = r.point.map(End::other);
                 } else if hosts.get(&r.id).is_some_and(|h| lengths.contains_key(h)) {
                     r.face = r.face.mirrored();
+                    r.point = r.point.map(End::other);
                 }
             }
         }
@@ -4856,14 +4908,75 @@ fn reference_near(m: &Model, level: impl Key, p: P2, keep: impl Fn(Line) -> bool
         .map(|(r, _)| r)
 }
 
-/// The round column on `level` whose edge passes nearest `p`, within 100 mm.
-fn arc_near(m: &Model, level: impl Key, p: P2) -> Option<Reference> {
-    let level = m.guid(level);
+/// Of the ends of the lines a plan of `level` (`view`, when not the level's own) shows (walls' centre lines and faces,
+/// doors' and windows' jambs, grids, its detail lines), the nearest `p`, within 100 mm.
+fn endpoint_near(m: &Model, level: Guid, view: Option<Guid>, p: P2) -> Option<Reference> {
+    let cut = |w: Option<&Wall>| w.is_some_and(|w| m.cut_by(w, level));
+    let plan = view.unwrap_or(level);
+    m.elements
+        .iter()
+        .filter(|(_, e)| match e {
+            Element::Wall(w) => cut(Some(w)),
+            Element::Door(o) | Element::Window(o) => cut(m.wall(o.host)),
+            Element::Grid(_) => true,
+            Element::DetailLine(l) => m.same(l.view, plan),
+            _ => false,
+        })
+        .filter_map(|(&id, _)| m.endpoint_at(id, p))
+        .filter(|(_, d)| *d <= 100.0)
+        .min_by(|a, b| a.1.total_cmp(&b.1))
+        .map(|(r, _)| r)
+}
+
+/// Of the arcs a plan of `level` (`view`, when not the level's own) shows (its curved walls' centre lines and faces, its
+/// detail lines that are arcs), the one passing nearest `p`, within 100 mm.
+fn sweep_near(m: &Model, level: Guid, view: Option<Guid>, p: P2) -> Option<Reference> {
+    let plan = view.unwrap_or(level);
     m.elements
         .with_guids()
-        .filter(|(_, _, e)| e.column().is_some_and(|col| col.level == level))
-        .filter_map(|(_, id, _)| {
-            let r = Reference { id, face: Face::Centre };
+        .flat_map(|(_, id, e)| {
+            match e {
+                Element::Wall(w) if w.arc != 0.0 && m.cut_by(w, level) => vec![Face::Centre, Face::Left, Face::Right],
+                Element::DetailLine(l) if m.same(l.view, plan) => vec![Face::Centre],
+                _ => Vec::new(),
+            }
+            .into_iter()
+            .map(move |face| Reference::line(id, face))
+        })
+        .filter_map(|r| {
+            let (c, radius, a0, sweep) = m.reference_sweep(&r).ok()?;
+            // How far round from its start `p` lies, the way it sweeps: within it, the distance off it; else from its ends.
+            let t = (sweep.signum() * ((p.1 - c.1).atan2(p.0 - c.0) - a0)).rem_euclid(std::f64::consts::TAU);
+            let gap = if t <= sweep.abs() {
+                (p.dist(c) - radius).abs()
+            } else {
+                let end = |a: f64| c + P2(a.cos(), a.sin()) * radius;
+                p.dist(end(a0)).min(p.dist(end(a0 + sweep)))
+            };
+            Some((r, gap))
+        })
+        .filter(|(_, d)| *d <= 100.0)
+        .min_by(|a, b| a.1.total_cmp(&b.1))
+        .map(|(r, _)| r)
+}
+
+/// Of what a plan of `level` (`view`, when not the level's own) shows round (its round columns, its curved walls' centre
+/// lines and faces, its detail lines that are circles or arcs), the one whose edge passes nearest `p`, within 100 mm.
+fn arc_near(m: &Model, level: Guid, view: Option<Guid>, p: P2) -> Option<Reference> {
+    let plan = view.unwrap_or(level);
+    m.elements
+        .with_guids()
+        .flat_map(|(_, id, e)| {
+            match e {
+                e if e.column().is_some_and(|col| col.level == level) => vec![Face::Centre],
+                Element::Wall(w) if w.arc != 0.0 && m.cut_by(w, level) => vec![Face::Centre, Face::Left, Face::Right],
+                Element::DetailLine(l) if m.same(l.view, plan) => vec![Face::Centre],
+                _ => Vec::new(),
+            }
+            .into_iter()
+            .map(move |face| Reference::line(id, face))
+        })
+        .filter_map(|r| {
             let (c, radius) = m.reference_arc(&r).ok()?;
             Some((r, (p.dist(c) - radius).abs()))
         })
@@ -4879,7 +4992,12 @@ fn dimension(s: &mut Session, p: &Value) -> R {
     let at = point_req(c, p, "at")?;
     let kind = match string(c, p, "kind")? {
         None => DimKind::Aligned,
-        Some(k) => serde_json::from_value(json!(k)).map_err(|_| bad(c, format!("`kind` is aligned, angular or radial, not `{k}`")))?,
+        Some(k) => serde_json::from_value(json!(k))
+            .map_err(|_| bad(c, format!("`kind` is aligned, linear, angular, radial, diameter or arc_length, not `{k}`")))?,
+    };
+    let mut orient: Option<Orient> = match string(c, p, "orient")? {
+        None => None,
+        Some(o) => Some(serde_json::from_value(json!(o)).map_err(|_| bad(c, format!("`orient` is horizontal or vertical, not `{o}`")))?),
     };
     let given = p.get("refs").and_then(Value::as_array).ok_or_else(|| bad(c, "`refs` [ref, …] is required"))?;
     if given.len() > MAX_POINTS {
@@ -4888,8 +5006,20 @@ fn dimension(s: &mut Session, p: &Value) -> R {
     let mut refs: Vec<Reference> = Vec::new();
     for v in given {
         let near = |q: P2, what: &str| bad(c, format!("no {what} at [{}, {}] on {}", q.0, q.1, level_name(m, level)));
+        let endpoint = v.get("endpoint").filter(|_| v.as_object().is_some_and(|o| o.len() == 1));
+        if let Some(e) = endpoint {
+            let q = point(e).ok_or_else(|| bad(c, format!("`endpoint` is a point [x, y], not {e}")))?;
+            refs.push(
+                endpoint_near(m, level, view, q)
+                    .ok_or_else(|| near(q, "end of a wall, a wall face, a door, a window, a grid or a detail line"))?,
+            );
+            continue;
+        }
         let r = match point(v) {
-            Some(q) if kind == DimKind::Radial => arc_near(m, level, q).ok_or_else(|| near(q, "round column's edge"))?,
+            Some(q) if matches!(kind, DimKind::Radial | DimKind::Diameter) => {
+                arc_near(m, level, view, q).ok_or_else(|| near(q, "round column's, curved wall's, circle's or arc's edge"))?
+            }
+            Some(q) if kind == DimKind::ArcLength => sweep_near(m, level, view, q).ok_or_else(|| near(q, "curved wall or arc"))?,
             Some(q) => {
                 // After the first: one parallel to it, or for an angle, one across it.
                 let first = refs.first().and_then(|r| m.reference_line(r).ok());
@@ -4902,7 +5032,35 @@ fn dimension(s: &mut Session, p: &Value) -> R {
         };
         refs.push(r);
     }
-    let d = Dimension { level, view, kind, refs, at };
+    if kind == DimKind::Linear && orient.is_none() {
+        // East or west of everything it measures, vertical; else horizontal.
+        let xs: Vec<f64> = refs.iter().filter_map(|r| m.reference_geometry(r).ok()).flat_map(|(a, b)| [a.0, b.0]).collect();
+        let beside = xs.iter().all(|&x| x < at.0) || xs.iter().all(|&x| x > at.0);
+        orient = Some(if beside && !xs.is_empty() { Orient::Vertical } else { Orient::Horizontal });
+    }
+    let type_name = match name_param(c, p, "type")? {
+        Some(t) => t,
+        None => crate::dims::default_type(&m.dimension_types, kind).cloned().unwrap_or_default(),
+    };
+    let text = |key: &str| string(c, p, key).map(Option::unwrap_or_default);
+    let d = Dimension {
+        level,
+        view,
+        kind,
+        orient,
+        refs,
+        at,
+        type_name,
+        prefix: text("prefix")?,
+        suffix: text("suffix")?,
+        above: text("above")?,
+        below: text("below")?,
+        replace: text("replace")?,
+        equality: flag(c, p, "equality")?,
+        texts: Vec::new(),
+        equal: false,
+        locked: Vec::new(),
+    };
     let values: Vec<f64> = m.dimension_values(&d).into_iter().map(hundredth).collect();
     let id = s.model_mut().insert(Element::Dimension(d));
     Ok(json!({"id": id, "values": values}))
@@ -5077,6 +5235,160 @@ fn text_type(s: &mut Session, p: &Value) -> R {
     t.check(&name).map_err(|e| bad(c, e))?;
     if m.text_types.get(&name) != Some(&t) {
         m.text_types.insert(name.clone(), t.clone());
+    }
+    Ok(json!({"name": name, "type": t}))
+}
+
+fn dimension_constraint(s: &mut Session, p: &Value) -> R {
+    use crate::model::Lock;
+    let c = "dimension_constraint";
+    only(c, p, &["id", "equal", "locked"])?;
+    let id = element_id(c, &s.model, p.get("id").unwrap_or(&Value::Null))?;
+    let Some(Element::Dimension(d)) = s.model.elements.get(id) else {
+        return Err(bad(c, format!("{} {id} isn't a dimension", s.model.elements.get(id).map_or("nothing", |e| e.category()))));
+    };
+    let mut d = d.clone();
+    let values = s.model.dimension_values(&d);
+    if !absent(p.get("equal")) {
+        d.equal = flag(c, p, "equal")?;
+        // As Revit's EQ shows its segments as EQ.
+        d.equality = d.equal;
+    }
+    if let Some(v) = p.get("locked").filter(|v| !v.is_null()) {
+        let list = v.as_array().ok_or_else(|| bad(c, format!("`locked` is a list of segments, not {v}")))?;
+        let mut locked = Vec::new();
+        for x in list {
+            let i = x
+                .as_u64()
+                .map(|i| i as usize)
+                .filter(|&i| i < values.len())
+                .ok_or_else(|| bad(c, format!("dimension {id} has segments 0 to {}, not {x}", values.len().saturating_sub(1))))?;
+            // A segment locked already keeps its length; a new one, the length it has now.
+            let length = d.locked.iter().find(|l| l.segment == i).map_or(values.get(i).copied().unwrap_or_default(), |l| l.length);
+            if !locked.iter().any(|l: &Lock| l.segment == i) {
+                locked.push(Lock { segment: i, length });
+            }
+        }
+        locked.sort_by_key(|l| l.segment);
+        d.locked = locked;
+    }
+    s.model_mut().elements.insert(id, Element::Dimension(d.clone()));
+    Ok(json!({"id": id, "equal": d.equal, "locked": d.locked.iter().map(|l| l.segment).collect::<Vec<_>>()}))
+}
+
+fn dimension_text(s: &mut Session, p: &Value) -> R {
+    use crate::model::SegmentText;
+    let c = "dimension_text";
+    only(c, p, &["id", "segment", "prefix", "suffix", "above", "below", "replace"])?;
+    let id = element_id(c, &s.model, p.get("id").unwrap_or(&Value::Null))?;
+    let Some(Element::Dimension(d)) = s.model.elements.get(id) else {
+        return Err(bad(c, format!("{} {id} isn't a dimension", s.model.elements.get(id).map_or("nothing", |e| e.category()))));
+    };
+    let mut d = d.clone();
+    let count = s.model.dimension_labels(&d).len();
+    let given = |key: &str| string(c, p, key);
+    match num(c, p, "segment")? {
+        None => {
+            for (key, slot) in [
+                ("prefix", &mut d.prefix),
+                ("suffix", &mut d.suffix),
+                ("above", &mut d.above),
+                ("below", &mut d.below),
+                ("replace", &mut d.replace),
+            ] {
+                if let Some(t) = given(key)? {
+                    *slot = t;
+                }
+            }
+        }
+        Some(i) if i.fract() == 0.0 && i >= 0.0 && (i as usize) < count => {
+            let i = i as usize;
+            let mut st = d.texts.iter().find(|t| t.segment == i).cloned().unwrap_or(SegmentText { segment: i, ..SegmentText::default() });
+            for (key, slot) in [
+                ("prefix", &mut st.prefix),
+                ("suffix", &mut st.suffix),
+                ("above", &mut st.above),
+                ("below", &mut st.below),
+                ("replace", &mut st.replace),
+            ] {
+                if let Some(t) = given(key)? {
+                    *slot = t;
+                }
+            }
+            d.texts.retain(|t| t.segment != i);
+            if !st.is_empty() {
+                d.texts.push(st);
+                d.texts.sort_by_key(|t| t.segment);
+            }
+        }
+        Some(i) => return Err(bad(c, format!("dimension {id} has segments 0 to {}, not {i}", count.saturating_sub(1)))),
+    }
+    let labels = s.model.dimension_labels(&d);
+    s.model_mut().elements.insert(id, Element::Dimension(d));
+    Ok(json!({"id": id, "labels": labels}))
+}
+
+fn dimension_type(s: &mut Session, p: &Value) -> R {
+    use crate::dims::DimensionType;
+    let c = "dimension_type";
+    let Some(name) = name_param(c, p, "name")? else {
+        return Ok(json!({"types": s.model.dimension_types, "fonts": crate::text::families()}));
+    };
+    let m = s.model_mut();
+    if flag(c, p, "delete")? {
+        if let Some((id, _)) = m.elements.iter().find(|(_, e)| matches!(e, Element::Dimension(d) if d.type_name == name)) {
+            return Err(bad(c, format!("dimension {id} is of `{name}`; give it another type first")));
+        }
+        if m.dimension_types.remove(&name).is_none() {
+            return Err(bad(c, format!("there's no dimension type `{name}`")));
+        }
+        return Ok(json!({"deleted": name}));
+    }
+    let t = match (m.dimension_types.get(&name), name_param(c, p, "like")?) {
+        (Some(t), _) => t.clone(),
+        (None, Some(like)) => {
+            m.dimension_types.get(&like).cloned().ok_or_else(|| bad(c, format!("there's no dimension type `{like}` to start from")))?
+        }
+        (None, None) => DimensionType::default(),
+    };
+    // What it is, with the values given over it, read as a file reads one: a key it hasn't is an error.
+    let mut v = serde_json::to_value(&t).map_err(|e| bad(c, e.to_string()))?;
+    let mut font = None;
+    if let Some(o) = v.as_object_mut() {
+        for (key, value) in p.as_object().into_iter().flatten() {
+            match key.as_str() {
+                "name" | "like" | "rename" | "delete" => {}
+                "font" => font = name_param(c, p, "font")?,
+                "color" if !value.is_null() => {
+                    let rgb =
+                        colour(value).ok_or_else(|| bad(c, format!("`color` is \"#rrggbb\" or [r, g, b], each 0 to 255, not {value}")))?;
+                    o.insert(key.clone(), json!(rgb));
+                }
+                _ => {
+                    o.insert(key.clone(), value.clone());
+                }
+            }
+        }
+    }
+    let mut t: DimensionType = serde_json::from_value(v).map_err(|e| bad(c, e.to_string()))?;
+    if let Some(f) = font.filter(|f| !f.trim().eq_ignore_ascii_case(t.font.trim())) {
+        t.font = crate::text::known(&f)
+            .ok_or_else(|| bad(c, format!("this system has no font `{f}`; `dimension_type` without `name` lists them")))?;
+    }
+    let name = match name_param(c, p, "rename")? {
+        Some(to) if to != name => {
+            if m.dimension_types.contains_key(&to) {
+                return Err(bad(c, format!("there's already a dimension type `{to}`")));
+            }
+            m.dimension_types.remove(&name);
+            rename_entry(m, &LibKind::DimensionType, &name, &to);
+            to
+        }
+        _ => name,
+    };
+    t.check(&name).map_err(|e| bad(c, e))?;
+    if m.dimension_types.get(&name) != Some(&t) {
+        m.dimension_types.insert(name.clone(), t.clone());
     }
     Ok(json!({"name": name, "type": t}))
 }
@@ -7379,7 +7691,7 @@ fn relocate(c: &str, s: &mut Session, ids: &[Id], mo: &Motion, end: Option<bool>
         let turned = |id: &Guid| moving_guids.contains(id) || hosts.get(id).is_some_and(|h| moving_guids.contains(h));
         for e in m.elements.values_mut() {
             if let Element::Dimension(d) = e {
-                d.refs.iter_mut().filter(|r| turned(&r.id)).for_each(|r| r.face = r.face.mirrored());
+                d.refs.iter_mut().filter(|r| turned(&r.id)).for_each(|r| *r = r.mirrored(hosts.contains_key(&r.id)));
             }
         }
     }
@@ -7478,9 +7790,10 @@ fn duplicate(c: &str, s: &mut Session, ids: &[Id], mo: &Motion) -> R {
             Element::Dimension(d) => {
                 for r in &mut d.refs {
                     if let Some(&to) = hosts.get(&r.id) {
+                        let opening = matches!(m.elements.get(r.id), Some(Element::Door(_) | Element::Window(_)));
                         r.id = to;
                         if mo.mirror {
-                            r.face = r.face.mirrored();
+                            *r = r.mirrored(opening);
                         }
                     }
                 }
@@ -7524,6 +7837,11 @@ fn align_element(s: &mut Session, p: &Value) -> R {
     let mo = Motion { map: &|q| placement.map(q), slide: (placement.angle.abs() <= 1e-9).then_some(placement.by), mirror: false };
     relocate(c, s, &[id], &mo, None)?;
     Ok(json!({"aligned": id, "angle": placement.angle, "by": placement.by}))
+}
+
+/// Element `id` moved `by` in plan, as `move` moves it: what keeps a dimension's constraints.
+pub(crate) fn move_by(s: &mut Session, id: Id, by: P2) -> Result<(), String> {
+    move_elements(s, &json!({"ids": [id], "by": [by.0, by.1]})).map(|_| ())
 }
 
 fn move_elements(s: &mut Session, p: &Value) -> R {

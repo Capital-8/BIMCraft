@@ -32,6 +32,8 @@ use crate::view3d::{self, Camera, Clip, Image, Scene};
 use crate::walls::{self, Axis};
 use crate::{font, massing, sheet, stairs};
 
+mod dimensions;
+use dimensions::dimension;
 mod regions;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -2474,75 +2476,9 @@ fn arc(center: P2, from: P2, to: P2, n: u32) -> Vec<P2> {
         .collect()
 }
 
-/// A dimension, of its kind.
-fn dimension(d: &mut Drawing, m: &Model, dim: &Dimension) {
-    match dim.kind {
-        DimKind::Aligned => aligned(d, m, dim),
-        DimKind::Angular => angular(d, m, dim),
-        DimKind::Radial => radial(d, m, dim),
-    }
-}
-
 /// A number as a dimension shows it: to the hundredth, without trailing zeros.
 fn figure(x: f64) -> String {
     format!("{}", (x * 100.0).round() / 100.0 + 0.0)
-}
-
-/// An angular dimension: an arc through `at` between its two lines, witness lines out along them
-/// to it, ticks at its ends, and the angle outside its middle.
-fn angular(d: &mut Drawing, m: &Model, dim: &Dimension) {
-    let Some((o, from, sweep)) = m.angle_sector(dim) else { return };
-    let r = dim.at.dist(o);
-    if r <= 0.0 {
-        return;
-    }
-    // Millimetres to a pixel of annotation.
-    let px = f64::from(d.k) / d.view.scale;
-    let ray = |t: f64| P2(t.cos(), t.sin());
-    let arc: Vec<P2> = (0..=48).map(|i| o + ray(from + sweep * f64::from(i) / 48.0) * r).collect();
-    d.line(&arc, Pen::PROJECTION, INK, false);
-    let lines: Vec<(P2, P2)> = dim.refs.iter().filter_map(|x| m.reference_line(x).ok()).collect();
-    for t in [from, from + sweep] {
-        let u = ray(t);
-        // How far out along this ray its line reaches: the witness line runs from there to the arc.
-        let reach = lines
-            .iter()
-            .filter(|(a, b)| geom::parallel(*a, *b, o, o + u))
-            .flat_map(|(a, b)| [(*a - o).dot(u), (*b - o).dot(u)])
-            .fold(0.0, f64::max);
-        if r > reach + 3.0 * px {
-            d.line(&[o + u * (reach + 3.0 * px), o + u * (r + 4.0 * px)], Pen::PROJECTION, INK, false);
-        }
-        let (p, k) = (o + u * r, (u + u.perp()) * (3.0 * px));
-        d.line(&[p - k, p + k], Pen::HEAVY, INK, false);
-    }
-    // Outside the arc's middle, clear of it however the text sits across the ray.
-    let (text, mid) = (format!("{}°", figure(sweep.to_degrees())), ray(from + sweep / 2.0));
-    let clear = f64::from(font::width(&text, 10.0) / 2.0) * mid.0.abs() + 5.0 * mid.1.abs() + 4.0;
-    d.text(&text, d.view.px(o + mid * (r + clear * px)), d.px(10.0), INK);
-}
-
-/// A radial dimension: a line from a round element's centre (marked with a cross) toward `at`,
-/// an arrow where it meets the edge, and the radius past its end.
-fn radial(d: &mut Drawing, m: &Model, dim: &Dimension) {
-    let Some(Ok((c, r))) = dim.refs.first().map(|x| m.reference_arc(x)) else { return };
-    let u = if dim.at.dist(c) > 0.0 { (dim.at - c).unit() } else { P2(1.0, 0.0) };
-    let (edge, end) = (c + u * r, if dim.at.dist(c) > r { dim.at } else { c + u * r });
-    d.line(&[c, end], Pen::PROJECTION, INK, false);
-    let (a, b) = (d.view.px(c), d.view.px(edge));
-    // Inside a circle too small for it, the arrow comes in from outside.
-    if r * d.view.scale > f64::from(d.px(14.0)) || end == edge {
-        arrow(d, a, b);
-    } else {
-        arrow(d, d.view.px(end), b);
-    }
-    for (dx, dy) in [(d.px(4.0), 0.0), (0.0, d.px(4.0))] {
-        d.stroke(vec![(a.0 - dx, a.1 - dy), (a.0 + dx, a.1 + dy)], Pen::PROJECTION, INK, None, false);
-    }
-    let text = format!("R {}", m.units.length(r));
-    let (x, y) = d.view.px(end);
-    let w = font::width(&text, d.px(10.0)) / 2.0 + d.px(6.0);
-    d.text(&text, (x + u.0 as f32 * w, y - u.1 as f32 * w), d.px(10.0), INK);
 }
 
 /// Fill pattern `p` over `rings` (model mm; `pieces`, the same with their holes cut out, for a solid one) in `color`, its
@@ -3021,41 +2957,6 @@ fn height(units: Units, z: f64) -> String {
         // What rounds to nothing reads as nothing, either side.
         None if units.length(0.0) == shown => format!("±{shown}"),
         None => format!("+{shown}"),
-    }
-}
-
-/// An aligned dimension: a witness line from each reference to the dimension line, a tick where
-/// it crosses, and each segment's length over its middle, readable from below or from the right.
-fn aligned(d: &mut Drawing, m: &Model, dim: &Dimension) {
-    let (n, cross) = m.crossings(dim);
-    let (Some(&(lo, _)), Some(&(hi, _))) = (cross.first(), cross.last()) else { return };
-    // Along the dimension line, and along the references; `px` mm make a pixel.
-    let u = n.perp();
-    let px = f64::from(d.k) / d.view.scale;
-    let on = |s: f64| dim.at + n * s;
-    d.line(&[on(lo - 4.0 * px), on(hi + 4.0 * px)], Pen::PROJECTION, INK, false);
-    for &(s, (a, b)) in &cross {
-        let c = on(s);
-        // The reference's extent along it, from the dimension line: the witness line runs from
-        // just off its nearer end to just past the dimension line.
-        let (ta, tb) = ((a - c).dot(u), (b - c).dot(u));
-        let (from, to) = match (ta.min(tb), ta.max(tb)) {
-            (near, _) if near > 0.0 => (near - 3.0 * px, -4.0 * px),
-            (_, near) if near < 0.0 => (near + 3.0 * px, 4.0 * px),
-            _ => (-4.0 * px, 4.0 * px),
-        };
-        d.line(&[c + u * from, c + u * to], Pen::PROJECTION, INK, false);
-        d.line(&[c - (u + n) * (3.0 * px), c + (u + n) * (3.0 * px)], Pen::HEAVY, INK, false);
-    }
-    // The line's angle on screen (y down): it runs east or north, so the text reads from below
-    // or from the right.
-    let angle = (-n.1).atan2(n.0);
-    // The text's up, on screen.
-    let up = (angle.sin() as f32, -angle.cos() as f32);
-    for pair in cross.windows(2) {
-        let [(s0, _), (s1, _)] = pair else { continue };
-        let (x, y) = d.view.px(on((s0 + s1) / 2.0));
-        d.text_turned(&m.units.length(s1 - s0), (x + up.0 * d.px(9.0), y + up.1 * d.px(9.0)), d.px(10.0), angle as f32, INK);
     }
 }
 

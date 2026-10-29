@@ -273,7 +273,7 @@ impl BimApp {
             "Ramp" => self.set_tool(Tool::Ramp(Vec::new())),
             "Railing" => self.set_tool(Tool::Railing(Vec::new())),
             "Mass" => self.set_tool(Tool::Mass(Vec::new())),
-            "Aligned Dimension" => self.set_tool(Tool::Dimension(Vec::new())),
+            "Aligned Dimension" => self.set_tool(Tool::Dimension(crate::DimMode::Aligned, Vec::new())),
             "Text" => self.set_tool(Tool::Text),
             "Spot Elevation" => self.set_tool(Tool::Spot),
             "Tag by Category" => self.set_tool(Tool::Tag),

@@ -85,7 +85,7 @@ pub const MAX_SLOPE: f64 = 75.0;
 /// 2: the library has ids and GUIDs too
 /// (`library`), and what names a library entry holds its GUID. 1: elements have GUIDs, ids six digits, and what points at
 /// an element holds its GUID. None (0): a file from before.
-pub const FORMAT: u32 = 9;
+pub const FORMAT: u32 = 10;
 /// How far past the model a level reaches without an extent of its own, mm.
 pub const LEVEL_PAST: f64 = 1000.0;
 
@@ -626,13 +626,47 @@ impl Face {
     }
 }
 
-/// A line a dimension measures to.
+/// A line a dimension measures to, or with `point`, the point at one end of it: a wall's centre line's end, a face's
+/// corner, a detail line's or a grid's end, a jamb's end at either face of its wall.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Reference {
     pub id: Guid,
     #[serde(default)]
     pub face: Face,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub point: Option<End>,
+}
+
+impl Reference {
+    /// Element `id`'s line `face`.
+    pub fn line(id: Guid, face: Face) -> Reference {
+        Reference { id, face, point: None }
+    }
+
+    /// The same of a mirrored element, which runs back the other way ([`Face::mirrored`]): the end of a line along it
+    /// swaps, and a line across it (a wall's end, any of an `opening`'s lines) still runs from its inside to its outside.
+    pub fn mirrored(self, opening: bool) -> Reference {
+        let along = !opening && matches!(self.face, Face::Centre | Face::Left | Face::Right);
+        Reference { face: self.face.mirrored(), point: self.point.map(|p| if along { p.other() } else { p }), ..self }
+    }
+}
+
+/// Which end of a line.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum End {
+    Start,
+    End,
+}
+
+impl End {
+    pub fn other(self) -> End {
+        match self {
+            End::Start => End::End,
+            End::End => End::Start,
+        }
+    }
 }
 
 /// How far a point stands from a line `toward` it (a unit vector along x or y): see [`Model::clearances`].
@@ -644,10 +678,12 @@ pub struct Clearance {
 }
 
 /// A dimension in a level's plan. Aligned: the distances between parallel references, along a
-/// line through `at` across them. Angular: the angle between two references that meet, on the
-/// side of `at`, its arc through `at`. Radial: a round element's radius, its line toward `at`. It
+/// line through `at` across them; between points, along the line through the first two; lines and points, square to the
+/// lines. Linear: the same, its line horizontal or vertical as `orient` says (its lines square to it). Angular: the angle between two references that meet, on the
+/// side of `at`, its arc through `at`. Radial: a round element's radius, its line toward `at`; diameter, across it through
+/// its centre. Arc length: how long an arc is along it, its line an arc through `at` round the same centre. It
 /// measures the model as it is, so it follows what it measures.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Dimension {
     pub level: Guid,
@@ -656,17 +692,148 @@ pub struct Dimension {
     pub view: Option<Guid>,
     #[serde(default)]
     pub kind: DimKind,
+    /// A linear dimension's: which way its line runs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub orient: Option<Orient>,
     pub refs: Vec<Reference>,
     pub at: P2,
+    /// Its dimension type (`crate::dims`): how it draws and letters its numbers.
+    #[serde(rename = "type", default)]
+    pub type_name: String,
+    /// Before and after each number, as Revit's Prefix and Suffix.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub prefix: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub suffix: String,
+    /// Over and under its numbers.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub above: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub below: String,
+    /// What shows instead of each number, as Revit's Replace With Text.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub replace: String,
+    /// Its segments show its type's equality text (EQ) instead of their lengths.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub equality: bool,
+    /// Text of single segments' own, over the dimension's (Revit's Dimension Text on one segment).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub texts: Vec<SegmentText>,
+    /// Its segments are kept equal: what it measures to between its first and last moves to keep them so (`crate::constraints`).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub equal: bool,
+    /// Its segments locked at a length: what it measures to moves together to keep them so.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub locked: Vec<Lock>,
+}
+
+/// A dimension's segment `segment` (counted as its values are) kept at `length` mm, Revit's padlock.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Lock {
+    pub segment: usize,
+    pub length: f64,
+}
+
+/// One segment's own text: what it shows in place of the dimension's where it says something. `segment` counts its numbers
+/// as [`Model::dimension_labels`] gives them, from 0: west to east, or south to north.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SegmentText {
+    pub segment: usize,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub prefix: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub suffix: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub above: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub below: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub replace: String,
+}
+
+impl SegmentText {
+    /// Its texts by name, as the dimension's are.
+    pub fn fields(&self) -> [(&'static str, &String); 5] {
+        [("prefix", &self.prefix), ("suffix", &self.suffix), ("above", &self.above), ("below", &self.below), ("replace", &self.replace)]
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.fields().iter().all(|(_, t)| t.is_empty())
+    }
+}
+
+impl Dimension {
+    /// Segment `i`'s text `field` (prefix, suffix, above, below or replace): its own, else the dimension's.
+    pub fn text(&self, i: usize, field: &str) -> &str {
+        let own =
+            self.texts.iter().find(|t| t.segment == i).and_then(|t| t.fields().into_iter().find(|(n, _)| *n == field)).map(|(_, t)| t);
+        let whole = match field {
+            "prefix" => &self.prefix,
+            "suffix" => &self.suffix,
+            "above" => &self.above,
+            "below" => &self.below,
+            _ => &self.replace,
+        };
+        own.filter(|t| !t.is_empty()).unwrap_or(whole)
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "snake_case")]
 pub enum DimKind {
     #[default]
     Aligned,
+    Linear,
     Angular,
     Radial,
+    /// Across a round element, through its centre.
+    Diameter,
+    /// Along an arc: a curved wall's centre line or face, or a detail line's arc.
+    ArcLength,
+}
+
+/// Which way a linear dimension's line runs: horizontal, measuring east and west, or vertical, north and south.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Orient {
+    Horizontal,
+    Vertical,
+}
+
+impl Orient {
+    /// The way it measures.
+    pub fn along(self) -> P2 {
+        match self {
+            Orient::Horizontal => P2(1.0, 0.0),
+            Orient::Vertical => P2(0.0, 1.0),
+        }
+    }
+
+    /// How a dimension between `points` placed at `at` runs, as Archicad's and AutoCAD's do: past the points' east or
+    /// west, vertical; past their north or south, horizontal; among them, aligned (None). Where they span no width, it
+    /// can't be horizontal, nor vertical where they span no height.
+    pub fn follow(points: &[P2], at: P2) -> Option<Orient> {
+        let (lo, hi) = points.iter().fold((P2(f64::INFINITY, f64::INFINITY), P2(f64::NEG_INFINITY, f64::NEG_INFINITY)), |(lo, hi), p| {
+            (P2(lo.0.min(p.0), lo.1.min(p.1)), P2(hi.0.max(p.0), hi.1.max(p.1)))
+        });
+        let (wide, tall) = (hi.0 - lo.0 > TOL, hi.1 - lo.1 > TOL);
+        let (beside, over) = (at.0 < lo.0 || at.0 > hi.0, at.1 < lo.1 || at.1 > hi.1);
+        match (wide, tall) {
+            (true, false) => Some(Orient::Horizontal),
+            (false, true) => Some(Orient::Vertical),
+            _ if beside && !over => Some(Orient::Vertical),
+            _ if over && !beside => Some(Orient::Horizontal),
+            // Off a corner: the way it is farther out.
+            _ if beside && over => {
+                let dx = (lo.0 - at.0).max(at.0 - hi.0);
+                let dy = (lo.1 - at.1).max(at.1 - hi.1);
+                Some(if dx > dy { Orient::Vertical } else { Orient::Horizontal })
+            }
+            _ => None,
+        }
+    }
 }
 
 /// A text note in a view: a level's plan, a section, an elevation or a sheet. `at` is the top left
@@ -2038,6 +2205,9 @@ pub struct Model {
     /// Its text types, by name: the font, size and lettering of the notes of each.
     #[serde(default = "crate::text::default_types")]
     pub text_types: BTreeMap<String, crate::text::TextType>,
+    /// Its dimension types, by name: how the dimensions of each draw and letter their numbers.
+    #[serde(default = "crate::dims::types")]
+    pub dimension_types: BTreeMap<String, crate::dims::DimensionType>,
     /// Its detail group types, by name: the members each one placed draws.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub detail_groups: BTreeMap<String, crate::groups::GroupType>,
@@ -2099,6 +2269,7 @@ impl Model {
             fill_patterns: fills::patterns(language),
             region_types: fills::region_types(language),
             text_types: crate::text::types(language),
+            dimension_types: crate::dims::types(),
             detail_groups: BTreeMap::new(),
             reinforcement: BTreeMap::new(),
             elements: Elements::new(),
@@ -2546,7 +2717,32 @@ impl Model {
         // 7 to 8: a note's size is its text type's. A note of a size gets a type of it.
         self.typed_notes();
         // 8 to 9: freely ordered graphic line segments; existing dash/space/dot patterns need no conversion.
+        // 9 to 10: a dimension may measure to a line's end (`point`) and run horizontal or vertical (`linear`), and has a
+        // dimension type; one of 10 read by 9 would measure its points as lines. A dimension of 9 gets its kind's type.
+        self.typed_dimensions();
         self.format = FORMAT;
+    }
+
+    /// Each dimension from before dimension types given the one its kind starts in.
+    fn typed_dimensions(&mut self) {
+        let types = &self.dimension_types;
+        let type_one = |d: &mut Dimension| {
+            if d.type_name.is_empty() {
+                d.type_name = crate::dims::default_type(types, d.kind).cloned().unwrap_or_default();
+            }
+        };
+        for e in self.elements.values_mut() {
+            if let Element::Dimension(d) = e {
+                type_one(d);
+            }
+        }
+        for g in self.detail_groups.values_mut() {
+            for member in &mut g.members {
+                if let Element::Dimension(d) = &mut member.element {
+                    type_one(d);
+                }
+            }
+        }
     }
 
     /// Each note from before text types (a `size`, or no type) given a text type of its size.
@@ -3001,6 +3197,7 @@ impl Model {
         match crate::commands::category(category).as_str() {
             "region" => names(&self.region_types),
             "text" => names(&self.text_types),
+            "dimension" => names(&self.dimension_types),
             "wall" => names(&self.types.wall),
             "floor" => names(&self.types.floor),
             "door" => names(&self.types.door),
@@ -3022,6 +3219,7 @@ impl Model {
         let preferred = match crate::commands::category(category).as_str() {
             "region" => return fills::default_region_type(&self.region_types, self.language).map(String::as_str),
             "text" => return crate::text::default_type(&self.text_types).map(String::as_str),
+            "dimension" => return crate::dims::default_type(&self.dimension_types, DimKind::Aligned).map(String::as_str),
             "wall" | "floor" => "Generic - 200mm",
             "door" => "Single 900 x 2100",
             "column" => "Rectangular 400 x 400",
@@ -3745,6 +3943,86 @@ impl Model {
         }
     }
 
+    /// The point a reference names: the end of its line it holds (`point`). A wall's centre line ends where its location
+    /// line does, and a face where the wall's outline turns off it (a corner, mitred where walls join); a curved wall's
+    /// faces are arcs, ending square to its ends; a detail line of any shape ends where it does.
+    pub fn reference_point(&self, r: &Reference) -> Result<P2, String> {
+        let Some(end) = r.point else { return Err(format!("{} {} is measured to as a line", self.cat(r.id), self.shown(r.id))) };
+        let pick = |(a, b): Line| if end == End::Start { a } else { b };
+        match (self.elements.get(r.id), r.face) {
+            (Some(Element::Wall(w)), face @ (Face::Centre | Face::Left | Face::Right)) => {
+                let axis = walls::Axis::of(w);
+                let (ext, int) = walls::faces(self, w);
+                let off = match face {
+                    Face::Left => ext,
+                    Face::Right => int,
+                    _ => (ext + int) / 2.0,
+                };
+                if face == Face::Centre || axis.radius().is_some() {
+                    return Ok(pick((axis.at(0.0, off), axis.at(axis.length(), off))));
+                }
+                let (a, b) = self.reference_line(&Reference::line(r.id, face))?;
+                let u = (b - a).unit();
+                let on: Vec<f64> = walls::outline(self, self.elements.id(r.id).unwrap_or_default())
+                    .iter()
+                    .filter(|p| (**p - a).cross(u).abs() <= 1e-6)
+                    .map(|p| (*p - a).dot(u))
+                    .collect();
+                let (lo, hi) = (on.iter().copied().fold(f64::INFINITY, f64::min), on.iter().copied().fold(f64::NEG_INFINITY, f64::max));
+                if !(lo.is_finite() && hi.is_finite()) {
+                    return Ok(pick((a, b)));
+                }
+                Ok(pick((a + u * lo, a + u * hi)))
+            }
+            (Some(Element::DetailLine(l)), Face::Centre) => Ok(pick((l.curve.start(), l.curve.end()))),
+            _ => self.reference_line(&Reference::line(r.id, r.face)).map(pick),
+        }
+    }
+
+    /// What a dimension measures to on `r`: its line, or, for a point, a line of no length there.
+    pub fn reference_geometry(&self, r: &Reference) -> Result<Line, String> {
+        match r.point {
+            Some(_) => self.reference_point(r).map(|p| (p, p)),
+            None => self.reference_line(r),
+        }
+    }
+
+    /// The points dimensions measure to on element `id`: both ends of each of its reference lines (and of a detail
+    /// line of any shape).
+    pub fn reference_points(&self, id: impl Key) -> Vec<(Reference, P2)> {
+        let id = self.guid(id);
+        let faces: &[Face] = match self.elements.get(id) {
+            Some(Element::Wall(_)) => &[Face::Centre, Face::Left, Face::Right],
+            Some(Element::Door(_) | Element::Window(_)) => &[Face::Centre, Face::Start, Face::End],
+            Some(Element::Grid(_) | Element::DetailLine(_)) => &[Face::Centre],
+            _ => &[],
+        };
+        faces
+            .iter()
+            .flat_map(|&face| [End::Start, End::End].map(|point| Reference { id, face, point: Some(point) }))
+            .filter_map(|r| Some((r, self.reference_point(&r).ok()?)))
+            .collect()
+    }
+
+    /// Of element `id`'s reference points, the one nearest `p`, and how far it is.
+    pub fn endpoint_at(&self, id: impl Key, p: P2) -> Option<(Reference, f64)> {
+        self.reference_points(id).into_iter().map(|(r, q)| (r, q.dist(p))).min_by(|x, y| x.1.total_cmp(&y.1))
+    }
+
+    /// The way an aligned or linear dimension measures, a unit vector: a linear one's `orient`; else square to its first
+    /// line, or with only points, from its first point toward the next elsewhere. None while its points are in one place.
+    pub fn measured_along(&self, d: &Dimension) -> Option<P2> {
+        if let Some(o) = d.orient {
+            return Some(o.along());
+        }
+        let geo: Vec<Line> = d.refs.iter().filter_map(|r| self.reference_geometry(r).ok()).collect();
+        if let Some((a, b)) = geo.iter().find(|(a, b)| a.dist(*b) > 1e-9) {
+            return Some((*b - *a).unit().perp());
+        }
+        let first = geo.first()?.0;
+        geo.iter().map(|g| g.0).find(|p| p.dist(first) > 1e-6).map(|p| (p - first).unit())
+    }
+
     /// The lines dimensions measure to on element `id`: a wall's centre line, faces and ends, a
     /// door's or a window's centre and jambs, a grid's line.
     pub fn reference_lines(&self, id: impl Key) -> Vec<(Reference, Line)> {
@@ -3759,7 +4037,7 @@ impl Model {
         faces
             .iter()
             .filter_map(|&face| {
-                let r = Reference { id, face };
+                let r = Reference::line(id, face);
                 Some((r, self.reference_line(&r).ok()?))
             })
             .collect()
@@ -3782,11 +4060,11 @@ impl Model {
             .elements
             .with_guids()
             .filter_map(|(_, id, e)| match e {
-                Element::Grid(g) => Some((Reference { id, face: Face::Centre }, (g.start, g.end))),
+                Element::Grid(g) => Some((Reference::line(id, Face::Centre), (g.start, g.end))),
                 Element::Wall(w) if w.arc == 0.0 && self.cut_by(w, level) => {
                     let (axis, (ext, int)) = (walls::Axis::of(w), walls::faces(self, w));
                     let mid = (ext + int) / 2.0;
-                    Some((Reference { id, face: Face::Centre }, (axis.at(0.0, mid), axis.at(axis.length(), mid))))
+                    Some((Reference::line(id, Face::Centre), (axis.at(0.0, mid), axis.at(axis.length(), mid))))
                 }
                 _ => None,
             })
@@ -3881,6 +4159,63 @@ impl Model {
         }
     }
 
+    /// The arc an arc length dimension measures along on `r`: its centre, its radius, the angle its start lies at from the
+    /// centre and how far it sweeps (radians, counter-clockwise positive). A curved wall's centre line or one of its faces,
+    /// or a detail line that is an arc.
+    pub fn reference_sweep(&self, r: &Reference) -> Result<(P2, f64, f64, f64), String> {
+        let what = "an arc length dimension measures along curved walls and arcs";
+        match self.elements.get(r.id) {
+            Some(Element::Wall(w)) => {
+                let axis = walls::Axis::of(w);
+                let Some((c, radius, a0, sweep)) = axis.arc() else { return Err(format!("wall {} is straight; {what}", r.id)) };
+                let (ext, int) = walls::faces(self, w);
+                let off = match r.face {
+                    Face::Left => ext,
+                    Face::Right => int,
+                    Face::Centre => (ext + int) / 2.0,
+                    Face::Start | Face::End => return Err(format!("wall {}'s ends are straight; {what}", r.id)),
+                };
+                Ok((c, radius - sweep.signum() * off, a0, sweep))
+            }
+            Some(Element::DetailLine(l)) => match &l.curve {
+                crate::curves::Curve::Circle { .. } => Err(format!("detail line {} is a circle, which has no ends; {what}", r.id)),
+                c => c
+                    .segments()
+                    .first()
+                    .filter(|_| c.kind() == "arc")
+                    .and_then(walls::Axis::arc)
+                    .ok_or_else(|| format!("detail line {} is a {}; {what}", r.id, c.kind())),
+            },
+            Some(e) => Err(format!("{} {} isn't curved; {what}", e.category(), r.id)),
+            None => Err(format!("element {} doesn't exist", r.id)),
+        }
+    }
+
+    /// What an arc length dimension measures along: its arc ([`Model::reference_sweep`]), all of it, or with two points
+    /// after it, from one to the other along it (either order). An error when a point isn't on the arc.
+    pub fn arc_span(&self, d: &Dimension) -> Result<(P2, f64, f64, f64), String> {
+        let Some(arc) = d.refs.first() else { return Err("an arc length dimension measures along an arc".into()) };
+        let (c, radius, a0, sweep) = self.reference_sweep(arc)?;
+        let points = &d.refs[1..];
+        if points.is_empty() {
+            return Ok((c, radius, a0, sweep));
+        }
+        let [p, q] = points else { return Err("an arc length dimension measures between two points on its arc, or all of it".into()) };
+        let along = |r: &Reference| -> Result<f64, String> {
+            let p = self.reference_point(r)?;
+            let what = format!("{} {}'s {}", self.cat(r.id), self.shown(r.id), if r.point == Some(End::Start) { "start" } else { "end" });
+            // How far round from the arc's start, the way it sweeps; on it, give or take a millimetre.
+            let t = (sweep.signum() * ((p.1 - c.1).atan2(p.0 - c.0) - a0)).rem_euclid(TAU);
+            let t = if t > sweep.abs() && TAU - t < 1.0 / radius.max(1.0) { 0.0 } else { t };
+            if (p.dist(c) - radius).abs() > TOL || t > sweep.abs() + 1.0 / radius.max(1.0) {
+                return Err(format!("{what} isn't on the arc it measures along"));
+            }
+            Ok(t.min(sweep.abs()))
+        };
+        let (s, e) = (along(p)?, along(q)?);
+        Ok((c, radius, a0 + sweep.signum() * s.min(e), sweep.signum() * (s - e).abs()))
+    }
+
     /// An angular dimension's arc: where its two lines meet, the angle (radians, counter-clockwise
     /// from east) of the ray it starts on, and how far it sweeps counter-clockwise to the other:
     /// the one of the four angles the lines make that holds `at`.
@@ -3911,26 +4246,100 @@ impl Model {
     /// when it runs north and south. Then where its references cross it, in order that way: how
     /// far from `at`, and the reference's line.
     pub fn crossings(&self, d: &Dimension) -> (P2, Vec<(f64, Line)>) {
-        let lines: Vec<Line> = d.refs.iter().filter_map(|r| self.reference_line(r).ok()).collect();
-        let Some(&(a, b)) = lines.first() else { return (P2(0.0, 0.0), Vec::new()) };
-        let n = (b - a).unit().perp();
+        let (n, stations) = self.stations(d);
+        (n, stations.into_iter().map(|(s, l, _)| (s, l)).collect())
+    }
+
+    /// [`Model::crossings`], each with the reference it is of.
+    pub fn stations(&self, d: &Dimension) -> (P2, Vec<(f64, Line, Reference)>) {
+        let lines: Vec<(Line, Reference)> = d.refs.iter().filter_map(|r| Some((self.reference_geometry(r).ok()?, *r))).collect();
+        let Some(n) = self.measured_along(d) else { return (P2(0.0, 0.0), Vec::new()) };
         let n = if n.0 < -1e-9 || (n.0.abs() <= 1e-9 && n.1 < 0.0) { n * -1.0 } else { n };
-        let mut v: Vec<(f64, Line)> = lines
+        let mut v: Vec<(f64, Line, Reference)> = lines
             .into_iter()
-            .map(|(a, b)| {
-                let c = geom::line_intersection(d.at, d.at + n, a, b).unwrap_or(a);
-                ((c - d.at).dot(n), (a, b))
+            .map(|((a, b), r)| {
+                // A point is where it stands along the line; a line, where the dimension line crosses it.
+                let c = if a.dist(b) <= 1e-9 { a } else { geom::line_intersection(d.at, d.at + n, a, b).unwrap_or(a) };
+                ((c - d.at).dot(n), (a, b), r)
             })
             .collect();
         v.sort_by(|x, y| x.0.total_cmp(&y.0));
         (n, v)
     }
 
+    /// The type dimension `d` draws in: its own, else (a type deleted while a command runs) one as a project starts with.
+    pub fn dimension_type(&self, d: &Dimension) -> crate::dims::DimensionType {
+        self.dimension_types.get(&d.type_name).cloned().unwrap_or_default()
+    }
+
+    /// What a dimension's numbers read, as its type and its own text say: each segment's length (a baseline string's
+    /// from its first reference; an ordinate's, each witness line's, the first 0), an angle in degrees, a radius or a
+    /// diameter after its type's symbol, an arc's length. Its prefix and suffix round each; its replacement stands for
+    /// each; with equality, a string of more than one segment shows its type's equality text.
+    pub fn dimension_labels(&self, d: &Dimension) -> Vec<String> {
+        let t = self.dimension_type(d);
+        let values = self.dimension_values(d);
+        let length = |x: f64| t.length(self.units, x);
+        let shown: Vec<String> = match d.kind {
+            DimKind::Aligned | DimKind::Linear => {
+                let sums = values.iter().scan(0.0, |sum, v| {
+                    *sum += v;
+                    Some(*sum)
+                });
+                match t.string {
+                    crate::dims::DimString::Continuous => values.iter().map(|&v| length(v)).collect(),
+                    crate::dims::DimString::Baseline => sums.map(length).collect(),
+                    crate::dims::DimString::Ordinate => std::iter::once(0.0).chain(sums).map(length).collect(),
+                }
+            }
+            DimKind::Angular => values.iter().map(|v| format!("{}°", (v * 100.0).round() / 100.0 + 0.0)).collect(),
+            DimKind::Radial => values.iter().map(|&v| format!("{} {}", t.radius_symbol, length(v)).trim().to_string()).collect(),
+            DimKind::Diameter => values.iter().map(|&v| format!("{} {}", t.diameter_symbol, length(v)).trim().to_string()).collect(),
+            DimKind::ArcLength => values.iter().map(|&v| length(v)).collect(),
+        };
+        let equal = d.equality && values.len() > 1 && t.string == crate::dims::DimString::Continuous;
+        shown
+            .into_iter()
+            .enumerate()
+            .map(|(i, v)| match d.text(i, "replace") {
+                _ if equal => t.equality_text.clone(),
+                r if !r.is_empty() => r.to_string(),
+                _ => format!("{}{v}{}", d.text(i, "prefix"), d.text(i, "suffix")),
+            })
+            .collect()
+    }
+
+    /// What number `i` of dimension `d` has over and under it.
+    pub fn dimension_extra(&self, d: &Dimension, i: usize) -> (String, String) {
+        (d.text(i, "above").to_string(), d.text(i, "below").to_string())
+    }
+
+    /// Which of dimension `d`'s numbers (as [`Model::dimension_labels`] counts them) is over point `p`: an aligned or a
+    /// linear one's segment `p` lies across (an ordinate's witness line nearest it), else its only one.
+    pub fn dimension_segment_at(&self, d: &Dimension, p: P2) -> usize {
+        if !matches!(d.kind, DimKind::Aligned | DimKind::Linear) {
+            return 0;
+        }
+        let (n, cross) = self.crossings(d);
+        let s = (p - d.at).dot(n);
+        let ss: Vec<f64> = cross.iter().map(|c| c.0).collect();
+        let last = ss.len().saturating_sub(2);
+        match self.dimension_type(d).string {
+            crate::dims::DimString::Ordinate => {
+                ss.iter().enumerate().min_by(|a, b| (a.1 - s).abs().total_cmp(&(b.1 - s).abs())).map_or(0, |(i, _)| i)
+            }
+            // The segment it is over: a baseline's lines are told by where each ends, the first end past the point.
+            crate::dims::DimString::Baseline | crate::dims::DimString::Continuous => {
+                ss.iter().skip(1).position(|&e| s <= e).unwrap_or(last).min(last)
+            }
+        }
+    }
+
     /// What a dimension shows: an aligned one's lengths, segment by segment (west to east, or
     /// south to north); an angular one's angle, in degrees; a radial one's radius.
     pub fn dimension_values(&self, d: &Dimension) -> Vec<f64> {
         match d.kind {
-            DimKind::Aligned => self
+            DimKind::Aligned | DimKind::Linear => self
                 .crossings(d)
                 .1
                 .windows(2)
@@ -3941,6 +4350,8 @@ impl Model {
                 .collect(),
             DimKind::Angular => self.angle_sector(d).map(|(_, _, sweep)| sweep.to_degrees()).into_iter().collect(),
             DimKind::Radial => d.refs.first().and_then(|r| self.reference_arc(r).ok()).map(|(_, r)| r).into_iter().collect(),
+            DimKind::Diameter => d.refs.first().and_then(|r| self.reference_arc(r).ok()).map(|(_, r)| 2.0 * r).into_iter().collect(),
+            DimKind::ArcLength => self.arc_span(d).ok().map(|(_, r, _, t)| r * t.abs()).into_iter().collect(),
         }
     }
 
@@ -4134,6 +4545,9 @@ impl Model {
         }
         for (n, p) in &self.reinforcement {
             p.check(n)?;
+        }
+        for (n, t) in &self.dimension_types {
+            t.check(n)?;
         }
         for (n, x) in &self.materials {
             for p in [&x.cut_pattern, &x.surface_pattern].into_iter().flatten() {
@@ -4579,23 +4993,103 @@ impl Model {
                             .ok_or_else(|| format!("{who}: view {} isn't a plan view of its level", self.shown(v)))?;
                     }
                     point(&who, d.at)?;
+                    if !self.dimension_types.contains_key(&d.type_name) {
+                        let there: Vec<&str> = self.dimension_types.keys().map(String::as_str).collect();
+                        return Err(format!("{who}: there's no dimension type `{}` (there are: {})", d.type_name, there.join(", ")));
+                    }
+                    for (what, t) in
+                        [("prefix", &d.prefix), ("suffix", &d.suffix), ("above", &d.above), ("below", &d.below), ("replace", &d.replace)]
+                    {
+                        crate::dims::dim_text(&who, what, t)?;
+                    }
+                    if d.equal && !(matches!(d.kind, DimKind::Aligned | DimKind::Linear) && d.refs.len() > 2) {
+                        return Err(format!("{who}: only an aligned or a linear dimension of two segments or more is kept equal"));
+                    }
+                    if !d.locked.is_empty() && !matches!(d.kind, DimKind::Aligned | DimKind::Linear) {
+                        return Err(format!("{who}: only an aligned or a linear dimension's segments are locked"));
+                    }
+                    let mut locks = BTreeSet::new();
+                    for l in &d.locked {
+                        if l.segment >= MAX_POINTS || !locks.insert(l.segment) || !(l.length.is_finite() && l.length.abs() <= MAX_COORD) {
+                            return Err(format!("{who}: segment {} is locked twice, at no length, or isn't a segment", l.segment));
+                        }
+                    }
+                    let mut segments = BTreeSet::new();
+                    for st in &d.texts {
+                        if st.segment >= MAX_POINTS || !segments.insert(st.segment) {
+                            return Err(format!("{who}: segment {}'s text is given twice, or there's no such segment", st.segment));
+                        }
+                        for (what, t) in st.fields() {
+                            crate::dims::dim_text(&format!("{who} segment {}", st.segment), what, t)?;
+                        }
+                    }
                     match (d.kind, d.refs.len()) {
-                        (DimKind::Aligned, 2..=MAX_POINTS) | (DimKind::Angular, 2) | (DimKind::Radial, 1) => {}
-                        (DimKind::Aligned, _) => return Err(format!("{who}: a dimension measures between 2 to {MAX_POINTS} references")),
+                        (DimKind::Aligned | DimKind::Linear, 2..=MAX_POINTS)
+                        | (DimKind::Angular, 2)
+                        | (DimKind::Radial | DimKind::Diameter | DimKind::ArcLength, 1) => {}
+                        (DimKind::Aligned | DimKind::Linear, _) => {
+                            return Err(format!("{who}: a dimension measures between 2 to {MAX_POINTS} references"));
+                        }
                         (DimKind::Angular, _) => return Err(format!("{who}: an angular dimension measures between two lines")),
                         (DimKind::Radial, _) => return Err(format!("{who}: a radial dimension measures one round element")),
+                        (DimKind::Diameter, _) => return Err(format!("{who}: a diameter dimension measures one round element")),
+                        (DimKind::ArcLength, 3) => {}
+                        (DimKind::ArcLength, _) => {
+                            return Err(format!(
+                                "{who}: an arc length dimension measures along one arc, all of it or between two points on it"
+                            ));
+                        }
                     }
+                    match (d.kind, d.orient) {
+                        (DimKind::Linear, None) => {
+                            return Err(format!("{who}: a linear dimension runs horizontal or vertical: give it an `orient`"));
+                        }
+                        (DimKind::Linear, Some(_)) | (_, None) => {}
+                        (_, Some(_)) => return Err(format!("{who}: only a linear dimension has an `orient`; this one is {:?}", d.kind)),
+                    }
+                    let linear = d.kind == DimKind::Linear;
+                    let along = self.measured_along(d);
                     let mut seen = BTreeSet::new();
                     let mut first: Option<(Reference, Line)> = None;
                     for r in &d.refs {
-                        if d.kind == DimKind::Radial {
-                            self.reference_arc(r).map_err(|e| format!("{who}: {e}"))?;
+                        match d.kind {
+                            DimKind::Radial => {
+                                self.reference_arc(r).map_err(|e| format!("{who}: {e}"))?;
+                                continue;
+                            }
+                            DimKind::Diameter => {
+                                self.reference_arc(r).map_err(|e| format!("{who}: {}", e.replace("a radial", "a diameter")))?;
+                                continue;
+                            }
+                            DimKind::ArcLength => {
+                                self.arc_span(d).map_err(|e| format!("{who}: {e}"))?;
+                                break;
+                            }
+                            _ => {}
+                        }
+                        let what = format!("{} {}", self.cat(r.id), self.shown(r.id));
+                        if r.point.is_some() && d.kind == DimKind::Angular {
+                            return Err(format!("{who}: it measures to an end of {what}; an angle is between two lines"));
+                        }
+                        let line = self.reference_geometry(r).map_err(|e| format!("{who}: {e}"))?;
+                        if !seen.insert((r.id, r.face, r.point)) {
+                            let at = match r.point {
+                                Some(End::Start) => "start of its ",
+                                Some(End::End) => "end of its ",
+                                None => "",
+                            };
+                            return Err(format!("{who}: it measures to {what}'s {at}{} twice", r.face.name()));
+                        }
+                        if r.point.is_some() {
                             continue;
                         }
-                        let line = self.reference_line(r).map_err(|e| format!("{who}: {e}"))?;
-                        let what = format!("{} {}", self.cat(r.id), self.shown(r.id));
-                        if !seen.insert((r.id, r.face)) {
-                            return Err(format!("{who}: it measures to {what}'s {} twice", r.face.name()));
+                        if let (true, Some(n)) = (linear, along)
+                            && !geom::parallel(line.0, line.1, P2(0.0, 0.0), n.perp())
+                        {
+                            let way = if d.orient == Some(Orient::Horizontal) { "horizontal" } else { "vertical" };
+                            return Err(format!(
+                                "{who}: {what} isn't square to a {way} dimension; measure to its ends, or make the dimension aligned"
+                            ));
                         }
                         match first {
                             None => first = Some((*r, line)),
@@ -4612,6 +5106,9 @@ impl Model {
                                 }
                             }
                         }
+                    }
+                    if matches!(d.kind, DimKind::Aligned | DimKind::Linear) && along.is_none() {
+                        return Err(format!("{who}: its points are all in one place, so it has no way to run"));
                     }
                 }
                 Element::Text(Note { view, .. })
