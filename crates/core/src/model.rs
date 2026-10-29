@@ -4392,21 +4392,32 @@ impl Model {
         }
     }
 
-    /// What bounds the rooms of `level`: the centre lines of its walls, arcs as chords, and its room separation lines.
+    /// What bounds the rooms of `level`: the centre lines of its walls, arcs as chords, and its room separation lines. A
+    /// separation line drawn to a wall's face, as one drawn on a plan usually is, runs on to the wall's centre line, so it
+    /// splits rooms measured there too.
     pub fn bounding_lines(&self, level: impl Key) -> Vec<(P2, P2)> {
-        let mut lines = self.wall_lines(level);
-        lines.extend(self.separators(level));
+        let walls = self.wall_segments(level);
+        let mut lines: Vec<(P2, P2)> = walls.iter().map(|&(a, b, _)| (a, b)).collect();
+        lines.extend(self.separators(level).into_iter().map(|(a, b)| (to_centre(b, a, &walls), to_centre(a, b, &walls))));
         lines
     }
 
     /// Centre lines of the walls that bound the rooms of `level`, arcs as chords.
     pub fn wall_lines(&self, level: impl Key) -> Vec<(P2, P2)> {
+        self.wall_segments(level).into_iter().map(|(a, b, _)| (a, b)).collect()
+    }
+
+    /// The segments of [`Model::wall_lines`], each with half its wall's thickness.
+    fn wall_segments(&self, level: impl Key) -> Vec<(P2, P2, f64)> {
         self.elements
             .iter()
-            .filter(|(_, e)| matches!(e, Element::Wall(w) if self.bounding(w, level)))
-            .flat_map(|(&id, _)| {
+            .filter_map(|(&id, e)| match e {
+                Element::Wall(w) if self.bounding(w, level) => Some((id, self.thickness(w) / 2.0)),
+                _ => None,
+            })
+            .flat_map(|(id, half)| {
                 let line = walls::centre_line(self, id);
-                line.windows(2).filter_map(|s| s.first().zip(s.get(1)).map(|(a, b)| (*a, *b))).collect::<Vec<_>>()
+                line.windows(2).filter_map(|s| s.first().zip(s.get(1)).map(|(a, b)| (*a, *b, half))).collect::<Vec<_>>()
             })
             .collect()
     }
@@ -5819,6 +5830,25 @@ struct OpeningSpan {
     sill: f64,
     head: f64,
     id: Id,
+}
+
+/// Where the line from `from` through `end` reaches the centre line of a wall that `end` lies inside (within half the wall's
+/// thickness of that line), carrying on the way it points; `end` itself when it lies in no wall or is on a centre line already.
+fn to_centre(from: P2, end: P2, walls: &[(P2, P2, f64)]) -> P2 {
+    let way = (end - from).unit();
+    if !way.is_finite() {
+        return end;
+    }
+    walls
+        .iter()
+        .filter(|&&(a, b, half)| half > 0.0 && geom::dist_to_segment(end, a, b) <= half + TOL)
+        .filter_map(|&(a, b, half)| {
+            // Far enough to cross a wall met at a slant, short of the wall beyond it.
+            let reach = 4.0 * half + TOL;
+            geom::crossing(end, end + way * reach, a, b).map(|t| t * reach)
+        })
+        .min_by(f64::total_cmp)
+        .map_or(end, |d| end + way * d)
 }
 
 #[cfg(test)]
