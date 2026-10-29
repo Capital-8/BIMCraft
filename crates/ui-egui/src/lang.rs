@@ -143,8 +143,8 @@ pub fn use_chinese_font(ctx: &Context, find: FontFinder) -> bool {
     let Some((bytes, index)) = find() else { return false };
     let mut data = FontData::from_owned(bytes);
     data.index = index;
-    let family = |family| InsertFontFamily { family, priority: FontPriority::Lowest };
-    ctx.add_font(FontInsert::new("chinese", data, vec![family(egui::FontFamily::Proportional), family(egui::FontFamily::Monospace)]));
+    let families = crate::style::families().map(|family| InsertFontFamily { family, priority: FontPriority::Lowest });
+    ctx.add_font(FontInsert::new("chinese", data, families.into()));
     ctx.data_mut(|d| d.insert_temp(Id::new("chinese-font"), true));
     true
 }
