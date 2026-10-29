@@ -40,11 +40,12 @@ pub enum Lang {
     English,
     Portuguese,
     Spanish,
+    Czech,
     Chinese,
 }
 
 impl Lang {
-    pub const ALL: [Lang; 4] = [Lang::English, Lang::Portuguese, Lang::Spanish, Lang::Chinese];
+    pub const ALL: [Lang; 5] = [Lang::English, Lang::Portuguese, Lang::Spanish, Lang::Czech, Lang::Chinese];
 
     /// The project language that goes with it, which new projects are named in: Chinese has none, so English.
     pub fn project(self) -> Language {
@@ -52,6 +53,7 @@ impl Lang {
             Lang::English | Lang::Chinese => Language::English,
             Lang::Portuguese => Language::Portuguese,
             Lang::Spanish => Language::Spanish,
+            Lang::Czech => Language::Czech,
         }
     }
 
@@ -91,6 +93,7 @@ impl From<Language> for Lang {
             Language::English => Lang::English,
             Language::Portuguese => Lang::Portuguese,
             Language::Spanish => Lang::Spanish,
+            Language::Czech => Lang::Czech,
         }
     }
 }
@@ -140,8 +143,8 @@ pub fn use_chinese_font(ctx: &Context, find: FontFinder) -> bool {
     let Some((bytes, index)) = find() else { return false };
     let mut data = FontData::from_owned(bytes);
     data.index = index;
-    let families = crate::style::families().map(|family| InsertFontFamily { family, priority: FontPriority::Lowest });
-    ctx.add_font(FontInsert::new("chinese", data, families.into()));
+    let family = |family| InsertFontFamily { family, priority: FontPriority::Lowest };
+    ctx.add_font(FontInsert::new("chinese", data, vec![family(egui::FontFamily::Proportional), family(egui::FontFamily::Monospace)]));
     ctx.data_mut(|d| d.insert_temp(Id::new("chinese-font"), true));
     true
 }
@@ -154,28 +157,16 @@ pub(crate) fn assume_chinese_font(ctx: &Context) {
 
 /// `english` in the interface's language.
 pub fn t(english: &str) -> &str {
-    translated_in(get(), english).unwrap_or(english)
+    tc("", english)
 }
 
-/// `english` in `lang`, when a non-English interface catalog has a finished translation.
-pub fn translated_in(lang: Lang, english: &str) -> Option<&'static str> {
-    match lang {
-        Lang::Chinese => bimcraft_i18n::translated(CATALOGS, lang.code(), "", english),
-        other => translated(other.project(), english),
+/// `english` in the interface's language, within `context`.
+pub fn tc(context: &str, english: &str) -> &str {
+    let lang = get();
+    if lang == Lang::English {
+        return english;
     }
-}
-
-/// An interface translation for one of the project languages, when the catalog has it.
-pub fn translated(language: Language, english: &str) -> Option<&'static str> {
-    if language == Language::English {
-        return None;
-    }
-    bimcraft_i18n::translated(CATALOGS, language.code(), "", english)
-}
-
-/// A message whose meaning is distinguished by a PO `msgctxt`.
-pub fn tc<'a>(context: &str, english: &'a str) -> &'a str {
-    bimcraft_i18n::translated(CATALOGS, get().code(), context, english).unwrap_or(english)
+    bimcraft_i18n::translated(CATALOGS, lang.code(), context, english).unwrap_or(english)
 }
 
 /// `template` translated, its `{}`s filled with `args` in order.
@@ -191,6 +182,7 @@ pub fn category(category: &str, several: bool) -> String {
         "window" => (msg!("category", "Window"), msg!("category-plural", "Windows")),
         "floor" => (msg!("category", "Floor"), msg!("category-plural", "Floors")),
         "room" => (msg!("category", "Room"), msg!("category-plural", "Rooms")),
+        "roomseparator" => (msg!("category", "Room Separator"), msg!("category-plural", "Room Separators")),
         "level" => (msg!("category", "Level"), msg!("category-plural", "Levels")),
         "grid" => (msg!("category", "Grid"), msg!("category-plural", "Grids")),
         "dimension" => (msg!("category", "Dimension"), msg!("category-plural", "Dimensions")),
@@ -200,21 +192,20 @@ pub fn category(category: &str, several: bool) -> String {
         "sheet" => (msg!("category", "Sheet"), msg!("category-plural", "Sheets")),
         "viewport" => (msg!("category", "Viewport"), msg!("category-plural", "Viewports")),
         "column" => (msg!("category", "Column"), msg!("category-plural", "Columns")),
+        "structuralcolumn" => (msg!("category", "Structural Column"), msg!("category-plural", "Structural Columns")),
+        "beam" => (msg!("category", "Beam"), msg!("category-plural", "Beams")),
+        "footing" => (msg!("category", "Footing"), msg!("category-plural", "Footings")),
+        "stripfooting" => (msg!("category", "Strip Footing"), msg!("category-plural", "Strip Footings")),
         "component" => (msg!("category", "Component"), msg!("category-plural", "Components")),
         "stair" => (msg!("category", "Stair"), msg!("category-plural", "Stairs")),
         "roof" => (msg!("category", "Roof"), msg!("category-plural", "Roofs")),
         "ceiling" => (msg!("category", "Ceiling"), msg!("category-plural", "Ceilings")),
         "shaft" => (msg!("category", "Shaft Opening"), msg!("category-plural", "Shaft Openings")),
-        "mass" => (msg!("category", "Mass"), msg!("category-plural", "Masses")),
-        "region" => (msg!("category", "Filled Region"), msg!("category-plural", "Filled Regions")),
-        "massfloor" => (msg!("category", "Mass Floor"), msg!("category-plural", "Mass Floors")),
-        "ramp" => (msg!("category", "Ramp"), msg!("category-plural", "Ramps")),
         "railing" => (msg!("category", "Railing"), msg!("category-plural", "Railings")),
-        "roomseparator" => (msg!("category", "Room Separator"), msg!("category-plural", "Room Separators")),
-        "beam" => (msg!("category", "Beam"), msg!("category-plural", "Beams")),
-        "structuralcolumn" => (msg!("category", "Structural Column"), msg!("category-plural", "Structural Columns")),
-        "footing" => (msg!("category", "Footing"), msg!("category-plural", "Footings")),
-        "stripfooting" => (msg!("category", "Strip Footing"), msg!("category-plural", "Strip Footings")),
+        "ramp" => (msg!("category", "Ramp"), msg!("category-plural", "Ramps")),
+        "mass" => (msg!("category", "Mass"), msg!("category-plural", "Masses")),
+        "massfloor" => (msg!("category", "Mass Floor"), msg!("category-plural", "Mass Floors")),
+        "filledregion" => (msg!("category", "Filled Region"), msg!("category-plural", "Filled Regions")),
         "pipe" => (msg!("category", "Pipe"), msg!("category-plural", "Pipes")),
         "conduit" => (msg!("category", "Conduit"), msg!("category-plural", "Conduits")),
         "cabletray" => (msg!("category", "Cable Tray"), msg!("category-plural", "Cable Trays")),
