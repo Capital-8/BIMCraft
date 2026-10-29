@@ -1462,7 +1462,7 @@ pub struct Sheet {
     pub size: String,
 }
 
-/// The paper an ISO size names, landscape: width and height in mm.
+/// The paper a standard size names, landscape: width and height in mm.
 pub fn paper(size: &str) -> Option<P2> {
     match size.trim().to_ascii_uppercase().as_str() {
         "A0" => Some(P2(1189.0, 841.0)),
@@ -1470,6 +1470,19 @@ pub fn paper(size: &str) -> Option<P2> {
         "A2" => Some(P2(594.0, 420.0)),
         "A3" => Some(P2(420.0, 297.0)),
         "A4" => Some(P2(297.0, 210.0)),
+        // US Architectural sizes (landscape, mm)
+        "ARCH A" | "ARCHA" => Some(P2(304.8, 228.6)),
+        "ARCH B" | "ARCHB" => Some(P2(457.2, 304.8)),
+        "ARCH C" | "ARCHC" => Some(P2(609.6, 457.2)),
+        "ARCH D" | "ARCHD" => Some(P2(914.4, 609.6)),
+        "ARCH E" | "ARCHE" => Some(P2(1219.2, 914.4)),
+        "ARCH E1" | "ARCHE1" => Some(P2(1066.8, 762.0)),
+        // ANSI Engineering sizes (landscape, mm)
+        "ANSI A" | "ANSIA" | "LETTER" => Some(P2(279.4, 215.9)),
+        "ANSI B" | "ANSIB" | "TABLOID" | "LEDGER" => Some(P2(431.8, 279.4)),
+        "ANSI C" | "ANSIC" => Some(P2(558.8, 431.8)),
+        "ANSI D" | "ANSID" => Some(P2(863.6, 558.8)),
+        "ANSI E" | "ANSIE" => Some(P2(1117.6, 863.6)),
         _ => None,
     }
 }
@@ -2226,6 +2239,9 @@ pub struct Model {
     /// ([`Model::line_weights`]).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub line_weights: Option<crate::pen::LineWeights>,
+    /// What technical standard (NBR, ISO, ANSI, EU, JIS) drawing conventions follow.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub standard: Option<crate::standards::TechnicalStandard>,
     /// The pens each model category draws in, cut and in projection (Manage > Object Styles), by category: only those it
     /// has set apart from what a project starts with ([`Model::object_style`]).
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
@@ -2266,6 +2282,33 @@ pub struct Model {
 }
 
 impl Model {
+    /// What technical standard (NBR, ISO, ANSI, EU, JIS) drawing conventions follow: the project's own, else ISO. A project made
+    /// before standards existed has none, and its sheets are not changed by guessing one from its language or units.
+    pub fn standard(&self) -> crate::standards::TechnicalStandard {
+        self.standard.unwrap_or(crate::standards::TechnicalStandard::Iso)
+    }
+
+    /// Adapt the project to `std`: sets the technical standard and optionally updates line weights,
+    /// object styles, and units to standard defaults.
+    pub fn apply_standard(&mut self, std: crate::standards::TechnicalStandard, line_weights: bool, object_styles: bool, units: bool) {
+        self.standard = Some(std);
+        if units {
+            if std == crate::standards::TechnicalStandard::Ansi && !self.units.imperial() {
+                self.units = Units::FeetInches;
+            } else if std != crate::standards::TechnicalStandard::Ansi && self.units.imperial() {
+                self.units = std.default_units();
+            }
+        }
+        if line_weights {
+            self.line_weights = Some(std.line_weights(self.units));
+        }
+        if object_styles {
+            for (cat, style) in std.object_styles() {
+                self.object_styles.insert(cat.to_string(), style);
+            }
+        }
+    }
+
     /// What its pens draw on paper: its own line weights, or those a project in its units starts with.
     pub fn line_weights(&self) -> std::borrow::Cow<'_, crate::pen::LineWeights> {
         match &self.line_weights {
@@ -2281,6 +2324,10 @@ impl Model {
 
     /// An empty project in `language`: its two levels named in it.
     pub fn new_in(name: &str, language: Language) -> Model {
+        let standard = match language {
+            Language::Portuguese => Some(crate::standards::TechnicalStandard::Nbr),
+            _ => None,
+        };
         let mut m = Model {
             format: FORMAT,
             name: name.into(),
@@ -2303,6 +2350,7 @@ impl Model {
             phase_overrides: phasing::overrides(),
             option_sets: BTreeMap::new(),
             line_weights: None,
+            standard,
             object_styles: BTreeMap::new(),
             line_patterns: lines::patterns(language),
             line_styles: lines::styles(language),
@@ -5573,7 +5621,7 @@ impl Model {
                         return Err(format!("{who}: another sheet is already numbered `{}`", sh.number));
                     }
                     if paper(&sh.size).is_none() {
-                        return Err(format!("{who}: size `{}` isn't A0, A1, A2, A3 or A4", sh.size));
+                        return Err(format!("{who}: size `{}` isn't A0, A1, A2, A3 or A4, or an Arch / ANSI size", sh.size));
                     }
                 }
                 Element::Viewport(v) => {

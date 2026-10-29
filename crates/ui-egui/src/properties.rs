@@ -2165,6 +2165,18 @@ impl BimApp {
                         "A direction from the last point sticks to multiples of this angle, from east and from the line before; a dashed guide shows it",
                     ));
                 });
+                ui.add_space(8.0);
+                ui.separator();
+                ui.add_space(4.0);
+                ui.checkbox(&mut s.alignment_guides, t("Alignment Guides")).on_hover_text(t(
+                "Show temporary alignment guides (smart snapping) when drawing",
+            ));
+            if s.alignment_guides {
+                ui.horizontal(|ui| {
+                    ui.label(t("Snap tolerance"));
+                    ui.add(egui::Slider::new(&mut s.alignment_tolerance, 2.0..=32.0).suffix(" px"));
+                });
+                }
             });
             crate::popup::footer(ui, |ui| {
                 ui.with_layout(Layout::right_to_left(Align::Min), |ui| close = ui.button(t("Close")).clicked());

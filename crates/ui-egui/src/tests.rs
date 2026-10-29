@@ -3354,6 +3354,76 @@ fn manage_snaps_switches_each_snap_and_the_angle_steps() {
 }
 
 #[test]
+fn walls_drawn_near_alignment_guide_snap_to_other_walls_reference_points() {
+    let mut h = app("");
+    // First wall from (0, 0) to (5000, 0)
+    tool(&mut h, "Wall");
+    click(&mut h, P2(0.0, 0.0));
+    click(&mut h, P2(5000.0, 0.0));
+    key(&mut h, Key::Enter);
+
+    // Second wall starting at (0, 3000)
+    tool(&mut h, "Wall");
+    click(&mut h, P2(0.0, 3000.0));
+    // Click near X = 5000 (e.g. 5005, 3000) within tolerance
+    click(&mut h, P2(5005.0, 3000.0));
+    key(&mut h, Key::Enter);
+
+    let w = walls(&h);
+    assert_eq!(w.len(), 2);
+    assert!(w[1].0.dist(P2(0.0, 3000.0)) < 1e-2);
+    // The second wall's endpoint snapped to exactly X = 5000.0 aligned with the first wall's endpoint
+    assert_eq!(w[1].1.0, 5000.0);
+    assert!((w[1].1.1 - 3000.0).abs() < 1e-2);
+}
+
+#[test]
+fn manage_snaps_toggles_alignment_guides() {
+    let mut h = app("");
+    assert!(h.state().snaps.alignment_guides);
+    press(&mut h, "Manage");
+    press(&mut h, "Snaps");
+    assert!(h.query_by_label("Alignment Guides").is_some());
+    pick(&mut h, Role::CheckBox, "Alignment Guides");
+    press(&mut h, "Close");
+    assert!(!h.state().snaps.alignment_guides);
+}
+
+#[test]
+fn grids_drawn_near_alignment_guide_snap_to_other_grids_reference_points() {
+    let mut h = app("");
+    // First grid from (0, 0) to (0, 5000)
+    tool(&mut h, "Grid");
+    click(&mut h, P2(0.0, 0.0));
+    click(&mut h, P2(0.0, 5000.0));
+
+    // Second grid starting at (3000, 0)
+    tool(&mut h, "Grid");
+    click(&mut h, P2(3000.0, 0.0));
+    // Second point near (3000, 5003) aligned with Y=5000
+    click(&mut h, P2(3000.0, 5003.0));
+
+    let grid = ids(&h, "grid");
+    assert_eq!(grid.len(), 2);
+    assert_eq!(field(&h, grid[1], "start"), json!([3000.0, 0.0]));
+    assert_eq!(field(&h, grid[1], "end"), json!([3000.0, 5000.0]));
+}
+
+#[test]
+fn shortcut_toggles_alignment_guides() {
+    let mut h = app("");
+    assert!(h.state().snaps.alignment_guides);
+    key(&mut h, Key::F8);
+    assert!(!h.state().snaps.alignment_guides);
+    key(&mut h, Key::F8);
+    assert!(h.state().snaps.alignment_guides);
+    shortcut(&mut h, "AG");
+    assert!(!h.state().snaps.alignment_guides);
+    shortcut(&mut h, "OG");
+    assert!(h.state().snaps.alignment_guides);
+}
+
+#[test]
 fn the_measure_tool_lays_a_ruler_between_two_snapped_points_and_esc_takes_it_away() {
     let mut h = app(BOX);
     press(&mut h, "Annotate");
@@ -5217,6 +5287,7 @@ mod revit;
 mod section_box;
 mod sketch;
 mod smallest;
+mod standards;
 mod start;
 mod titlebar;
 mod tools;

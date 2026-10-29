@@ -5,6 +5,7 @@
 pub mod align;
 #[cfg(test)]
 mod align_tests;
+pub mod alignment;
 pub mod autosave;
 #[cfg(test)]
 mod autosave_tests;
@@ -75,6 +76,7 @@ pub mod skeleton;
 pub mod sketch;
 pub mod snap;
 pub mod stairs;
+pub mod standards;
 pub mod step;
 pub mod storm;
 pub mod styles;

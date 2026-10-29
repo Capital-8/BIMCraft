@@ -1265,6 +1265,17 @@ pub static ALL: &[Command] = &[
          Portuguese, Spanish or Swedish. What's already named stays named",
         language,
     ),
+    edit(
+        "standard",
+        "Technical Standards",
+        &[],
+        "{set?: nbr|iso|ansi|eu|jis, adapt_all?: bool, adapt_line_weights?: bool, adapt_object_styles?: bool, adapt_units?: bool} configures the project's technical standard (NBR, ISO, ANSI, EU, JIS) \
+         and adapts line weights (pens), sheet layouts, object styles, and dimensioning conventions. \
+         NBR includes NBR 16861, NBR 16752, NBR 17006, NBR 17067, NBR 17068, and NBR 6492. \
+         The numbers each standard sets (margins, folds, pens, per-category pens) came with the contribution that added them and \
+         have not been checked against the standards named. Without `set`, reports the current standard and available standards",
+        standard,
+    ),
     other("inspect", "Inspect", "{} levels, element counts, types, warnings and undo history", inspect),
     other(
         "render",
@@ -9260,6 +9271,46 @@ fn delete(s: &mut Session, p: &Value) -> R {
 
 // ---------- reading ----------
 
+fn standard(s: &mut Session, p: &Value) -> R {
+    let c = "standard";
+    if let Some(code) = string(c, p, "set")? {
+        let std = crate::standards::TechnicalStandard::from_code(&code)
+            .ok_or_else(|| bad(c, format!("`set` is nbr, iso, ansi, eu or jis, not `{code}`")))?;
+        let flag = |key: &str, default: bool| -> Result<bool, String> {
+            match p.get(key) {
+                None | Some(Value::Null) => Ok(default),
+                Some(Value::Bool(b)) => Ok(*b),
+                Some(v) => Err(bad(c, format!("`{key}` is true or false, not {v}"))),
+            }
+        };
+        let adapt_all = flag("adapt_all", true)?;
+        let (lw, os, un) =
+            (flag("adapt_line_weights", adapt_all)?, flag("adapt_object_styles", adapt_all)?, flag("adapt_units", adapt_all)?);
+        s.model_mut().apply_standard(std, lw, os, un);
+    }
+    let m = &s.model;
+    let std = m.standard();
+    Ok(json!({
+        "standard": std.code(),
+        "name": std.name(),
+        "short_name": std.short_name(),
+        "region": std.region(),
+        "governing_body": std.governing_body(),
+        "references": std.reference_standards(),
+        "projection": std.projection_method().name(),
+        "default_units": std.default_units().name(),
+        "default_sheet_size": std.default_sheet_size(),
+        "all": crate::standards::TechnicalStandard::ALL.iter().map(|s| json!({
+            "code": s.code(),
+            "name": s.name(),
+            "short_name": s.short_name(),
+            "region": s.region(),
+            "description": s.description(),
+            "references": s.reference_standards(),
+        })).collect::<Vec<_>>()
+    }))
+}
+
 fn units(s: &mut Session, p: &Value) -> R {
     let c = "units";
     if let Some(name) = string(c, p, "length")? {
@@ -10025,7 +10076,7 @@ fn inspect(s: &mut Session, _: &Value) -> R {
         })
         .collect();
     Ok(json!({
-        "name": m.name, "units": "mm", "project_units": m.units.name(), "room_area": m.room_area.name(), "language": m.language.code(), "path": s.path, "levels": levels,
+        "name": m.name, "units": "mm", "project_units": m.units.name(), "room_area": m.room_area.name(), "language": m.language.code(), "standard": m.standard().code(), "path": s.path, "levels": levels,
         "counts": counts,
         "types": m.types, "materials": m.materials, "images": images(m), "families": families(m), "parameters": m.parameters,
         "view_filters": m.view_filters, "view_templates": m.view_templates, "phases": m.phases, "phase_filters": m.phase_filters,

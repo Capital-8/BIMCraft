@@ -53,6 +53,7 @@ mod section_box;
 pub mod settings;
 pub mod shortcuts;
 mod sketch;
+mod standards;
 mod start;
 mod structure;
 mod style;
@@ -305,7 +306,7 @@ type Buttons<'a> = &'a [(Icon, &'a str, &'a str, Option<Tool>, bool)];
 
 /// The desktop's own two-letter shortcuts, which [`BimApp::shortcut`] takes before the commands'
 /// aliases, and what Keyboard Shortcuts (KS) calls them.
-const SHORTCUTS: [(&str, &str); 51] = [
+const SHORTCUTS: [(&str, &str); 53] = [
     ("3D", "3D View"),
     ("MD", "Modify"),
     ("SB", "Floor: Structural"),
@@ -324,6 +325,8 @@ const SHORTCUTS: [(&str, &str); 51] = [
     ("VP", "Properties"),
     ("NP", "Project Browser"),
     ("SA", "Select All Instances"),
+    ("AG", msg!("Alignment Guides")),
+    ("OG", msg!("Orthogonal Guides")),
     ("SE", msg!("Snap to Endpoints")),
     ("SM", msg!("Snap to Midpoints")),
     ("SI", msg!("Snap to Intersections")),
@@ -648,6 +651,8 @@ pub struct BimApp {
     project: u64,
     /// How wide the ribbon's Mode panel was last drawn, to stand it at the ribbon's right end.
     mode_width: f32,
+    /// Manage > Technical Standards, while open.
+    standards_dialog: Option<standards::StandardsDialog>,
     options_dialog: Option<phasing::OptionsDialog>,
     purge_dialog: Option<purge::PurgeDialog>,
     /// Manage > Select by ID and IDs of Selection, while open.
@@ -1077,6 +1082,7 @@ impl BimApp {
             fill_patterns_dialog: None,
             sketch: None,
             mode_width: 0.0,
+            standards_dialog: None,
             options_dialog: None,
             purge_dialog: None,
             select_by_id: None,
@@ -1434,6 +1440,13 @@ impl BimApp {
         self.show_palette(p, !self.docking.shown(p));
     }
 
+    /// Toggle temporary alignment guides (smart snapping) on or off.
+    pub(crate) fn toggle_alignment_guides(&mut self) {
+        self.snaps.alignment_guides = !self.snaps.alignment_guides;
+        let text = if self.snaps.alignment_guides { t("Alignment guides on") } else { t("Alignment guides off") };
+        self.status = Status { text: text.to_string(), error: false };
+    }
+
     /// Follow what the last command removed: the selection, views of levels that are gone, and
     /// the contextual tab once its tool or selection is.
     fn tidy(&mut self) {
@@ -1617,6 +1630,9 @@ impl BimApp {
         if matches!(self.tool, Tool::Component | Tool::Fixture(_)) && pressed(Modifiers::NONE, Key::Space) {
             self.component_angle = (self.component_angle + 90.0) % 360.0;
         }
+        if pressed(Modifiers::NONE, Key::F8) || pressed(Modifiers::NONE, Key::F11) {
+            self.toggle_alignment_guides();
+        }
         let typed: String = ctx.input(|i| {
             i.events
                 .iter()
@@ -1691,6 +1707,10 @@ impl BimApp {
             }
             "SA" => {
                 self.select_all_instances();
+                return true;
+            }
+            "AG" | "OG" => {
+                self.toggle_alignment_guides();
                 return true;
             }
             "KS" => {
@@ -3442,6 +3462,11 @@ impl BimApp {
             if big_button(ui, Icon::Delete, "Purge Unused", self.purge_dialog.is_some(), tip).clicked() {
                 self.open_purge();
             }
+            let now_std = self.session.model.standard();
+            let tip = tf("Technical Standards: configure drawing standards (NBR, ISO, ANSI, EU); now {}", &[t(now_std.short_name())]);
+            if big_button(ui, Icon::Settings, "Technical Standards", self.standards_dialog.is_some(), &tip).clicked() {
+                self.standards_dialog = Some(standards::StandardsDialog::new(&self.session.model));
+            }
             // Fills, snaps and units, stacked.
             stacked(ui, |ui| {
                 let tip = msg!("Fill Patterns: the patterns filled regions fill with, and the filled region types");
@@ -4446,6 +4471,7 @@ impl BimApp {
         self.text_type_window(ctx);
         self.dimension_type_window(ctx);
         self.dimension_text_window(ctx);
+        self.standards_window(ctx);
         self.options_window(ctx);
         self.purge_window(ctx);
         if std::mem::take(&mut self.link_dialog) {
