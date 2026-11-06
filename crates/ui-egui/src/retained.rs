@@ -825,6 +825,64 @@ mod tests {
         crate::style::set_canvas(false, None);
     }
 
+    /// Diagnostic 4 (scratch): case 3 with egui's coarse culling on and off, and the primitives near where it differed.
+    #[test]
+    fn diag_arm_cull() {
+        let diff = |a: &[u8], b: &[u8]| a.chunks(4).zip(b.chunks(4)).filter(|(x, y)| x != y).count();
+        let Some(card) = card() else {
+            eprintln!("DIAG4 no card");
+            return;
+        };
+        let (m, level, view, owner) = drawing();
+        let clip = Rect::from_min_max(pos2(37.0, 21.0), pos2(611.0, 503.0));
+        let selected = vec![owner];
+        crate::style::set_canvas(false, None);
+        let d = Arc::new(render::draw(&m, level, view));
+        let at = Place::at(clip.min);
+        for (i, prim) in d.prims.iter().enumerate() {
+            let pts = prim.points();
+            let (mut lo, mut hi) = (pos2(f32::INFINITY, f32::INFINITY), pos2(f32::NEG_INFINITY, f32::NEG_INFINITY));
+            for q in &pts {
+                let q = at.pos(*q);
+                (lo, hi) = (lo.min(q), hi.max(q));
+            }
+            if hi.x < 465.0 || lo.x > 520.0 || hi.y < 498.0 || lo.y > 508.0 {
+                continue;
+            }
+            let (kind, width, dash) = match prim {
+                bimcraft_core::render::Prim::Fill { .. } => ("fill", 0.0, false),
+                bimcraft_core::render::Prim::Line { width, dash, .. } => ("line", canvas::on_screen(*width, at.k, false), dash.is_some()),
+                bimcraft_core::render::Prim::Image { .. } => ("image", 0.0, false),
+            };
+            let culled = !Rect::from_min_max(lo, hi).expand(width / 2.0).intersects(clip);
+            eprintln!(
+                "DIAG4 prim {i} {kind} owner {:?} part {:?} points {} from {lo:?} to {hi:?} width {width} dash {dash}; egui culls it {culled}",
+                d.owners.get(i),
+                d.parts.get(i),
+                pts.len()
+            );
+        }
+        for format in [wgpu::TextureFormat::Rgba8Unorm, wgpu::TextureFormat::Rgba8UnormSrgb] {
+            let pipeline = Arc::new(Pipeline::new(&card.0, &card.1, format));
+            let today = frame(&card, format, 1.0, clip, |p, _| canvas::paint(p, at, &d, &selected, None, false, &[]));
+            let unculled = frame(&card, format, 1.0, clip, |p, ctx| {
+                ctx.tessellation_options_mut(|o| o.coarse_tessellation_culling = false);
+                canvas::paint(p, at, &d, &selected, None, false, &[]);
+            });
+            let mut retained = Retained::default();
+            let kept = frame(&card, format, 1.0, clip, |p, ctx| {
+                retained.paint(ctx, &pipeline, p, at, at.origin, &d, &selected, None, false);
+            });
+            eprintln!(
+                "DIAG4 {format:?}: today/kept {}, unculled/kept {}, today/unculled {}",
+                diff(&today, &kept),
+                diff(&unculled, &kept),
+                diff(&today, &unculled)
+            );
+        }
+        crate::style::set_canvas(false, None);
+    }
+
     /// Diagnostic 3 (scratch): every case of `kept_triangles_draw_the_pixels_egui_draws`, in its order, counted instead of asserted,
     /// with the pixels and vertices that differ.
     #[test]
