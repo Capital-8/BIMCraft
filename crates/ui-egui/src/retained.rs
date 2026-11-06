@@ -133,7 +133,7 @@ impl Mesh {
                 mapped_at_creation: false,
             })
         };
-        let vertex_buffer = buffer("canvas vertices", vertices * STRIDE, wgpu::BufferUsages::VERTEX);
+        let vertex_buffer = buffer("canvas vertices", vertices * STRIDE, wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_SRC);
         let index_buffer = buffer("canvas indices", indices * 4, wgpu::BufferUsages::INDEX);
         let (mut v, mut i) = (0, 0);
         for part in parts {
@@ -715,6 +715,111 @@ mod tests {
                 assert!(today.iter().any(|b| *b != today[0]), "the frame holds something");
                 let differs = today.chunks(4).zip(kept.chunks(4)).filter(|(a, b)| a != b).count();
                 assert_eq!(differs, 0, "{format:?} at {ppp}: {differs} pixels differ from egui's (dark {dark}, thin {thin})");
+            }
+        }
+        crate::style::set_canvas(false, None);
+    }
+
+    /// Diagnostic for the ARM runner (branch diag/arm-pixels, never merged): on each backend and format, which pixels differ between
+    /// egui's frame, a fresh build and a retint, and whether the retint's vertices are a fresh build's.
+    #[test]
+    fn diag_arm_pixels() {
+        fn on(backends: wgpu::Backends) -> Option<(wgpu::Device, wgpu::Queue)> {
+            let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
+                backends,
+                flags: wgpu::InstanceFlags::empty(),
+                ..wgpu::InstanceDescriptor::new_without_display_handle()
+            });
+            let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default())).ok()?;
+            eprintln!("DIAG {backends:?}: {:?}", adapter.get_info());
+            pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default())).ok()
+        }
+        fn vertices(card: &(wgpu::Device, wgpu::Queue), r: &Retained) -> Vec<u8> {
+            let Some((_, Kept::Mesh(mesh, _))) = &r.kept else { return Vec::new() };
+            let size = mesh.vertices.size();
+            let read = card.0.create_buffer(&wgpu::BufferDescriptor {
+                label: None,
+                size,
+                usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
+            let mut encoder = card.0.create_command_encoder(&Default::default());
+            encoder.copy_buffer_to_buffer(&mesh.vertices, 0, &read, 0, size);
+            card.1.submit([encoder.finish()]);
+            read.slice(..).map_async(wgpu::MapMode::Read, |_| ());
+            card.0.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+            read.slice(..).get_mapped_range().unwrap().to_vec()
+        }
+        let vertex = |bytes: &[u8], i: usize| {
+            let s = &bytes[i * 20..i * 20 + 20];
+            let f = |o: usize| f32::from_le_bytes([s[o], s[o + 1], s[o + 2], s[o + 3]]);
+            format!("pos ({:?}, {:?}) uv ({:?}, {:?}) colour {:02x?}", f(0), f(4), f(8), f(12), &s[16..20])
+        };
+        let diff = |a: &[u8], b: &[u8]| {
+            a.chunks(4).zip(b.chunks(4)).enumerate().filter(|(_, (x, y))| x != y).map(|(i, _)| i).collect::<Vec<usize>>()
+        };
+        eprintln!("DIAG threads: {}", rayon::current_num_threads());
+        let (m, level, view, owner) = drawing();
+        let second = render::draw(&m, level, view).owners.iter().flatten().copied().find(|id| *id != owner).unwrap();
+        eprintln!("DIAG second: {second:?}");
+        let clip = Rect::from_min_size(pos2(0.0, 0.0), vec2(900.0, 640.0));
+        for backends in [wgpu::Backends::VULKAN, wgpu::Backends::GL] {
+            let Some(card) = on(backends) else {
+                eprintln!("DIAG {backends:?}: no card");
+                continue;
+            };
+            for format in [wgpu::TextureFormat::Rgba8Unorm, wgpu::TextureFormat::Rgba8UnormSrgb] {
+                let pipeline = Arc::new(Pipeline::new(&card.0, &card.1, format));
+                crate::style::set_canvas(false, None);
+                let d = Arc::new(render::draw(&m, level, view));
+                let at = Place::at(clip.min);
+                let today = frame(&card, format, 1.0, clip, |p, _| canvas::paint(p, at, &d, &[], None, false, &[]));
+                let mut fresh = Retained::default();
+                let kept = frame(&card, format, 1.0, clip, |p, ctx| {
+                    fresh.paint(ctx, &pipeline, p, at, at.origin, &d, &[], None, false);
+                });
+                let mut moved = Retained::default();
+                let other = frame(&card, format, 1.0, clip, |p, ctx| {
+                    moved.paint(ctx, &pipeline, p, at, at.origin, &d, &[], Some(second), false);
+                });
+                let hovered = vertices(&card, &moved);
+                let through = frame(&card, format, 1.0, clip, |p, ctx| {
+                    moved.paint(ctx, &pipeline, p, at, at.origin, &d, &[], None, false);
+                });
+                let second_today = frame(&card, format, 1.0, clip, |p, _| canvas::paint(p, at, &d, &[], Some(second), false, &[]));
+                let again = frame(&card, format, 1.0, clip, |p, _| canvas::paint(p, at, &d, &[], None, false, &[]));
+                eprintln!(
+                    "DIAG {backends:?} {format:?}: built {} retinted {}; today/again {}, today/kept {}, today/through {}, kept/through {}, \
+                     other/second_today {}",
+                    moved.built,
+                    moved.retinted,
+                    diff(&today, &again).len(),
+                    diff(&today, &kept).len(),
+                    diff(&today, &through).len(),
+                    diff(&kept, &through).len(),
+                    diff(&other, &second_today).len()
+                );
+                let px = |v: &[u8], i: usize| v.get(i * 4..i * 4 + 4).map(<[u8]>::to_vec);
+                for i in diff(&today, &through).into_iter().take(40) {
+                    eprintln!(
+                        "DIAG   through ({}, {}): today {:?} kept {:?} through {:?} other {:?}",
+                        i % SIDE[0] as usize,
+                        i / SIDE[0] as usize,
+                        px(&today, i),
+                        px(&kept, i),
+                        px(&through, i),
+                        px(&other, i)
+                    );
+                }
+                for i in diff(&today, &kept).into_iter().take(20) {
+                    eprintln!("DIAG   kept ({}, {}): today {:?} kept {:?}", i % SIDE[0] as usize, i / SIDE[0] as usize, px(&today, i), px(&kept, i));
+                }
+                let (a, b) = (vertices(&card, &fresh), vertices(&card, &moved));
+                let differ: Vec<usize> = (0..a.len().min(b.len()) / 20).filter(|i| a[i * 20..i * 20 + 20] != b[i * 20..i * 20 + 20]).collect();
+                eprintln!("DIAG   vertices: fresh {} retinted {}, {} differ", a.len() / 20, b.len() / 20, differ.len());
+                for &i in differ.iter().take(20) {
+                    eprintln!("DIAG     {i}: fresh {} | retinted {} | hovered {}", vertex(&a, i), vertex(&b, i), vertex(&hovered, i));
+                }
             }
         }
         crate::style::set_canvas(false, None);

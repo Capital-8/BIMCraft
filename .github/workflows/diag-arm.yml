@@ -1,0 +1,36 @@
+# A one-off diagnostic for the Linux ARM release job's retained-triangles test, on a scratch branch that is never merged.
+name: Diag ARM pixels
+
+on:
+  push:
+    branches: [diag/arm-pixels]
+
+permissions:
+  contents: read
+
+jobs:
+  arm:
+    runs-on: ubuntu-22.04-arm
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libxkbcommon-dev libwayland-dev libx11-dev \
+            libxrandr-dev libxi-dev libgl1-mesa-dev
+          nproc
+          lscpu | head -24
+          dpkg -l | grep -iE 'mesa|vulkan|llvm|libegl|libgl1' || true
+          ls /usr/share/vulkan/icd.d /usr/share/glvnd/egl_vendor.d 2>&1 || true
+
+      - name: Rust
+        run: rustup update stable && rustup default stable
+
+      - name: Diagnose
+        run: cargo test -p bimcraft-ui-egui --lib diag_arm_pixels -- --nocapture --test-threads=1
+        continue-on-error: true
+
+      - name: The test alone
+        run: cargo test -p bimcraft-ui-egui --lib retained::tests::kept_triangles_draw_the_pixels_egui_draws -- --exact --nocapture
+        continue-on-error: true
