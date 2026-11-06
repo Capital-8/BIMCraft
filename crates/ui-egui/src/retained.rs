@@ -825,6 +825,116 @@ mod tests {
         crate::style::set_canvas(false, None);
     }
 
+    /// Diagnostic 3 (scratch): every case of `kept_triangles_draw_the_pixels_egui_draws`, in its order, counted instead of asserted,
+    /// with the pixels and vertices that differ.
+    #[test]
+    fn diag_arm_cases() {
+        fn read(card: &(wgpu::Device, wgpu::Queue), r: &Retained) -> Vec<u8> {
+            let Some((_, Kept::Mesh(mesh, _))) = &r.kept else { return Vec::new() };
+            let size = mesh.vertices.size();
+            let read = card.0.create_buffer(&wgpu::BufferDescriptor {
+                label: None,
+                size,
+                usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
+            let mut encoder = card.0.create_command_encoder(&Default::default());
+            encoder.copy_buffer_to_buffer(&mesh.vertices, 0, &read, 0, size);
+            card.1.submit([encoder.finish()]);
+            read.slice(..).map_async(wgpu::MapMode::Read, |_| ());
+            card.0.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+            read.slice(..).get_mapped_range().unwrap().to_vec()
+        }
+        let vertex = |bytes: &[u8], i: usize| {
+            let Some(s) = bytes.get(i * 20..i * 20 + 20) else { return "none".to_string() };
+            let f = |o: usize| f32::from_le_bytes([s[o], s[o + 1], s[o + 2], s[o + 3]]);
+            format!("pos ({:?}, {:?}) uv ({:?}, {:?}) colour {:02x?}", f(0), f(4), f(8), f(12), &s[16..20])
+        };
+        let diff = |a: &[u8], b: &[u8]| {
+            a.chunks(4).zip(b.chunks(4)).enumerate().filter(|(_, (x, y))| x != y).map(|(i, _)| i).collect::<Vec<usize>>()
+        };
+        let px = |v: &[u8], i: usize| v.get(i * 4..i * 4 + 4).map(<[u8]>::to_vec);
+        let Some(card) = card() else {
+            eprintln!("DIAG3 no card");
+            return;
+        };
+        let (m, level, view, owner) = drawing();
+        let second = render::draw(&m, level, view).owners.iter().flatten().copied().find(|id| *id != owner).unwrap();
+        eprintln!("DIAG3 owner {owner:?} second {second:?}");
+        let zoomed = View { scale: view.scale * 6.0, ..view };
+        let clips = [Rect::from_min_size(pos2(0.0, 0.0), vec2(900.0, 640.0)), Rect::from_min_max(pos2(37.0, 21.0), pos2(611.0, 503.0))];
+        for format in [wgpu::TextureFormat::Rgba8Unorm, wgpu::TextureFormat::Rgba8UnormSrgb] {
+            let pipeline = Arc::new(Pipeline::new(&card.0, &card.1, format));
+            let tan = Some(egui::Color32::from_rgb(232, 220, 196));
+            for (case, (ppp, view, clip, selected, hovered, thin, dark, ground)) in [
+                (1.0, view, clips[0], vec![], None, false, false, None),
+                (1.0, view, clips[0], vec![], None, false, true, None),
+                (1.0, view, clips[1], vec![owner], None, false, false, None),
+                (1.0, zoomed, clips[1], vec![], Some(owner), true, true, None),
+                (1.5, zoomed, clips[0], vec![owner], None, false, false, None),
+                (1.0, view, clips[0], vec![owner], None, false, false, tan),
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                crate::style::set_canvas(dark, ground);
+                let d = Arc::new(render::draw(&m, level, view));
+                let at = Place::at(clip.min);
+                let today = frame(&card, format, ppp, clip, |p, _| canvas::paint(p, at, &d, &selected, hovered, thin, &[]));
+                let mut retained = Retained::default();
+                let kept = frame(&card, format, ppp, clip, |p, ctx| {
+                    retained.paint(ctx, &pipeline, p, at, at.origin, &d, &selected, hovered, thin);
+                });
+                let mut moved = Retained::default();
+                let other = frame(&card, format, ppp, clip, |p, ctx| {
+                    moved.paint(ctx, &pipeline, p, at, at.origin, &d, &[], Some(second), thin);
+                });
+                let through = frame(&card, format, ppp, clip, |p, ctx| {
+                    moved.paint(ctx, &pipeline, p, at, at.origin, &d, &selected, hovered, thin);
+                });
+                let still = frame(&card, format, ppp, clip, |p, ctx| {
+                    moved.paint(ctx, &pipeline, p, at, at.origin, &d, &selected, hovered, thin);
+                });
+                let second_today = frame(&card, format, ppp, clip, |p, _| canvas::paint(p, at, &d, &[], Some(second), thin, &[]));
+                let (v_kept, v_moved) = (read(&card, &retained), read(&card, &moved));
+                let differ: Vec<usize> =
+                    (0..v_kept.len().min(v_moved.len()) / 20).filter(|i| v_kept[i * 20..i * 20 + 20] != v_moved[i * 20..i * 20 + 20]).collect();
+                let bad = diff(&today, &through);
+                eprintln!(
+                    "DIAG3 {format:?} case {}: built {} retinted {}; today/through {}, today/still {}, today/kept {}, kept/through {}, \
+                     other/second_today {}; vertices {} and {}, {} differ",
+                    case + 1,
+                    moved.built,
+                    moved.retinted,
+                    bad.len(),
+                    diff(&today, &still).len(),
+                    diff(&today, &kept).len(),
+                    diff(&kept, &through).len(),
+                    diff(&other, &second_today).len(),
+                    v_kept.len() / 20,
+                    v_moved.len() / 20,
+                    differ.len()
+                );
+                for &i in bad.iter().take(20) {
+                    eprintln!(
+                        "DIAG3   ({}, {}): today {:?} through {:?} kept {:?} other {:?} still {:?}",
+                        i % SIDE[0] as usize,
+                        i / SIDE[0] as usize,
+                        px(&today, i),
+                        px(&through, i),
+                        px(&kept, i),
+                        px(&other, i),
+                        px(&still, i)
+                    );
+                }
+                for &i in differ.iter().take(12) {
+                    eprintln!("DIAG3     vertex {i}: kept {} | retinted {}", vertex(&v_kept, i), vertex(&v_moved, i));
+                }
+            }
+        }
+        crate::style::set_canvas(false, None);
+    }
+
     /// Diagnostic 2 (scratch): the test's own order, with nothing, a wait or a read of the vertices between the hovered frame and the
     /// retint; then a frame with nothing changed after it, and the vertices as the card holds them.
     #[test]
