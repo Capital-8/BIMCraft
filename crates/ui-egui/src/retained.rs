@@ -825,6 +825,97 @@ mod tests {
         crate::style::set_canvas(false, None);
     }
 
+    /// Diagnostic 2 (scratch): the test's own order, with nothing, a wait or a read of the vertices between the hovered frame and the
+    /// retint; then a frame with nothing changed after it, and the vertices as the card holds them.
+    #[test]
+    fn diag_arm_sequence() {
+        fn read(card: &(wgpu::Device, wgpu::Queue), r: &Retained) -> Vec<u8> {
+            let Some((_, Kept::Mesh(mesh, _))) = &r.kept else { return Vec::new() };
+            let size = mesh.vertices.size();
+            let read = card.0.create_buffer(&wgpu::BufferDescriptor {
+                label: None,
+                size,
+                usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
+            let mut encoder = card.0.create_command_encoder(&Default::default());
+            encoder.copy_buffer_to_buffer(&mesh.vertices, 0, &read, 0, size);
+            card.1.submit([encoder.finish()]);
+            read.slice(..).map_async(wgpu::MapMode::Read, |_| ());
+            card.0.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+            read.slice(..).get_mapped_range().unwrap().to_vec()
+        }
+        let diff = |a: &[u8], b: &[u8]| {
+            a.chunks(4).zip(b.chunks(4)).enumerate().filter(|(_, (x, y))| x != y).map(|(i, _)| i).collect::<Vec<usize>>()
+        };
+        let Some(card) = card() else {
+            eprintln!("DIAG2 no card");
+            return;
+        };
+        let (m, level, view, owner) = drawing();
+        let second = render::draw(&m, level, view).owners.iter().flatten().copied().find(|id| *id != owner).unwrap();
+        let clip = Rect::from_min_size(pos2(0.0, 0.0), vec2(900.0, 640.0));
+        let format = wgpu::TextureFormat::Rgba8Unorm;
+        let pipeline = Arc::new(Pipeline::new(&card.0, &card.1, format));
+        for mode in ["nothing", "wait", "read", "nothing"] {
+            crate::style::set_canvas(false, None);
+            let d = Arc::new(render::draw(&m, level, view));
+            let at = Place::at(clip.min);
+            let today = frame(&card, format, 1.0, clip, |p, _| canvas::paint(p, at, &d, &[], None, false, &[]));
+            let mut fresh = Retained::default();
+            let kept = frame(&card, format, 1.0, clip, |p, ctx| {
+                fresh.paint(ctx, &pipeline, p, at, at.origin, &d, &[], None, false);
+            });
+            let mut moved = Retained::default();
+            let other = frame(&card, format, 1.0, clip, |p, ctx| {
+                moved.paint(ctx, &pipeline, p, at, at.origin, &d, &[], Some(second), false);
+            });
+            match mode {
+                "wait" => {
+                    card.0.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+                }
+                "read" => {
+                    read(&card, &moved);
+                }
+                _ => {}
+            }
+            let through = frame(&card, format, 1.0, clip, |p, ctx| {
+                moved.paint(ctx, &pipeline, p, at, at.origin, &d, &[], None, false);
+            });
+            let still = frame(&card, format, 1.0, clip, |p, ctx| {
+                moved.paint(ctx, &pipeline, p, at, at.origin, &d, &[], None, false);
+            });
+            let (v_fresh, v_moved) = (read(&card, &fresh), read(&card, &moved));
+            let vertices_differ = v_fresh.chunks(20).zip(v_moved.chunks(20)).filter(|(a, b)| a != b).count();
+            let bad = diff(&today, &through);
+            let like_other = bad.iter().filter(|&&i| through.get(i * 4..i * 4 + 4) == other.get(i * 4..i * 4 + 4)).count();
+            eprintln!(
+                "DIAG2 {mode}: built {} retinted {}; today/kept {}, today/through {} ({} of them as the hovered frame), today/still {}, \
+                 vertices differ {}",
+                moved.built,
+                moved.retinted,
+                diff(&today, &kept).len(),
+                bad.len(),
+                like_other,
+                diff(&today, &still).len(),
+                vertices_differ
+            );
+            let px = |v: &[u8], i: usize| v.get(i * 4..i * 4 + 4).map(<[u8]>::to_vec);
+            for &i in bad.iter().take(20) {
+                eprintln!(
+                    "DIAG2   ({}, {}): today {:?} through {:?} other {:?} still {:?}",
+                    i % SIDE[0] as usize,
+                    i / SIDE[0] as usize,
+                    px(&today, i),
+                    px(&through, i),
+                    px(&other, i),
+                    px(&still, i)
+                );
+            }
+        }
+        crate::style::set_canvas(false, None);
+    }
+
     /// The whole app's window on a plan, with a wall selected: `card` given or not.
     fn window(
         card: &(wgpu::Device, wgpu::Queue),

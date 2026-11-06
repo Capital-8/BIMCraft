@@ -28,7 +28,7 @@ jobs:
         run: rustup update stable && rustup default stable
 
       - name: Diagnose
-        run: cargo test -p bimcraft-ui-egui --lib diag_arm_pixels -- --nocapture --test-threads=1
+        run: cargo test -p bimcraft-ui-egui --lib diag_arm_ -- --nocapture --test-threads=1
         continue-on-error: true
 
       - name: The test alone
