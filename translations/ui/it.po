@@ -3773,8 +3773,8 @@ msgid "Home"
 msgstr "Home"
 
 #: crates/ui-egui/src/lib.rs:3091
-msgid "Home ({})"
-msgstr ""
+msgid "Home ({}U)"
+msgstr "Home ({}U)"
 
 #: crates/ui-egui/src/orbit.rs:1582
 msgid "Home View"
@@ -10765,3 +10765,6 @@ msgstr ""
 #: crates/ui-egui/src/fillpatterns.rs:354
 #~ msgid "{}: {} Colour"
 #~ msgstr "{}: colore {}"
+#: crates/ui-egui/src/lib.rs:3091
+#~ msgid "Home ({})"
+#~ msgstr ""

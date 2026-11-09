@@ -3088,7 +3088,7 @@ impl BimApp {
         let row = ui
             .horizontal(|ui| {
                 let cmd = if cfg!(target_os = "macos") { "⌘" } else { "Ctrl+" };
-                if icon_button_tip(ui, Icon::Home, t("Home"), tf("Home ({})", &[cmd])).clicked() {
+                if icon_button_tip(ui, Icon::Home, t("Home"), tf("Home ({}U)", &[cmd])).clicked() {
                     self.toggle_home();
                 }
                 let file = egui::Button::new(RichText::new(t("File")).color(pal().app_bar_text)).frame(false).min_size(vec2(44.0, 24.0));

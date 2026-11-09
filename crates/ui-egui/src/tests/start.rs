@@ -94,6 +94,33 @@ fn ctrl_u_and_the_back_arrow_go_between_the_start_page_and_the_project() {
 }
 
 #[test]
+fn home_and_back_name_the_key_that_takes_you_between_them_in_both_profiles() {
+    let cmd = if cfg!(target_os = "macos") { "⌘" } else { "Ctrl+" };
+    for (profile, mut h) in [("Rev", app("")), ("BIMCraft", bimcraft(""))] {
+        h.state_mut().run("wall", json!({"points": [[0, 0], [3000, 0]]}));
+        h.run();
+        h.get_by_label("Home").hover();
+        h.run();
+        let tip = format!("Home ({cmd}U)");
+        assert!(h.query_by_label(&tip).is_some(), "{profile}: Home's tooltip says {tip}");
+        press(&mut h, "Home");
+        assert!(h.state().home.shown, "{profile}: Home brings up the start page");
+        h.get_by_label("Back").hover();
+        h.run();
+        let tip = format!("Back to the project ({cmd}U)");
+        assert!(h.query_by_label(&tip).is_some(), "{profile}: Back's tooltip says {tip}");
+        // Translated, Home's tooltip is the language's own word, with the same key.
+        press(&mut h, "Back");
+        h.state_mut().lang = crate::lang::Lang::Portuguese;
+        h.run();
+        h.get_by_label("Início").hover();
+        h.run();
+        let tip = format!("Início ({cmd}U)");
+        assert!(h.query_by_label(&tip).is_some(), "{profile}: in Portuguese, Home's tooltip says {tip}");
+    }
+}
+
+#[test]
 fn recent_files_are_tiles_with_a_picture_that_open_with_a_click() {
     let dir = tempfile::tempdir().unwrap();
     let (a, b) = (project(dir.path(), "office.bimcraft"), project(dir.path(), "school.bimcraft"));

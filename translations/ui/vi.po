@@ -3773,8 +3773,8 @@ msgid "Home"
 msgstr "Trang chủ"
 
 #: crates/ui-egui/src/lib.rs:3091
-msgid "Home ({})"
-msgstr ""
+msgid "Home ({}U)"
+msgstr "Trang chủ ({}U)"
 
 #: crates/ui-egui/src/orbit.rs:1582
 msgid "Home View"
@@ -10659,3 +10659,6 @@ msgstr ""
 #: crates/ui-egui/src/orbit.rs:835
 #~ msgid "in the 3D view this tool draws on a level face: the top of a floor, a flat roof or a level"
 #~ msgstr "trong khung nhìn 3D, công cụ này vẽ trên một mặt nằm ngang: mặt trên của sàn, mái bằng hoặc một tầng"
+#: crates/ui-egui/src/lib.rs:3091
+#~ msgid "Home ({})"
+#~ msgstr ""

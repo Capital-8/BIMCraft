@@ -3772,8 +3772,8 @@ msgid "Home"
 msgstr "Domů"
 
 #: crates/ui-egui/src/lib.rs:3091
-msgid "Home ({})"
-msgstr ""
+msgid "Home ({}U)"
+msgstr "Domů ({}U)"
 
 #: crates/ui-egui/src/orbit.rs:1582
 msgid "Home View"
@@ -10781,3 +10781,6 @@ msgstr "Horní"
 #: crates/ui-egui/src/fillpatterns.rs:354
 #~ msgid "{}: {} Colour"
 #~ msgstr "{}: Barva: {}"
+#: crates/ui-egui/src/lib.rs:3091
+#~ msgid "Home ({})"
+#~ msgstr ""

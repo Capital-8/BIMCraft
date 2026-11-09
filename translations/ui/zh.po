@@ -3773,8 +3773,8 @@ msgid "Home"
 msgstr "主页"
 
 #: crates/ui-egui/src/lib.rs:3091
-msgid "Home ({})"
-msgstr ""
+msgid "Home ({}U)"
+msgstr "主页（{}U）"
 
 #: crates/ui-egui/src/orbit.rs:1582
 msgid "Home View"
@@ -10845,3 +10845,6 @@ msgstr "上"
 #: crates/ui-egui/src/fillpatterns.rs:354
 #~ msgid "{}: {} Colour"
 #~ msgstr "{}：{} 颜色"
+#: crates/ui-egui/src/lib.rs:3091
+#~ msgid "Home ({})"
+#~ msgstr ""

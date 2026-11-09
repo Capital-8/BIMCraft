@@ -3773,8 +3773,8 @@ msgid "Home"
 msgstr "主頁"
 
 #: crates/ui-egui/src/lib.rs:3091
-msgid "Home ({})"
-msgstr ""
+msgid "Home ({}U)"
+msgstr "主頁（{}U）"
 
 #: crates/ui-egui/src/orbit.rs:1582
 msgid "Home View"
@@ -10905,3 +10905,6 @@ msgstr "上"
 #: crates/ui-egui/src/standards.rs:94
 #~ msgid "‧ Wide / Heavy (0.50 mm — 0.70 mm): Cut walls and structural sections."
 #~ msgstr "‧ 粗線 (0.50 mm — 0.70 mm)：剖切牆體與結構剖面。"
+#: crates/ui-egui/src/lib.rs:3091
+#~ msgid "Home ({})"
+#~ msgstr ""

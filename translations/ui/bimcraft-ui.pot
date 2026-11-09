@@ -3773,7 +3773,7 @@ msgid "Home"
 msgstr ""
 
 #: crates/ui-egui/src/lib.rs:3091
-msgid "Home ({})"
+msgid "Home ({}U)"
 msgstr ""
 
 #: crates/ui-egui/src/orbit.rs:1582
