@@ -44,7 +44,7 @@ enum Thumb {
 #[derive(Default)]
 pub struct Home {
     pub shown: bool,
-    /// Whether it was brought up over a project, which Back (and Ctrl+U, as in Revit) goes back to.
+    /// Whether it was brought up over a project, which Back (and Ctrl+U) goes back to. Home moved off Revit's Ctrl+D to Ctrl+U.
     pub over: bool,
     thumbs: HashMap<PathBuf, Thumb>,
     drawn: Option<Receiver<(PathBuf, Option<ColorImage>)>>,
